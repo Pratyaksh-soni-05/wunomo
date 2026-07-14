@@ -93,12 +93,12 @@ async def run_quality_dry_run(db, tenant_id: UUID, pipeline_id) -> dict:
         if not pipeline_id:
             return {"status": "skipped", "reason": "no pipeline linked", "rules_checked": 0}
 
-        from models.quality import QualityRule
+        from models.all_models import QualityRule
 
         result = await db.execute(
             select(QualityRule).where(
                 QualityRule.pipeline_id == pipeline_id,
-                QualityRule.tenant_id == tenant_id,
+                QualityRule.tenant_id == str(tenant_id),
                 QualityRule.is_active == True,
             )
         )
@@ -109,7 +109,7 @@ async def run_quality_dry_run(db, tenant_id: UUID, pipeline_id) -> dict:
 
         failed_rules = []
         for rule in rules:
-            if not rule.rule_type or not rule.config:
+            if not rule.rule_type or not rule.rule_config:
                 failed_rules.append({"rule_id": str(rule.id), "issue": "incomplete config"})
 
         return {
@@ -156,13 +156,13 @@ async def run_history_check(db, tenant_id: UUID, pipeline_id) -> dict:
         if not pipeline_id:
             return {"status": "skipped", "recent_failure_rate": 0, "runs_checked": 0}
 
-        from models.pipeline import PipelineRun
+        from models.all_models import PipelineRun
 
         result = await db.execute(
             select(PipelineRun)
             .where(
                 PipelineRun.pipeline_id == pipeline_id,
-                PipelineRun.tenant_id == tenant_id,
+                PipelineRun.tenant_id == str(tenant_id),
             )
             .order_by(PipelineRun.started_at.desc())
             .limit(10)
@@ -202,25 +202,27 @@ async def create_approval_request(
     risk_score: float,
 ) -> None:
     try:
-        from models.approval import ApprovalRequest
+        from models.all_models import ApprovalRequest, ApprovalStatus
 
         approval = ApprovalRequest(
-            tenant_id=tenant_id,
-            request_type="pipeline_deployment",
-            status="pending",
-            context={
+            tenant_id=str(tenant_id),
+            user_id="system",
+            session_id=f"cicd-commit-{commit.id}",
+            action_name="cicd_pipeline_deployment",
+            action_args={
                 "commit_id": str(commit.id),
                 "commit_sha": commit.commit_sha,
                 "pipeline_id": str(commit.pipeline_id) if commit.pipeline_id else None,
-                "risk_score": risk_score,
                 "check_results": check_results,
                 "branch": commit.branch,
                 "author": commit.author,
-                "message": (
-                    f"High-risk pipeline change requires approval. "
-                    f"Risk score: {risk_score:.0f}/100"
-                ),
             },
+            risk_level="high",
+            reason=(
+                f"High-risk pipeline change requires approval. "
+                f"Risk score: {risk_score:.0f}/100"
+            ),
+            status=ApprovalStatus.PENDING,
         )
         db.add(approval)
         await db.commit()
@@ -356,8 +358,16 @@ def run_ci_pipeline(self, commit_id: str, tenant_id: str) -> None:
                     risk_score=risk_score,
                 )
 
+    async def _run_with_fresh_pool() -> None:
+        # See services/tasks.py — a retried Celery task calls asyncio.run()
+        # again on a new loop, and the shared engine's pooled connections
+        # from the previous (closed) loop must be dropped first.
+        from database import engine
+        await engine.dispose()
+        await _run()
+
     try:
-        asyncio.run(_run())
+        asyncio.run(_run_with_fresh_pool())
     except Exception as exc:
         log.error("cicd.task_crashed", commit_id=commit_id, error=str(exc))
         raise self.retry(exc=exc, countdown=30)
@@ -374,4 +384,4 @@ async def _safe_notify(event: str, payload: dict) -> None:
         from services.cicd_notify import notify
         await notify(event, payload)
     except Exception as e:
-        log.warning("cicd.notify_skipped", event=event, error=str(e))
+        log.warning("cicd.notify_skipped", notify_event=event, error=str(e))
