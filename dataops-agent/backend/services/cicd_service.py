@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from models.cicd import PipelineCommit, PipelineDeployment, CICDStatus
-from models.all_models import Pipeline
+from models.all_models import Pipeline, PipelineStatus
 from schemas.cicd import GitHubWebhookPayload
 
 log = structlog.get_logger()
@@ -70,18 +70,18 @@ async def get_pipeline_for_repo(
     tenant_id: UUID,
     repo_url: str,
 ) -> Optional[Pipeline]:
-    """Try to find a pipeline linked to this repository URL."""
-    # Assumes Pipeline model has a source_config JSON column with repo_url key
-    # Adjust the query if your pipeline model stores it differently
+    """Try to find a pipeline linked to this repository URL via its
+    pipeline_config.repo_url — mirrors the matching logic already used
+    inline by the webhook handler in api/v1/cicd.py."""
     result = await db.execute(
         select(Pipeline).where(
             Pipeline.tenant_id == tenant_id,
-            Pipeline.is_active == True,
+            Pipeline.status == PipelineStatus.ACTIVE,
         )
     )
     pipelines = result.scalars().all()
     for p in pipelines:
-        cfg = p.source_config or {}
+        cfg = p.pipeline_config or {}
         if repo_url and repo_url in str(cfg):
             return p
     return None
