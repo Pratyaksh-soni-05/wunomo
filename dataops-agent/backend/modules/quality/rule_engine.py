@@ -169,13 +169,17 @@ class QualityRuleEngine:
         from modules.ingestion.connector_manager import ConnectorManager
         connector = ConnectorManager(self.tenant_id)._get_connector(source)
 
+        # File sources ignore this (single implicit table); DB sources need
+        # the actual table name from the source's own connection_config.
+        table_name = (source.connection_config or {}).get("table", "main")
+
         rt  = rule.rule_type
         col = rule.column_name
         cfg = rule.rule_config or {}
 
         # ── row_count check (no column needed) ────────────────────────────────
         if rt == "row_count":
-            preview = await connector.preview("main", limit=10000)
+            preview = await connector.preview(table_name, limit=10000)
             count   = preview.get("count", 0)
             min_r   = cfg.get("min_rows", 1)
             passed  = count >= min_r
@@ -186,7 +190,7 @@ class QualityRuleEngine:
         if not col:
             return {"passed": True, "message": "No column specified — skipping"}
 
-        preview = await connector.preview("main", limit=10000)
+        preview = await connector.preview(table_name, limit=10000)
         rows    = preview.get("rows", [])
         if not rows:
             return {"passed": True, "message": "No data to check"}
