@@ -49,14 +49,30 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
             PersonalityMode(state["personality_mode"]),
             OperationMode(state["operation_mode"]),
         )
+        # Tell the LLM its real, server-derived tenant_id explicitly — tool schemas
+        # require tenant_id as an argument the LLM itself must supply, and without
+        # this it has no way to know the real value and will invent a placeholder
+        # (e.g. "your_tenant_id"), silently querying the wrong/nonexistent tenant.
+        identity = (
+            f"\n\n[IDENTITY]\nYour authenticated tenant_id is: {state['tenant_id']}\n"
+            "Always pass this exact tenant_id to every tool call that requires one. "
+            "Never invent, guess, or substitute a different tenant_id."
+        )
         ctx = f"\n\n[CONTEXT]\n{json.dumps(state['context'])}" if state.get("context") else ""
-        return {"system_prompt": sys_prompt + ctx}
+        return {"system_prompt": sys_prompt + identity + ctx}
 
     async def agent_node(state):
         if state.get("iteration_count", 0) > 20:
             return {"messages": [AIMessage(content="Max reasoning steps reached. Please clarify your request.")]}
         llm_input = [SystemMessage(content=state["system_prompt"])] + list(state["messages"])
         response = await llm_with_tools.ainvoke(llm_input)
+        # Defense-in-depth: never trust the LLM's own tenant_id argument, even
+        # though it's told the correct value above — force every tool call's
+        # tenant_id to the real, server-derived value so a hallucination or a
+        # prompt-injected tool result can never redirect a call at another tenant.
+        for call in (response.tool_calls or []):
+            if "tenant_id" in call.get("args", {}):
+                call["args"]["tenant_id"] = state["tenant_id"]
         return {"messages": [response], "iteration_count": state.get("iteration_count", 0) + 1}
 
     def approval_gate_node(state):
@@ -106,11 +122,18 @@ async def run_agent(user_message, tenant_id, user_id, session_id,
                     history=None, context=None) -> dict:
     agent = get_agent(personality_mode, operation_mode)
     messages = list(history or []) + [HumanMessage(content=user_message)]
+    # tenant_id/user_id/session_id are trusted values the caller derives from the
+    # authenticated JWT (see api/v1/auth.py get_current_user, via api/v1/chat.py).
+    # Any client-supplied `context` must never be able to override them — force
+    # (not merge) so a malicious or mistaken client-supplied context can't smuggle
+    # in a different identity for the LLM to be told about.
+    safe_context = dict(context or {})
+    safe_context.update({"tenant_id": tenant_id, "user_id": user_id, "session_id": session_id})
     final = await agent.ainvoke({
         "messages": messages, "tenant_id": tenant_id, "user_id": user_id,
         "session_id": session_id, "personality_mode": personality_mode,
         "operation_mode": operation_mode, "pending_approvals": [],
-        "iteration_count": 0, "context": context or {}, "system_prompt": "",
+        "iteration_count": 0, "context": safe_context, "system_prompt": "",
     })
     last_ai = next((m for m in reversed(final["messages"]) if isinstance(m, AIMessage)), None)
     return {

@@ -1,5 +1,5 @@
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
 
 from agent import dataops_agent
@@ -9,6 +9,21 @@ from agent import dataops_agent
 async def fake_echo_tool(x: str) -> str:
     """Echo a string back (test-only fake tool)."""
     return x
+
+
+@tool
+async def fake_identity_tool(tenant_id: str, x: str = "") -> str:
+    """Return whatever tenant_id it was actually invoked with (test-only)."""
+    return tenant_id
+
+
+def _identity_tool_call_responses(claimed_tenant_id):
+    return [
+        AIMessage(content="", tool_calls=[
+            {"name": "fake_identity_tool", "args": {"tenant_id": claimed_tenant_id, "x": "hi"}, "id": "call_1"},
+        ]),
+        AIMessage(content="Done."),
+    ]
 
 
 class FakeToolCallLLM:
@@ -101,3 +116,51 @@ async def test_agent_multi_turn_history_grows_linearly(monkeypatch):
         assert len(result["messages"]) == len(history) + 4
 
         history = history + [HumanMessage(content=f"turn {turn}"), AIMsg(content=result["response"])]
+
+
+@pytest.mark.asyncio
+async def test_agent_forces_real_tenant_id_even_if_llm_guesses_wrong(monkeypatch):
+    """Regression test for the tenant-isolation gap: tool schemas require
+    tenant_id as an LLM-supplied argument, but the LLM previously had no way
+    to know the real value and would invent a placeholder (e.g.
+    "your_tenant_id"), silently querying the wrong/nonexistent tenant.
+    agent_node must force-correct the argument to the real, server-derived
+    tenant_id before the tool ever executes — defense-in-depth on top of the
+    system-prompt instruction, in case the LLM ignores or mistypes it.
+    """
+    fake_llm = FakeToolCallLLM(_identity_tool_call_responses("hallucinated-placeholder"))
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_identity_tool])
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    result = await dataops_agent.run_agent(
+        user_message="do the thing",
+        tenant_id="real-tenant-abc", user_id="u1", session_id="s1",
+    )
+
+    tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert len(tool_messages) == 1
+    assert tool_messages[0].content == "real-tenant-abc"
+
+
+@pytest.mark.asyncio
+async def test_client_supplied_context_tenant_id_override_is_ignored(monkeypatch):
+    """A client-supplied `context` dict must never be able to override the
+    server-derived tenant_id — run_agent() must force it, not merge it,
+    whether the mismatch comes from a malicious client or an honest mistake.
+    """
+    fake_llm = FakeToolCallLLM(_identity_tool_call_responses("real-tenant-abc"))
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_identity_tool])
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    result = await dataops_agent.run_agent(
+        user_message="do the thing",
+        tenant_id="real-tenant-abc", user_id="u1", session_id="s1",
+        context={"tenant_id": "malicious-other-tenant", "note": "kept"},
+    )
+
+    tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert tool_messages[0].content == "real-tenant-abc"
