@@ -2,9 +2,38 @@
 
 **Read this file in full before doing any work in this repo.** It is the living contract for how Claude Code operates here. Update it (Status Table + Known Gotchas, at minimum) in the same commit as any fix, feature, or discovery that changes what's true below.
 
-Repo root: `c:\Pratyaksh Personal\My Projects\ai workforce\`. The one real project inside it is `dataops-agent/` — "AXIOM", an autonomous AI DataOps agent (part of the "AI Workforce Systems" product line). Everything else at repo root (`employee_data.csv`, `sales_data.csv`, `pipeline_config.json`, `tree.txt`, `generate_dataops_project.py`, `Document/*.pdf`) is scaffolding/sample/reference material, not application code. `generate_dataops_project.py` is the original scaffold generator that wrote out `dataops-agent/` — treat it as historical, not as the source of truth; the files it once generated have since been hand-edited (see patch scripts in Archive).
+Repo root: `c:\Pratyaksh Personal\My Projects\ai workforce\`. The one real project inside it is `dataops-agent/` — "AXIOM", an autonomous AI DataOps agent (part of the "AI Workforce Systems" product line). Everything else at repo root (`employee_data.csv`, `sales_data.csv`, `pipeline_config.json`, `tree.txt`, `generate_dataops_project.py`, `Document/*.pdf`) is scaffolding/sample/reference material, not application code, **except `FRONTEND_BUILD_PLAN.md`**, which is a real, authoritative planning document — read it before doing any frontend work. `generate_dataops_project.py` is the original scaffold generator that wrote out `dataops-agent/` — treat it as historical, not as the source of truth; the files it once generated have since been hand-edited (see patch scripts in Archive).
 
 This repo now has git history: an initial commit capturing the scaffold as originally built (after cleaning ~11.5k stray `node_modules`/`.next` files out of the index — see Archive), followed by one commit per individually-verified fix. Keep following the one-fix-per-commit rule for everything from here on (Workflow Rule 6).
+
+---
+
+## 0. Current Position (read this first)
+
+**Backend:** feature-complete and verified through Phase 4 of backend testing (see
+Status Table below) — auth, sources, pipelines, quality, incidents, CI/CD, approvals,
+governance, transforms, and the AXIOM chat agent are all real and live-tested.
+Two items are externally blocked, not code issues: **Gemini's API key still shows
+`limit: 0`** on the free tier (a Google Cloud billing/project-setup issue on the
+user's side, unresolved as of this writing — Groq is the effective primary provider
+until it's fixed), and Groq's own daily token quota has been separately exhausted
+more than once during testing (resets on its own schedule).
+
+**Frontend:** Phase 0 (design sign-off) is complete and approved. Full plan —
+19 phases across two parallel backend tracks (auth/profile, and billing/metering/
+team) interleaved with frontend build phases — is in **`FRONTEND_BUILD_PLAN.md`**
+at repo root; read it before starting any frontend work. Locked decisions:
+- Typography: General Sans (UI/body) + Fraunces (display) + JetBrains Mono (code), self-hosted
+- Palette: Midnight `#122C4F` / Pearl Perfect `#FBF9E4` / Noir `#000000` / Ocean `#5B88B2` — derived token values in `dataops-agent/DESIGN_TOKENS.md`
+- Stack: Next.js 15 App Router, Zustand, Chart.js + react-chartjs-2, ported design-system CSS (not Tailwind), JWT in localStorage for v1
+
+**Next action:** Phase 1 (usage metering foundation) and Phase 2 (frontend scaffold)
+in parallel, per `FRONTEND_BUILD_PLAN.md`. Phase 1 starts with proposing the
+`LlmUsageEvent` schema for approval before any migration.
+
+**Outstanding on the user's side:**
+- Google OAuth client id/secret — being created in Google Cloud Console, will be provided via `.env` when ready. Blocks full live verification of Phase 5 only, not its code/design.
+- Gemini billing (see above) — unresolved, external, not a code fix.
 
 ---
 
@@ -122,6 +151,7 @@ This repo now has git history: an initial commit capturing the scaffold as origi
 - **No agent tool should ever call back into this app's own REST API over HTTP.** Tools should call the same service-layer functions the REST endpoints call, in-process — that's the pattern every tool follows (`modules/*` classes, or plain functions in `services/*.py` like `cicd_service.py`). An HTTP round-trip back into your own API (`get_cicd_status` did this until fixed — see Archive) is a sign a tool was stubbed out before the shared service layer existed, and it silently loses auth/tenant context in the process: `httpx` doesn't raise on a 4xx by default, so a failed/unauthenticated self-call can return empty defaults (`{}`, `0`, `"unknown"`) instead of an error. Treat any tool whose failure mode is unusually generic zero/empty defaults as a signal to check whether it's swallowing a failed call this way.
 - **"Verified live" only proves the exact code path that specific test exercised — write regression tests against the real model/schema, not assumptions about column names.** `get_pipeline_for_repo()` referenced `Pipeline.is_active`/`Pipeline.source_config`, neither of which exist (real columns: `status`, `pipeline_config`) — it would have raised `AttributeError` on its very first real call, forever, since the function was written. There was no mock or fixture to blame (no automated test existed for it at all); the original fix was verified manually/live, and that manual pass most likely exercised a different code path (setting `pipeline_config` at pipeline-creation time, which has always used the correct field name) than the one that was actually broken (the function itself, plus the update path). When you add a regression test for a DB-touching fix, prefer hitting the real model via a real session (see `test_cicd_service.py`, `test_pipeline_run_status.py`) over a hand-rolled mock — a mock can only be wrong about the schema in the same way the code under test is already wrong, silently agreeing with itself.
 - **The primary→fallback LLM handoff has a hard 15-second ceiling (`PRIMARY_LLM_TIMEOUT_SECONDS` in `services/llm_service.py`) — don't remove it or "simplify" back to bare `.with_fallbacks()`.** A failing Gemini call doesn't fail fast on its own: google-api-core's gRPC retry layer honors the server's suggested `retry_delay` (observed 40s+), and `langchain_google_genai`'s own hardcoded tenacity retry (`max_retries=2`, backoff up to 60s) sits on top of that — neither is configurable from outside, and `ChatGoogleGenerativeAI`'s `timeout` constructor field is dead code in the installed version (never wired to the actual request — verified by grepping the library source for `self.timeout`, zero hits). Measured live: 2m22s before this fix, 14.7s after. If you're tempted to raise/remove the 15s ceiling because "it might cut off a slow-but-working Gemini call," Groq's own responses have consistently landed in the 2-12s range in testing, so 15s already has margin — don't just trust a config field on the primary model to bound this instead, confirm it actually works with a live forced-failure test first (it didn't, here).
+- **`get_agent()`'s module-level `_cache` dict in `agent/dataops_agent.py` is keyed only by `"{personality}:{operation}"` — this will break once per-tenant AI model selection ships (`FRONTEND_BUILD_PLAN.md` Phase 16).** The cached value is a fully-built agent object with a specific primary/fallback LLM already bound in. If tenants can choose their own model, the SAME cache key today would serve tenant A's cached agent (built with tenant A's model choice) to tenant B on a matching personality/operation combo — silently leaking one tenant's model preference into another tenant's requests. Before Phase 16 lands any per-tenant model override, the cache key must include tenant_id (and the resolved model names) — not just personality/operation. This is a **known, planned regression risk**, flagged here in advance specifically so no intermediate session touches `get_agent()`/`build_agent()` without knowing the cache key is about to need this. Test it explicitly when Phase 16 arrives: two tenants with different model preferences, confirm each gets their own, not a cross-tenant cache hit.
 
 ---
 

@@ -1,0 +1,2688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wunomo AI — DataOps Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+/* ==========================================
+   WUNOMO AI — Design System
+   Navy Blue × White × Enterprise
+   ========================================== */
+
+:root {
+  /* Brand */
+  --navy: #0f1e3d;
+  --navy-800: #1a2f5a;
+  --navy-700: #1e3a6e;
+  --navy-600: #2351a1;
+  --navy-500: #2d63c8;
+  --navy-400: #4a7fd4;
+  --navy-300: #7aa7e2;
+  --navy-200: #b5cff0;
+  --navy-100: #ddeafc;
+  --navy-50: #f0f5fd;
+
+  /* Neutrals */
+  --gray-950: #0a0c10;
+  --gray-900: #111318;
+  --gray-800: #1c1f26;
+  --gray-700: #282c36;
+  --gray-600: #3a3f4d;
+  --gray-500: #555b6e;
+  --gray-400: #737a8f;
+  --gray-300: #9ba3b8;
+  --gray-200: #c4c9d8;
+  --gray-150: #d8dce8;
+  --gray-100: #e8eaf2;
+  --gray-50: #f4f5f9;
+  --white: #ffffff;
+
+  /* Semantic */
+  --success: #16a34a;
+  --success-bg: #f0fdf4;
+  --success-border: #bbf7d0;
+  --warning: #d97706;
+  --warning-bg: #fffbeb;
+  --warning-border: #fde68a;
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
+  --info: #0891b2;
+  --info-bg: #ecfeff;
+  --info-border: #a5f3fc;
+  --purple: #7c3aed;
+  --purple-bg: #f5f3ff;
+  --teal: #0d9488;
+  --teal-bg: #f0fdfa;
+  --orange: #ea580c;
+  --orange-bg: #fff7ed;
+
+  /* Surfaces */
+  --bg: #f8f9fc;
+  --surface: #ffffff;
+  --surface-hover: #f4f5f9;
+  --surface-active: #eef1f8;
+  --border: #e4e6ef;
+  --border-strong: #c8ccdb;
+
+  /* Text */
+  --text-primary: #0f1e3d;
+  --text-secondary: #4a5068;
+  --text-muted: #8892a8;
+  --text-disabled: #b8c0d2;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(15,30,61,0.05);
+  --shadow-sm: 0 1px 4px rgba(15,30,61,0.08), 0 1px 2px rgba(15,30,61,0.04);
+  --shadow-md: 0 4px 12px rgba(15,30,61,0.1), 0 2px 4px rgba(15,30,61,0.06);
+  --shadow-lg: 0 8px 24px rgba(15,30,61,0.12), 0 4px 8px rgba(15,30,61,0.06);
+  --shadow-xl: 0 16px 48px rgba(15,30,61,0.16), 0 8px 16px rgba(15,30,61,0.08);
+
+  /* Layout */
+  --sidebar-w: 220px;
+  --sidebar-w-collapsed: 60px;
+  --topbar-h: 52px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --t-fast: 100ms ease;
+  --t-normal: 180ms ease;
+  --t-slow: 280ms ease;
+
+  /* Font */
+  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ==========================================
+   RESET & BASE
+   ========================================== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 14px; -webkit-font-smoothing: antialiased; }
+body { font-family: var(--font); background: var(--bg); color: var(--text-primary); line-height: 1.5; overflow-x: hidden; }
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; }
+input, select, textarea { font-family: inherit; font-size: inherit; }
+ul, ol { list-style: none; }
+svg { display: block; flex-shrink: 0; }
+img { display: block; max-width: 100%; }
+
+/* ==========================================
+   TYPOGRAPHY
+   ========================================== */
+.text-xs { font-size: 11px; line-height: 1.4; }
+.text-sm { font-size: 12px; line-height: 1.5; }
+.text-base { font-size: 14px; line-height: 1.5; }
+.text-md { font-size: 15px; line-height: 1.5; }
+.text-lg { font-size: 17px; line-height: 1.4; }
+.text-xl { font-size: 20px; line-height: 1.3; }
+.text-2xl { font-size: 24px; line-height: 1.3; }
+.text-3xl { font-size: 30px; line-height: 1.2; }
+.font-normal { font-weight: 400; }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+.font-bold { font-weight: 700; }
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-muted { color: var(--text-muted); }
+.text-navy { color: var(--navy-600); }
+.text-success { color: var(--success); }
+.text-danger { color: var(--danger); }
+.text-warning { color: var(--warning); }
+.text-purple { color: var(--purple); }
+.mono { font-family: var(--font-mono); }
+
+/* ==========================================
+   LAYOUT UTILITIES
+   ========================================== */
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.justify-between { justify-content: space-between; }
+.justify-center { justify-content: center; }
+.justify-end { justify-content: flex-end; }
+.gap-1 { gap: 4px; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+.gap-4 { gap: 16px; }
+.gap-6 { gap: 24px; }
+.gap-8 { gap: 32px; }
+.flex-1 { flex: 1; }
+.flex-shrink-0 { flex-shrink: 0; }
+.flex-wrap { flex-wrap: wrap; }
+.grid { display: grid; }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+.w-full { width: 100%; }
+.h-full { height: 100%; }
+.min-h-0 { min-height: 0; }
+.overflow-hidden { overflow: hidden; }
+.overflow-auto { overflow: auto; }
+.relative { position: relative; }
+.absolute { position: absolute; }
+.sticky { position: sticky; }
+.fixed { position: fixed; }
+.inset-0 { inset: 0; }
+.z-10 { z-index: 10; }
+.z-20 { z-index: 20; }
+.z-50 { z-index: 50; }
+.hidden { display: none !important; }
+.block { display: block; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.whitespace-nowrap { white-space: nowrap; }
+
+/* Spacing */
+.p-2 { padding: 8px; }
+.p-3 { padding: 12px; }
+.p-4 { padding: 16px; }
+.p-6 { padding: 24px; }
+.px-2 { padding-inline: 8px; }
+.px-3 { padding-inline: 12px; }
+.px-4 { padding-inline: 16px; }
+.py-1 { padding-block: 4px; }
+.py-2 { padding-block: 8px; }
+.py-3 { padding-block: 12px; }
+.mt-1 { margin-top: 4px; }
+.mt-2 { margin-top: 8px; }
+.mt-4 { margin-top: 16px; }
+.mb-1 { margin-bottom: 4px; }
+.mb-2 { margin-bottom: 8px; }
+.mb-4 { margin-bottom: 16px; }
+.ml-auto { margin-left: auto; }
+.mr-auto { margin-right: auto; }
+
+/* ==========================================
+   COMPONENTS
+   ========================================== */
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 500; line-height: 1;
+  transition: all var(--t-fast);
+  white-space: nowrap; cursor: pointer;
+  border: 1px solid transparent;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--navy-600); color: white; border-color: var(--navy-700); }
+.btn-primary:hover:not(:disabled) { background: var(--navy-700); }
+.btn-secondary { background: var(--white); color: var(--text-primary); border-color: var(--border-strong); }
+.btn-secondary:hover:not(:disabled) { background: var(--gray-50); }
+.btn-ghost { background: transparent; color: var(--text-secondary); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-hover); color: var(--text-primary); }
+.btn-danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-border); }
+.btn-danger:hover:not(:disabled) { background: #fee2e2; }
+.btn-success { background: var(--success-bg); color: var(--success); border-color: var(--success-border); }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-lg { padding: 10px 20px; font-size: 14px; }
+.btn-icon { padding: 6px; }
+.btn-icon.btn-sm { padding: 4px; }
+
+/* Cards */
+.card {
+  background: var(--surface); border-radius: var(--radius-lg);
+  border: 1px solid var(--border); box-shadow: var(--shadow-xs);
+}
+.card-hover { transition: all var(--t-normal); }
+.card-hover:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); transform: translateY(-1px); }
+.card-body { padding: 20px; }
+.card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.card-footer { padding: 12px 20px; border-top: 1px solid var(--border); background: var(--gray-50); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+
+/* Badges */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: var(--radius-full);
+  font-size: 11px; font-weight: 500; line-height: 1.4;
+}
+.badge-success { background: var(--success-bg); color: var(--success); }
+.badge-danger { background: var(--danger-bg); color: var(--danger); }
+.badge-warning { background: var(--warning-bg); color: var(--warning); }
+.badge-info { background: var(--info-bg); color: var(--info); }
+.badge-gray { background: var(--gray-100); color: var(--text-secondary); }
+.badge-navy { background: var(--navy-100); color: var(--navy-700); }
+.badge-purple { background: var(--purple-bg); color: var(--purple); }
+.badge-teal { background: var(--teal-bg); color: var(--teal); }
+
+/* Status dot */
+.status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.status-dot.success { background: var(--success); }
+.status-dot.danger { background: var(--danger); }
+.status-dot.warning { background: var(--warning); }
+.status-dot.info { background: var(--info); }
+.status-dot.gray { background: var(--gray-300); }
+.status-dot.pulse { animation: pulse-dot 1.5s ease infinite; }
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.7; }
+}
+
+/* Inputs */
+.input {
+  width: 100%; padding: 7px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong); background: var(--white);
+  color: var(--text-primary); font-size: 13px;
+  transition: all var(--t-fast); outline: none;
+}
+.input:focus { border-color: var(--navy-500); box-shadow: 0 0 0 3px rgba(45,99,200,0.1); }
+.input::placeholder { color: var(--text-muted); }
+.input-group { display: flex; flex-direction: column; gap: 5px; }
+.input-label { font-size: 12px; font-weight: 500; color: var(--text-secondary); }
+.input-hint { font-size: 11px; color: var(--text-muted); }
+.input-error { border-color: var(--danger) !important; }
+
+/* Select */
+.select {
+  appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238892a8' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+  padding-right: 30px;
+}
+
+/* Tabs */
+.tabs { display: flex; border-bottom: 1px solid var(--border); gap: 0; }
+.tab { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all var(--t-fast); white-space: nowrap; }
+.tab:hover { color: var(--text-primary); }
+.tab.active { color: var(--navy-600); border-color: var(--navy-600); }
+
+/* Table */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { padding: 8px 12px; text-align: left; font-weight: 500; color: var(--text-muted); background: var(--gray-50); border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: var(--gray-50); }
+tr.selected td { background: var(--navy-50) !important; }
+
+/* Sidebar */
+.sidebar {
+  width: var(--sidebar-w); min-height: 100vh; background: var(--navy);
+  display: flex; flex-direction: column; flex-shrink: 0;
+  transition: width var(--t-slow); overflow: hidden;
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 40;
+}
+.sidebar.collapsed { width: var(--sidebar-w-collapsed); }
+.sidebar-logo {
+  display: flex; align-items: center; gap: 8px; padding: 14px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+.sidebar-logo-icon { width: 28px; height: 28px; background: var(--navy-500); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.sidebar-logo-text { color: white; font-size: 15px; font-weight: 700; letter-spacing: -0.3px; }
+.sidebar-logo-text span { color: var(--navy-300); }
+.sidebar-nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px 0; }
+.sidebar-nav::-webkit-scrollbar { width: 3px; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+.sidebar-section { padding: 16px 12px 4px; }
+.sidebar-section-label { font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.08em; }
+.sidebar-item {
+  display: flex; align-items: center; gap: 10px; padding: 7px 12px;
+  border-radius: var(--radius-sm); margin: 1px 4px;
+  color: rgba(255,255,255,0.65); font-size: 13px; font-weight: 450;
+  cursor: pointer; transition: all var(--t-fast); white-space: nowrap;
+}
+.sidebar-item:hover { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.9); }
+.sidebar-item.active { background: rgba(45,99,200,0.35); color: white; }
+.sidebar-item .badge-count { background: rgba(255,255,255,0.15); color: rgba(255,255,255,0.8); padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: auto; }
+.sidebar-item svg { flex-shrink: 0; }
+
+/* Topbar */
+.topbar {
+  height: var(--topbar-h); background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 20px; flex-shrink: 0;
+  position: sticky; top: 0; z-index: 30;
+}
+
+/* Content area */
+.app-layout {
+  display: flex; min-height: 100vh;
+}
+.main-content {
+  flex: 1; margin-left: var(--sidebar-w);
+  display: flex; flex-direction: column;
+  min-height: 100vh; transition: margin-left var(--t-slow);
+}
+.main-content.expanded { margin-left: var(--sidebar-w-collapsed); }
+.page-content { flex: 1; overflow-y: auto; }
+
+/* Toast */
+.toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  background: var(--navy); color: white; padding: 12px 16px;
+  border-radius: var(--radius-md); box-shadow: var(--shadow-xl);
+  display: flex; align-items: center; gap: 10px; min-width: 280px;
+  animation: toast-in 0.2s ease; font-size: 13px;
+}
+.toast.success { background: var(--success); }
+.toast.danger { background: var(--danger); }
+.toast.warning { background: #b45309; }
+@keyframes toast-in { from { transform: translateX(110%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* Modal */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(15,30,61,0.5); backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.modal { background: var(--surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-xl); width: 100%; max-height: 90vh; overflow-y: auto; animation: modal-in 0.15s ease; }
+.modal-sm { max-width: 420px; }
+.modal-md { max-width: 560px; }
+.modal-lg { max-width: 760px; }
+.modal-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.modal-body { padding: 20px 24px; }
+.modal-footer { padding: 16px 24px 20px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+@keyframes modal-in { from { transform: scale(0.96) translateY(8px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+
+/* Command palette */
+.cmd-palette {
+  position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
+  width: 600px; background: var(--surface); border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl); border: 1px solid var(--border);
+  z-index: 200; overflow: hidden;
+  animation: modal-in 0.12s ease;
+}
+.cmd-input { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.cmd-input input { flex: 1; border: none; outline: none; font-size: 14px; color: var(--text-primary); background: transparent; }
+.cmd-results { max-height: 360px; overflow-y: auto; }
+.cmd-section-label { padding: 8px 14px 4px; font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.cmd-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+.cmd-item:hover, .cmd-item.selected { background: var(--navy-50); color: var(--navy-700); }
+.cmd-kbd { font-size: 10px; color: var(--text-muted); background: var(--gray-100); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; margin-left: auto; font-family: var(--font-mono); }
+
+/* Progress */
+.progress-bar { height: 4px; background: var(--gray-100); border-radius: var(--radius-full); overflow: hidden; }
+.progress-fill { height: 100%; border-radius: var(--radius-full); background: var(--navy-600); transition: width 0.3s ease; }
+.progress-fill.success { background: var(--success); }
+.progress-fill.danger { background: var(--danger); }
+.progress-fill.warning { background: var(--warning); }
+
+/* Skeleton */
+@keyframes shimmer { from { background-position: -400px 0; } to { background-position: 400px 0; } }
+.skeleton { background: linear-gradient(90deg, var(--gray-100) 25%, var(--gray-50) 50%, var(--gray-100) 75%); background-size: 400px 100%; animation: shimmer 1.5s infinite; border-radius: var(--radius-sm); }
+
+/* Metric card */
+.metric-card { padding: 20px; }
+.metric-value { font-size: 28px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.5px; line-height: 1; }
+.metric-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.metric-change { font-size: 11px; font-weight: 500; margin-top: 8px; }
+.metric-change.up { color: var(--success); }
+.metric-change.down { color: var(--danger); }
+
+/* Code block */
+.code-block { background: var(--gray-950); color: #e2e8f0; border-radius: var(--radius-md); padding: 16px; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; overflow-x: auto; }
+.code-keyword { color: #93c5fd; }
+.code-string { color: #86efac; }
+.code-comment { color: #6b7280; }
+.code-number { color: #fcd34d; }
+
+/* Chart container */
+.chart-container { position: relative; width: 100%; }
+
+/* Empty state */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; text-align: center; gap: 12px; }
+.empty-icon { width: 48px; height: 48px; background: var(--gray-100); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center; color: var(--text-muted); margin: 0 auto 4px; }
+
+/* Drawer */
+.drawer { position: fixed; right: 0; top: 0; bottom: 0; width: 480px; background: var(--surface); box-shadow: var(--shadow-xl); z-index: 90; border-left: 1px solid var(--border); display: flex; flex-direction: column; transform: translateX(100%); transition: transform var(--t-slow); }
+.drawer.open { transform: translateX(0); }
+.drawer-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.drawer-body { flex: 1; overflow-y: auto; padding: 20px; }
+.drawer-footer { padding: 12px 20px; border-top: 1px solid var(--border); flex-shrink: 0; }
+
+/* Divider */
+.divider { height: 1px; background: var(--border); }
+.divider-text { display: flex; align-items: center; gap: 12px; color: var(--text-muted); font-size: 12px; }
+.divider-text::before, .divider-text::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+/* Tooltip */
+.tooltip-wrap { position: relative; }
+.tooltip { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: var(--navy); color: white; font-size: 11px; padding: 4px 8px; border-radius: var(--radius-sm); white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity var(--t-fast); z-index: 999; }
+.tooltip-wrap:hover .tooltip { opacity: 1; }
+
+/* Search bar */
+.search-bar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: var(--gray-50); border: 1px solid var(--border); border-radius: var(--radius-md); transition: all var(--t-fast); }
+.search-bar:focus-within { background: white; border-color: var(--navy-500); box-shadow: 0 0 0 3px rgba(45,99,200,0.1); }
+.search-bar input { border: none; outline: none; background: transparent; font-size: 13px; color: var(--text-primary); flex: 1; }
+.search-bar input::placeholder { color: var(--text-muted); }
+
+/* Avatar */
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--navy-600); color: white; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+.avatar-sm { width: 22px; height: 22px; font-size: 9px; }
+.avatar-lg { width: 36px; height: 36px; font-size: 14px; }
+
+/* Connection status */
+.conn-indicator { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+
+/* Page header */
+.page-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.page-title { font-size: 20px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.3px; }
+.breadcrumb { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.breadcrumb-sep { color: var(--gray-200); }
+.breadcrumb a:hover { color: var(--navy-600); }
+
+/* Stats row */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+
+/* Pipeline node */
+.pipeline-node { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 16px; min-width: 160px; }
+
+/* Notification dot */
+.notif-dot { position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; background: var(--danger); border-radius: 50%; border: 2px solid white; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gray-300); }
+
+/* Animations */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slide-up { from { transform: translateY(12px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.animate-fade { animation: fade-in 0.2s ease; }
+.animate-up { animation: slide-up 0.2s ease; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.mobile-open { transform: translateX(0); }
+  .main-content { margin-left: 0 !important; }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .cmd-palette { width: calc(100vw - 32px); }
+  .drawer { width: 100%; }
+}
+
+/* SHELL ADDITIONS */
+.sidebar-workspace { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.sidebar-workspace-sel {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 7px 10px; border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.06); cursor: pointer;
+  color: rgba(255,255,255,0.7); font-size: 12px; font-weight: 500;
+  transition: background var(--t-fast);
+}
+.sidebar-workspace-sel:hover { background: rgba(255,255,255,0.1); }
+.sidebar-workspace-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-footer {
+  padding: 10px 12px; border-top: 1px solid rgba(255,255,255,0.08);
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0; background: rgba(0,0,0,0.12);
+}
+.sidebar-footer-info { flex: 1; min-width: 0; overflow: hidden; }
+.sidebar-footer-name { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.88); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-footer-sub { font-size: 10px; color: rgba(255,255,255,0.38); margin-top: 1px; }
+.sidebar-toggle-btn {
+  background: none; border: none; cursor: pointer; padding: 4px; color: rgba(255,255,255,0.35);
+  display: flex; align-items: center; flex-shrink: 0; transition: color var(--t-fast); border-radius: 4px;
+}
+.sidebar-toggle-btn:hover { color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.06); }
+/* Collapsed */
+.sidebar.collapsed .sidebar-logo-text,
+.sidebar.collapsed .sidebar-section-label,
+.sidebar.collapsed .sidebar-item > span,
+.sidebar.collapsed .sidebar-item .badge-count,
+.sidebar.collapsed .sidebar-workspace-name,
+.sidebar.collapsed .sidebar-workspace-sel > svg,
+.sidebar.collapsed .sidebar-footer-info { display: none; }
+.sidebar.collapsed .sidebar-workspace { padding: 6px; }
+.sidebar.collapsed .sidebar-workspace-sel { justify-content: center; padding: 7px; }
+.sidebar.collapsed .sidebar-item { justify-content: center; padding: 8px; gap: 0; }
+.sidebar.collapsed .sidebar-logo { justify-content: center; padding: 14px 8px; }
+.sidebar.collapsed .sidebar-section { padding: 10px 6px 2px; }
+.sidebar.collapsed .sidebar-footer { justify-content: center; padding: 8px; }
+/* FAB */
+.axiom-fab {
+  position: fixed; bottom: 24px; right: 24px; background: var(--navy-600); color: white;
+  border: none; border-radius: var(--radius-full); padding: 10px 18px;
+  display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500;
+  cursor: pointer; box-shadow: 0 4px 20px rgba(35,81,161,0.4); z-index: 50;
+  transition: all var(--t-normal); font-family: var(--font);
+}
+.axiom-fab:hover { background: var(--navy-500); transform: translateY(-2px); box-shadow: 0 8px 28px rgba(35,81,161,0.5); }
+/* Topbar search */
+.topbar-search {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+  background: var(--gray-50); border: 1px solid var(--border); border-radius: var(--radius-md);
+  cursor: pointer; flex: 1; max-width: 400px; transition: all var(--t-fast);
+}
+.topbar-search:hover { background: white; border-color: var(--navy-300); }
+.topbar-search-ph { color: var(--text-muted); font-size: 13px; flex: 1; white-space: nowrap; }
+/* Env select */
+.env-select {
+  appearance: none; background: white; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 4px 26px 4px 10px;
+  font-size: 12px; font-weight: 500; color: var(--text-secondary);
+  cursor: pointer; font-family: var(--font);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238892a8' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center;
+}
+.env-select:focus { outline: none; border-color: var(--navy-400); }
+/* Credits */
+.credits-badge {
+  display: flex; align-items: center; gap: 5px;
+  background: var(--navy-50); border: 1px solid var(--navy-100);
+  border-radius: var(--radius-sm); padding: 4px 10px;
+  font-size: 12px; font-weight: 600; color: var(--navy-700);
+}
+/* Topbar avatar */
+.topbar-avatar {
+  width: 30px; height: 30px; background: var(--navy-600);
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; color: white; cursor: pointer;
+  border: 2px solid var(--navy-200); flex-shrink: 0; transition: border-color var(--t-fast);
+}
+.topbar-avatar:hover { border-color: var(--navy-300); }
+/* AI status */
+.ai-status { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.ai-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: pulse-dot 2s ease infinite; flex-shrink: 0; }
+/* Topbar icon btn */
+.topbar-icon-btn {
+  background: none; border: none; cursor: pointer; padding: 6px;
+  border-radius: var(--radius-sm); color: var(--text-secondary);
+  display: flex; align-items: center; transition: all var(--t-fast);
+}
+.topbar-icon-btn:hover { background: var(--gray-100); color: var(--text-primary); }
+#page-content { min-height: calc(100vh - var(--topbar-h)); }
+@media (max-width: 768px) {
+  .axiom-fab span { display: none; }
+  .axiom-fab { padding: 12px; }
+  .ai-status, .credits-badge { display: none; }
+  .topbar-search { max-width: 200px; }
+}
+  </style>
+</head>
+<body>
+
+<div id="toast-container" class="toast-container"></div>
+
+<div class="app-layout">
+
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><svg width="17" height="17" viewBox="0 0 28 28" fill="none"><path d="M14 2L26 9V19L14 26L2 19V9L14 2Z" fill="white" fill-opacity="0.15" stroke="white" stroke-width="1.5"/><path d="M14 7L22 12V18L14 23L6 18V12L14 7Z" fill="white" fill-opacity="0.1" stroke="white" stroke-width="1.5"/><circle cx="14" cy="15" r="3.5" fill="white"/></svg></div>
+      <div class="sidebar-logo-text">Wunomo<span> AI</span></div>
+    </div>
+    <div class="sidebar-workspace">
+      <div class="sidebar-workspace-sel" onclick="Toast.show('Workspace switcher — coming soon', 'default')">
+        <span class="sidebar-workspace-name">Production</span>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+
+      <div class="sidebar-item active" data-page="dashboard" onclick="navigateTo('dashboard')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span>Dashboard</span>
+      </div>
+      <div class="sidebar-section"><div class="sidebar-section-label">Workspace</div></div>
+      <div class="sidebar-item" data-page="ai-employees" onclick="navigateTo('ai-employees')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>AI Employees</span>
+      </div>
+      <div class="sidebar-item" data-page="axiom" onclick="navigateTo('axiom')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 0 1 8 8v12l-4-4H4a8 8 0 0 1 0-16"/></svg>
+        <span>AXIOM</span>
+        <span class="badge-count" style="background:rgba(45,99,200,0.5);color:rgba(180,210,255,0.95)">Live</span>
+      </div>
+      <div class="sidebar-section"><div class="sidebar-section-label">Data</div></div>
+      <div class="sidebar-item" data-page="sources" onclick="navigateTo('sources')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>
+        <span>Data Sources</span>
+      </div>
+      <div class="sidebar-item" data-page="catalog" onclick="navigateTo('catalog')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span>Data Catalog</span>
+      </div>
+      <div class="sidebar-item" data-page="pipelines" onclick="navigateTo('pipelines')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span>Pipelines</span>
+        <span class="badge-count">13</span>
+      </div>
+      <div class="sidebar-item" data-page="transformations" onclick="navigateTo('transformations')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        <span>Transforms</span>
+      </div>
+      <div class="sidebar-section"><div class="sidebar-section-label">Quality &amp; Ops</div></div>
+      <div class="sidebar-item" data-page="quality" onclick="navigateTo('quality')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span>Quality</span>
+      </div>
+      <div class="sidebar-item" data-page="incidents" onclick="navigateTo('incidents')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>Incidents</span>
+        <span class="badge-count" style="background:rgba(220,38,38,0.3);color:rgba(255,160,160,0.9)">2</span>
+      </div>
+      <div class="sidebar-item" data-page="governance" onclick="navigateTo('governance')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="7" x2="5" y2="17"/><line x1="12" y1="7" x2="19" y2="17"/><line x1="5" y1="19" x2="19" y2="19"/></svg>
+        <span>Governance</span>
+      </div>
+      <div class="sidebar-item" data-page="automations" onclick="navigateTo('automations')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span>Automations</span>
+      </div>
+      <div class="sidebar-item" data-page="cicd" onclick="navigateTo('cicd')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg>
+        <span>CI / CD</span>
+      </div>
+      <div class="sidebar-item" data-page="approvals" onclick="navigateTo('approvals')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        <span>Approvals</span>
+        <span class="badge-count" style="background:rgba(217,119,6,0.3);color:rgba(255,213,120,0.9)">3</span>
+      </div>
+      <div class="sidebar-section"><div class="sidebar-section-label">Analytics</div></div>
+      <div class="sidebar-item" data-page="analytics" onclick="navigateTo('analytics')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>Analytics</span>
+      </div>
+      <div class="sidebar-section"><div class="sidebar-section-label">Admin</div></div>
+      <div class="sidebar-item" data-page="audit" onclick="navigateTo('audit')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Audit Logs</span>
+      </div>
+      <div class="sidebar-item" data-page="team" onclick="navigateTo('team')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Team</span>
+      </div>
+      <div class="sidebar-item" data-page="billing" onclick="navigateTo('billing')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+        <span>Billing</span>
+      </div>
+      <div class="sidebar-item" data-page="settings" onclick="navigateTo('settings')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <span>Settings</span>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="avatar" style="flex-shrink:0;background:var(--navy-500);border:1.5px solid rgba(255,255,255,0.2)">AM</div>
+      <div class="sidebar-footer-info"><div class="sidebar-footer-name">Arjun Mehta</div><div class="sidebar-footer-sub">Growth Plan · DataCompany</div></div>
+      <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Collapse sidebar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
+    </div>
+  </aside>
+
+  <div id="main-content" class="main-content">
+
+    <header class="topbar" style="gap:10px">
+      <button class="topbar-icon-btn" onclick="toggleSidebar()" title="Toggle sidebar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <div id="breadcrumb" class="breadcrumb" style="font-size:12px;flex-shrink:0;white-space:nowrap"><a onclick="navigateTo('dashboard')" style="cursor:pointer">Wunomo</a><span class="breadcrumb-sep">/</span><span style="color:var(--text-secondary);font-weight:500">Dashboard</span></div>
+      <div style="height:16px;width:1px;background:var(--border);flex-shrink:0"></div>
+      <div class="topbar-search" onclick="CmdPalette.open()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <span class="topbar-search-ph">Search or run a command…</span>
+        <kbd style="font-size:10px;color:var(--text-muted);background:var(--gray-100);border:1px solid var(--border);padding:1px 5px;border-radius:4px;font-family:var(--font-mono);font-weight:500;flex-shrink:0">Ctrl+K</kbd>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+        <div class="ai-status"><div class="ai-dot"></div><span>AXIOM Online</span></div>
+        <div style="height:16px;width:1px;background:var(--border)"></div>
+        <select class="env-select" onchange="Toast.show('Switched to ' + this.options[this.selectedIndex].text, 'default')"><option value="prod">Production</option><option value="staging">Staging</option><option value="dev">Development</option></select>
+        <div class="credits-badge" title="8,420 AI credits remaining"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>8,420</div>
+        <div style="position:relative"><button class="topbar-icon-btn" onclick="toggleNotifications()" title="Notifications"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></button><div class="notif-dot"></div></div>
+        <div class="topbar-avatar" onclick="Toast.show('Arjun Mehta · Owner · Growth Plan', 'default')" title="Arjun Mehta">AM</div>
+      </div>
+    </header>
+
+    <main id="page-content" class="page-content">
+      <div style="padding:24px"><div class="skeleton" style="width:240px;height:28px;margin-bottom:24px;border-radius:8px"></div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px"><div class="skeleton" style="height:90px;border-radius:12px"></div><div class="skeleton" style="height:90px;border-radius:12px"></div><div class="skeleton" style="height:90px;border-radius:12px"></div><div class="skeleton" style="height:90px;border-radius:12px"></div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"><div class="skeleton" style="height:220px;border-radius:12px"></div><div class="skeleton" style="height:220px;border-radius:12px"></div></div></div>
+    </main>
+
+  </div>
+</div>
+
+<button class="axiom-fab" id="axiom-fab"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a8 8 0 0 1 8 8v12l-4-4H4a8 8 0 0 1 0-16"/></svg><span>Ask AXIOM</span></button>
+
+<script>
+/* ==========================================
+   WUNOMO AI — Core JavaScript
+   State, Navigation, Utilities
+   ========================================== */
+
+// ==========================================
+// APP STATE
+// ==========================================
+const AppState = {
+  currentPage: 'dashboard',
+  sidebarCollapsed: false,
+  cmdPaletteOpen: false,
+  activeModal: null,
+  activeDrawer: null,
+  theme: 'light',
+  user: {
+    name: 'Arjun Mehta',
+    email: 'arjun@datacompany.com',
+    role: 'owner',
+    avatar: 'AM',
+    org: 'DataCompany Ltd',
+    workspace: 'Production',
+    plan: 'growth'
+  },
+  data: {
+    pipelineHealth: 94,
+    qualityScore: 91,
+    sourcesOnline: 7,
+    sourcesFailed: 1,
+    openIncidents: 2,
+    pendingApprovals: 3,
+    todayRuns: 47,
+    successRate: 96.8,
+    chatSessions: 12,
+    activePipelines: 13,
+    creditBalance: 8420,
+    monthlySpend: 148.50
+  },
+  notifications: [
+    { id: 1, type: 'warning', title: 'Pipeline failed', body: 'Daily Sales Aggregation failed at 06:00', time: '2m ago', read: false },
+    { id: 2, type: 'info', title: 'Approval needed', body: 'Deploy commit abc123 to production', time: '15m ago', read: false },
+    { id: 3, type: 'success', title: 'Quality check passed', body: 'Customer data contract validated', time: '1h ago', read: true },
+    { id: 4, type: 'danger', title: 'Schema drift detected', body: 'Source: DataOps Postgres — 1 column added', time: '2h ago', read: true },
+  ]
+};
+
+// ==========================================
+// TOAST SYSTEM
+// ==========================================
+const Toast = {
+  container: null,
+  init() {
+    this.container = document.getElementById('toast-container');
+    if (!this.container) {
+      this.container = document.createElement('div');
+      this.container.id = 'toast-container';
+      this.container.className = 'toast-container';
+      document.body.appendChild(this.container);
+    }
+  },
+  show(message, type = 'default', duration = 3500) {
+    const icons = {
+      success: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`,
+      danger: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+      warning: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/></svg>`,
+      default: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>`
+    };
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `${icons[type] || icons.default}<span style="flex:1">${message}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;color:rgba(255,255,255,0.7);cursor:pointer;padding:0 0 0 8px;font-size:16px;line-height:1">×</button>`;
+    this.container.appendChild(toast);
+    setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(110%)'; toast.style.transition = 'all 0.3s ease'; setTimeout(() => toast.remove(), 300); }, duration);
+  }
+};
+
+// ==========================================
+// MODAL SYSTEM
+// ==========================================
+const Modal = {
+  open(contentHTML, size = 'md') {
+    document.getElementById('modal-backdrop')?.remove();
+    const backdrop = document.createElement('div');
+    backdrop.id = 'modal-backdrop';
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `<div class="modal modal-${size}">${contentHTML}</div>`;
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) Modal.close(); });
+    document.body.appendChild(backdrop);
+    document.body.style.overflow = 'hidden';
+  },
+  close() {
+    document.getElementById('modal-backdrop')?.remove();
+    document.body.style.overflow = '';
+  }
+};
+
+// ==========================================
+// COMMAND PALETTE
+// ==========================================
+const CmdPalette = {
+  commands: [
+    { label: 'Dashboard', icon: 'home', action: () => navigateTo('dashboard') },
+    { label: 'New Pipeline', icon: 'plus', action: () => { navigateTo('pipelines'); CmdPalette.close(); Toast.show('Opening pipeline builder...', 'default'); } },
+    { label: 'Ask AXIOM', icon: 'message-circle', action: () => navigateTo('chat') },
+    { label: 'Add Data Source', icon: 'database', action: () => navigateTo('sources') },
+    { label: 'Run Quality Check', icon: 'shield-check', action: () => { CmdPalette.close(); Toast.show('Running quality checks...', 'default'); } },
+    { label: 'View Incidents', icon: 'alert-circle', action: () => navigateTo('incidents') },
+    { label: 'Pending Approvals', icon: 'check-square', action: () => navigateTo('approvals') },
+    { label: 'Analytics', icon: 'bar-chart-2', action: () => navigateTo('analytics') },
+    { label: 'Governance Lineage', icon: 'git-branch', action: () => navigateTo('governance') },
+    { label: 'CI/CD Deployments', icon: 'rocket', action: () => navigateTo('cicd') },
+    { label: 'Audit Logs', icon: 'file-text', action: () => navigateTo('audit') },
+    { label: 'Team Settings', icon: 'users', action: () => navigateTo('team') },
+    { label: 'Billing', icon: 'credit-card', action: () => navigateTo('billing') },
+    { label: 'API Keys', icon: 'key', action: () => navigateTo('settings') },
+  ],
+  open() {
+    const existing = document.getElementById('cmd-palette');
+    if (existing) { existing.remove(); return; }
+    const el = document.createElement('div');
+    el.id = 'cmd-palette';
+    el.className = 'cmd-palette';
+    el.innerHTML = `
+      <div class="cmd-input">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8892a8" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="cmd-search" placeholder="Search actions, pages, sources..." autofocus>
+        <span style="font-size:11px;color:var(--text-muted);background:var(--gray-100);border:1px solid var(--border);padding:2px 6px;border-radius:4px;font-family:monospace">ESC</span>
+      </div>
+      <div class="cmd-results" id="cmd-results"></div>
+    `;
+    document.body.appendChild(el);
+    const input = document.getElementById('cmd-search');
+    input.focus();
+    this.render('');
+    input.addEventListener('input', (e) => this.render(e.target.value));
+    document.addEventListener('keydown', this._escHandler);
+  },
+  render(query) {
+    const results = document.getElementById('cmd-results');
+    if (!results) return;
+    const filtered = query ? this.commands.filter(c => c.label.toLowerCase().includes(query.toLowerCase())) : this.commands;
+    results.innerHTML = `<div class="cmd-section-label">Actions</div>` + filtered.map(c => `
+      <div class="cmd-item" onclick="CmdPalette.run(${this.commands.indexOf(c)})">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/></svg>
+        <span>${c.label}</span>
+        <span class="cmd-kbd">↵</span>
+      </div>
+    `).join('');
+  },
+  run(index) { this.commands[index]?.action(); this.close(); },
+  close() { document.getElementById('cmd-palette')?.remove(); document.removeEventListener('keydown', this._escHandler); },
+  _escHandler(e) { if (e.key === 'Escape') CmdPalette.close(); }
+};
+
+// ==========================================
+// NAVIGATION
+// ==========================================
+function navigateTo(page) {
+  AppState.currentPage = page;
+  CmdPalette.close();
+  // Update sidebar active
+  document.querySelectorAll('.sidebar-item').forEach(item => {
+    item.classList.toggle('active', item.dataset.page === page);
+  });
+  // Render page
+  const pageEl = document.getElementById('page-content');
+  if (pageEl) {
+    pageEl.innerHTML = '<div class="empty-state"><div class="skeleton" style="width:200px;height:20px;margin-bottom:12px"></div><div class="skeleton" style="width:100%;max-width:600px;height:300px"></div></div>';
+    setTimeout(() => renderPage(page, pageEl), 150);
+  }
+  // Update breadcrumb
+  updateBreadcrumb(page);
+  window.scrollTo(0, 0);
+}
+
+function updateBreadcrumb(page) {
+  const el = document.getElementById('breadcrumb');
+  if (!el) return;
+  const labels = {
+    dashboard: 'Dashboard', axiom: 'AXIOM', sources: 'Data Sources',
+    pipelines: 'Pipelines', transformations: 'Transformations', quality: 'Data Quality',
+    incidents: 'Incidents', governance: 'Governance', analytics: 'Analytics',
+    cicd: 'CI/CD', approvals: 'Approvals', audit: 'Audit Logs',
+    team: 'Team', billing: 'Billing', settings: 'Settings', chat: 'Chat',
+    'ai-employees': 'AI Employees', automations: 'Automations', catalog: 'Data Catalog'
+  };
+  el.innerHTML = `<a>Wunomo</a><span class="breadcrumb-sep">/</span><span style="color:var(--text-secondary)">${labels[page] || page}</span>`;
+}
+
+// ==========================================
+// SIDEBAR TOGGLE
+// ==========================================
+function toggleSidebar() {
+  AppState.sidebarCollapsed = !AppState.sidebarCollapsed;
+  const sidebar = document.getElementById('sidebar');
+  const main = document.getElementById('main-content');
+  sidebar?.classList.toggle('collapsed', AppState.sidebarCollapsed);
+  main?.classList.toggle('expanded', AppState.sidebarCollapsed);
+}
+
+// ==========================================
+// NOTIFICATION PANEL
+// ==========================================
+function toggleNotifications() {
+  const existing = document.getElementById('notif-panel');
+  if (existing) { existing.remove(); return; }
+  const panel = document.createElement('div');
+  panel.id = 'notif-panel';
+  panel.style.cssText = 'position:fixed;top:52px;right:16px;width:360px;background:white;border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-xl);z-index:200;animation:modal-in 0.15s ease;';
+  panel.innerHTML = `
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+      <span class="font-semibold" style="font-size:13px;">Notifications</span>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('notif-panel').remove()">Mark all read</button>
+    </div>
+    <div style="max-height:400px;overflow-y:auto;">
+      ${AppState.notifications.map(n => `
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:10px;background:${n.read ? 'white' : 'var(--navy-50)'};cursor:pointer;" onclick="this.style.background='white'">
+          <div class="status-dot ${n.type === 'warning' ? 'warning' : n.type === 'success' ? 'success' : n.type === 'danger' ? 'danger' : 'info'} pulse" style="margin-top:5px;flex-shrink:0"></div>
+          <div style="flex:1;min-width:0">
+            <div class="font-medium" style="font-size:12px;">${n.title}</div>
+            <div class="text-muted text-sm" style="margin-top:2px">${n.body}</div>
+            <div class="text-xs text-muted" style="margin-top:4px">${n.time}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    <div style="padding:10px 16px;text-align:center;"><a style="font-size:12px;color:var(--navy-600);cursor:pointer">View all notifications</a></div>
+  `;
+  document.body.appendChild(panel);
+  setTimeout(() => document.addEventListener('click', function handler(e) { if (!panel.contains(e.target)) { panel.remove(); document.removeEventListener('click', handler); } }), 100);
+}
+
+// ==========================================
+// GLOBAL KEYBOARD SHORTCUTS
+// ==========================================
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    CmdPalette.open();
+  }
+});
+
+// ==========================================
+// CHART HELPERS
+// ==========================================
+function createSparkline(ctx, data, color = '#2351a1') {
+  if (!window.Chart) return;
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: data.map((_, i) => i),
+      datasets: [{ data, borderColor: color, borderWidth: 2, fill: true, backgroundColor: color + '18', tension: 0.4, pointRadius: 0 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false } }, animation: false }
+  });
+}
+
+function createBarChart(ctx, labels, datasets, opts = {}) {
+  if (!window.Chart) return;
+  return new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', labels: { font: { size: 11 }, padding: 16 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { grid: { color: '#f0f0f4' }, ticks: { font: { size: 11 } }, ...opts.y }
+      },
+      ...opts.extra
+    }
+  });
+}
+
+function createLineChart(ctx, labels, datasets, opts = {}) {
+  if (!window.Chart) return;
+  return new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', labels: { font: { size: 11 }, padding: 16 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { grid: { color: '#f0f0f4' }, ticks: { font: { size: 11 } } }
+      },
+      ...opts.extra
+    }
+  });
+}
+
+function createDonut(ctx, labels, data, colors) {
+  if (!window.Chart) return;
+  return new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 0, hoverOffset: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '72%',
+      plugins: { legend: { position: 'right', labels: { font: { size: 11 }, padding: 12, usePointStyle: true } } }
+    }
+  });
+}
+
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
+function timeAgo(date) {
+  const diff = Date.now() - date;
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+  return Math.floor(diff / 86400000) + 'd ago';
+}
+
+function formatNumber(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function statusBadge(status) {
+  const map = {
+    success: 'badge-success', active: 'badge-success', healthy: 'badge-success',
+    running: 'badge-info', pending: 'badge-warning',
+    failed: 'badge-danger', error: 'badge-danger',
+    paused: 'badge-gray', inactive: 'badge-gray',
+    'coming-soon': 'badge-purple', locked: 'badge-gray'
+  };
+  return `<span class="badge ${map[status] || 'badge-gray'}">${status}</span>`;
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => Toast.show('Copied to clipboard', 'success'));
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', () => {
+  Toast.init();
+  // AXIOM floating button behavior
+  const fab = document.getElementById('axiom-fab');
+  if (fab) fab.addEventListener('click', () => navigateTo('axiom'));
+});
+
+</script>
+
+<script>
+/* ==========================================
+   WUNOMO AI — Page Renderers
+   ========================================== */
+
+// ==========================================
+// MASTER PAGE ROUTER
+// ==========================================
+function renderPage(page, container) {
+  const renderers = {
+    dashboard: renderDashboard,
+    'ai-employees': renderAIEmployees,
+    axiom: renderAxiom,
+    sources: renderSources,
+    pipelines: renderPipelines,
+    transformations: renderTransformations,
+    quality: renderQuality,
+    incidents: renderIncidents,
+    governance: renderGovernance,
+    analytics: renderAnalytics,
+    cicd: renderCICD,
+    approvals: renderApprovals,
+    audit: renderAudit,
+    team: renderTeam,
+    billing: renderBilling,
+    settings: renderSettings,
+    automations: renderAutomations,
+    catalog: renderCatalog,
+    chat: renderAxiom
+  };
+  const fn = renderers[page];
+  if (fn) { container.innerHTML = fn(); bindPageEvents(page); }
+  else { container.innerHTML = `<div class="empty-state"><p class="text-muted">Page coming soon</p></div>`; }
+}
+
+// ==========================================
+// BIND PAGE EVENTS AFTER RENDER
+// ==========================================
+function bindPageEvents(page) {
+  setTimeout(() => {
+    // Tabs
+    document.querySelectorAll('.tab[data-tab]').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const group = tab.dataset.group;
+        document.querySelectorAll(`.tab[data-group="${group}"]`).forEach(t => t.classList.remove('active'));
+        document.querySelectorAll(`.tab-panel[data-group="${group}"]`).forEach(p => p.classList.add('hidden'));
+        tab.classList.add('active');
+        const panel = document.querySelector(`.tab-panel[data-tab="${tab.dataset.tab}"]`);
+        if (panel) panel.classList.remove('hidden');
+      });
+    });
+    // Init charts
+    if (page === 'dashboard') initDashboardCharts();
+    if (page === 'analytics') initAnalyticsCharts();
+    if (page === 'quality') initQualityCharts();
+    if (page === 'pipelines') initPipelineCharts();
+  }, 100);
+}
+
+// ==========================================
+// DASHBOARD
+// ==========================================
+function renderDashboard() {
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a>Wunomo</a><span class="breadcrumb-sep">/</span><span style="color:var(--text-secondary)">Dashboard</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Good morning, Arjun 👋</h1>
+    <div class="flex gap-2">
+      <button class="btn btn-secondary btn-sm" onclick="Toast.show('Refreshing dashboard...','default')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh
+      </button>
+      <button class="btn btn-primary btn-sm" onclick="navigateTo('axiom')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 0 1 8 8v12l-4-4H4a8 8 0 0 1 0-16"/></svg>Ask AXIOM
+      </button>
+    </div>
+  </div>
+</div>
+
+<div style="padding:20px 24px;display:flex;flex-direction:column;gap:20px;">
+
+<!-- System Health Alert -->
+<div style="background:linear-gradient(135deg,var(--warning-bg),#fff);border:1px solid var(--warning-border);border-radius:var(--radius-lg);padding:14px 16px;display:flex;align-items:center;gap:10px;">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+  <div style="flex:1"><span class="font-medium" style="font-size:12px">Pipeline "Daily Sales Aggregation" failed 2h ago.</span> <span style="font-size:12px;color:var(--text-secondary)">Schema drift detected in DataOps Postgres.</span></div>
+  <button class="btn btn-sm" style="background:var(--warning);color:white;border-color:var(--warning)" onclick="navigateTo('incidents')">Investigate</button>
+  <button class="btn btn-ghost btn-sm btn-icon">×</button>
+</div>
+
+<!-- KPI Metrics Row -->
+<div class="stats-grid">
+  ${[
+    { label: 'System Health', value: '94%', change: '+2%', up: true, color: 'var(--success)', sparkId: 'spark1', data: [88,90,91,89,93,94,94] },
+    { label: 'Pipelines Active', value: '13', change: '1 paused', up: null, color: 'var(--navy-500)', sparkId: 'spark2', data: [10,11,11,12,13,13,13] },
+    { label: 'Quality Score', value: '91/100', change: '+3 this week', up: true, color: 'var(--teal)', sparkId: 'spark3', data: [84,85,87,88,88,90,91] },
+    { label: "Today's Runs", value: '47', change: '96.8% success', up: true, color: 'var(--purple)', sparkId: 'spark4', data: [32,38,41,44,45,46,47] },
+    { label: 'Data Sources', value: '8', change: '1 unhealthy', up: false, color: 'var(--orange)', sparkId: 'spark5', data: [6,7,7,7,8,8,8] },
+    { label: 'Open Incidents', value: '2', change: '↓ from 5 yesterday', up: true, color: 'var(--danger)', sparkId: 'spark6', data: [5,4,4,3,2,2,2] },
+    { label: 'Pending Approvals', value: '3', change: '2 urgent', up: null, color: 'var(--warning)', sparkId: 'spark7', data: [1,2,2,3,3,3,3] },
+    { label: 'AI Credit Balance', value: '8,420', change: '$148 used this month', up: null, color: 'var(--navy-600)', sparkId: 'spark8', data: [9200,9000,8800,8700,8600,8500,8420] },
+  ].map(m => `
+    <div class="card card-hover" style="cursor:default">
+      <div class="metric-card">
+        <div class="flex items-center justify-between" style="margin-bottom:12px">
+          <span class="text-sm text-muted font-medium">${m.label}</span>
+          <div class="chart-container" style="width:70px;height:28px"><canvas id="${m.sparkId}"></canvas></div>
+        </div>
+        <div class="metric-value" style="color:${m.color}">${m.value}</div>
+        ${m.change ? `<div class="metric-change ${m.up === true ? 'up' : m.up === false ? 'down' : ''}">${m.up === true ? '↑ ' : m.up === false ? '↓ ' : ''}${m.change}</div>` : ''}
+      </div>
+    </div>
+  `).join('')}
+</div>
+
+<!-- Charts Row -->
+<div class="grid-2" style="gap:16px">
+  <div class="card">
+    <div class="card-header"><span class="font-semibold text-sm">Pipeline Run History (7 days)</span><span class="badge badge-success text-xs">Live</span></div>
+    <div class="card-body" style="padding-top:8px"><div class="chart-container" style="height:180px"><canvas id="pipeline-run-chart"></canvas></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><span class="font-semibold text-sm">Quality Score Trend</span></div>
+    <div class="card-body" style="padding-top:8px"><div class="chart-container" style="height:180px"><canvas id="quality-trend-chart"></canvas></div></div>
+  </div>
+</div>
+
+<!-- Bottom Row: Activity + Approvals + AXIOM -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+
+  <!-- Recent Runs -->
+  <div class="card" style="grid-column:span 1">
+    <div class="card-header"><span class="font-semibold text-sm">Recent Pipeline Runs</span><button class="btn btn-ghost btn-sm" onclick="navigateTo('pipelines')">View all</button></div>
+    <div style="font-size:12px">
+      ${[
+        { name: 'Daily Sales Agg.', status: 'failed', time: '06:00', rows: 0 },
+        { name: 'Customer ETL', status: 'success', time: '05:45', rows: 14820 },
+        { name: 'Inventory Sync', status: 'success', time: '05:30', rows: 3201 },
+        { name: 'Revenue Report', status: 'success', time: '04:00', rows: 8940 },
+        { name: 'User Events', status: 'running', time: 'Now', rows: null },
+      ].map(r => `
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--border);">
+          <div class="status-dot ${r.status === 'success' ? 'success' : r.status === 'failed' ? 'danger' : 'info'} ${r.status === 'running' ? 'pulse' : ''}"></div>
+          <span class="truncate font-medium" style="flex:1">${r.name}</span>
+          <span class="text-muted">${r.time}</span>
+          <span style="color:${r.status === 'failed' ? 'var(--danger)' : 'var(--text-muted)'}">${r.rows !== null ? formatNumber(r.rows) + ' rows' : '...'}</span>
+        </div>
+      `).join('')}
+    </div>
+  </div>
+
+  <!-- Pending Approvals -->
+  <div class="card">
+    <div class="card-header"><span class="font-semibold text-sm">Pending Approvals</span><span class="badge badge-warning">3</span></div>
+    <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px">
+      ${[
+        { title: 'Deploy pipeline v2', by: 'Priya S.', urgent: true },
+        { title: 'Schema migration', by: 'Dev Team', urgent: true },
+        { title: 'Quality threshold change', by: 'Rohan M.', urgent: false },
+      ].map(a => `
+        <div class="card" style="padding:10px 12px;">
+          <div class="flex items-center justify-between" style="margin-bottom:6px">
+            <span class="font-medium" style="font-size:12px">${a.title}</span>
+            ${a.urgent ? '<span class="badge badge-danger" style="font-size:10px">Urgent</span>' : ''}
+          </div>
+          <div class="text-xs text-muted" style="margin-bottom:8px">Requested by ${a.by}</div>
+          <div class="flex gap-2">
+            <button class="btn btn-success btn-sm" style="flex:1;font-size:11px" onclick="Toast.show('Approved!','success')">Approve</button>
+            <button class="btn btn-danger btn-sm" style="flex:1;font-size:11px" onclick="Toast.show('Rejected','danger')">Reject</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  </div>
+
+  <!-- AXIOM Activity -->
+  <div class="card">
+    <div class="card-header"><span class="font-semibold text-sm">AXIOM Activity</span><button class="btn btn-primary btn-sm" onclick="navigateTo('axiom')">Open</button></div>
+    <div style="padding:12px 16px;display:flex;flex-direction:column;gap:6px">
+      ${[
+        { q: 'Show failed runs by pipeline', t: '2m ago', success: true },
+        { q: 'Why did Daily Sales fail?', t: '18m ago', success: true },
+        { q: 'Generate quality report', t: '1h ago', success: true },
+        { q: 'Explain this SQL transformation', t: '2h ago', success: true },
+        { q: 'List sources with drift', t: '3h ago', success: true },
+      ].map(c => `
+        <div style="padding:8px;background:var(--gray-50);border-radius:var(--radius-sm);cursor:pointer" onclick="navigateTo('axiom')">
+          <div class="flex items-center gap-2">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--navy-500)" stroke-width="2"><path d="M12 2a8 8 0 0 1 8 8v12l-4-4H4a8 8 0 0 1 0-16"/></svg>
+            <span class="text-xs font-medium truncate" style="flex:1">${c.q}</span>
+            <span class="text-xs text-muted">${c.t}</span>
+          </div>
+        </div>
+      `).join('')}
+      <button class="btn btn-ghost" style="width:100%;font-size:12px;margin-top:4px" onclick="navigateTo('axiom')">View all conversations →</button>
+    </div>
+  </div>
+</div>
+
+</div>
+  `;
+}
+
+function initDashboardCharts() {
+  const sparkData = [
+    { id: 'spark1', data: [88,90,91,89,93,94,94], color: '#16a34a' },
+    { id: 'spark2', data: [10,11,11,12,13,13,13], color: '#2351a1' },
+    { id: 'spark3', data: [84,85,87,88,88,90,91], color: '#0d9488' },
+    { id: 'spark4', data: [32,38,41,44,45,46,47], color: '#7c3aed' },
+    { id: 'spark5', data: [6,7,7,7,8,8,8], color: '#ea580c' },
+    { id: 'spark6', data: [5,4,4,3,2,2,2], color: '#dc2626' },
+    { id: 'spark7', data: [1,2,2,3,3,3,3], color: '#d97706' },
+    { id: 'spark8', data: [9200,9000,8800,8700,8600,8500,8420], color: '#2351a1' },
+  ];
+  sparkData.forEach(s => { const el = document.getElementById(s.id); if (el) createSparkline(el, s.data, s.color); });
+
+  const labels = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const prChart = document.getElementById('pipeline-run-chart');
+  if (prChart) createBarChart(prChart, labels,
+    [{ label: 'Success', data: [38,42,39,45,44,30,47], backgroundColor: '#16a34a22', borderColor: '#16a34a', borderWidth: 2, borderRadius: 3 },
+     { label: 'Failed', data: [2,1,3,1,2,1,1], backgroundColor: '#dc262622', borderColor: '#dc2626', borderWidth: 2, borderRadius: 3 }]
+  );
+  const qtChart = document.getElementById('quality-trend-chart');
+  if (qtChart) createLineChart(qtChart, labels,
+    [{ label: 'Quality Score', data: [84,85,87,88,88,90,91], borderColor: '#0d9488', backgroundColor: '#0d948818', fill: true, tension: 0.4, borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#0d9488' }]
+  );
+}
+
+// ==========================================
+// AI EMPLOYEES
+// ==========================================
+function renderAIEmployees() {
+  const employees = [
+    { id: 'axiom', name: 'AXIOM', role: 'DataOps Engineer', status: 'active', desc: 'Automates your entire DataOps workflow. Connects databases, runs pipelines, enforces quality, and understands your data.', caps: ['SQL Generation', 'Pipeline Orchestration', 'Schema Drift Detection', 'Data Quality', 'Incident Response', 'CI/CD'], price: '$49/mo', color: 'var(--navy-600)', emoji: '⬡' },
+    { id: 'finance', name: 'LEDGER', role: 'Finance Analyst', status: 'locked', desc: 'Automates financial reporting, variance analysis, forecasting, and budget reconciliation.', caps: ['P&L Analysis', 'Budget Forecasting', 'Variance Reports', 'Compliance Checks'], price: '$59/mo', color: 'var(--success)', emoji: '📊' },
+    { id: 'devops', name: 'DEPLOY', role: 'DevOps Engineer', status: 'locked', desc: 'Manages infrastructure, deployment pipelines, monitoring, and incident response.', caps: ['CI/CD Automation', 'K8s Management', 'Incident Response', 'SLA Monitoring'], price: '$69/mo', color: 'var(--orange)', emoji: '🚀' },
+    { id: 'analytics', name: 'INSIGHT', role: 'Analytics Engineer', status: 'locked', desc: 'Builds dashboards, analyzes trends, and generates business intelligence reports automatically.', caps: ['Dashboard Builder', 'Trend Analysis', 'KPI Tracking', 'Custom Reports'], price: '$49/mo', color: 'var(--purple)', emoji: '📈' },
+    { id: 'security', name: 'SENTINEL', role: 'Security Engineer', status: 'locked', desc: 'Monitors threats, enforces compliance policies, and responds to security incidents.', caps: ['Threat Detection', 'Compliance Audit', 'GDPR/SOC2', 'Access Review'], price: '$79/mo', color: 'var(--danger)', emoji: '🛡' },
+    { id: 'hr', name: 'PULSE', role: 'HR Analyst', status: 'locked', desc: 'Handles HR analytics, performance tracking, and workforce intelligence.', caps: ['Workforce Analytics', 'Attrition Risk', 'Performance Metrics', 'Org Charting'], price: '$39/mo', color: 'var(--teal)', emoji: '👥' },
+  ];
+
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a>Wunomo</a><span class="breadcrumb-sep">/</span><span style="color:var(--text-secondary)">AI Employees</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">AI Employees</h1>
+    <div class="flex gap-2 items-center">
+      <span class="badge badge-navy">1 Active</span>
+      <button class="btn btn-primary btn-sm">Browse Marketplace</button>
+    </div>
+  </div>
+  <p class="text-secondary" style="font-size:13px;margin-top:6px">Hire AI employees that autonomously handle specialized roles in your organization.</p>
+</div>
+
+<div style="padding:24px;display:flex;flex-direction:column;gap:20px">
+  <div class="grid-3" style="gap:16px">
+    ${employees.map(e => `
+      <div class="card card-hover" style="position:relative;${e.status === 'active' ? 'border-color:var(--navy-300);box-shadow:0 0 0 1px var(--navy-300);' : ''}">
+        ${e.status === 'locked' ? '<div style="position:absolute;inset:0;background:rgba(255,255,255,0.6);backdrop-filter:blur(1px);border-radius:var(--radius-lg);z-index:1;display:flex;align-items:center;justify-content:center"><span class="badge badge-gray" style="font-size:12px;padding:6px 14px">Coming Soon</span></div>' : ''}
+        <div class="card-body">
+          <div class="flex items-start justify-between" style="margin-bottom:12px">
+            <div class="flex items-center gap-10" style="gap:10px">
+              <div style="width:40px;height:40px;background:${e.color}18;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-size:20px;border:1px solid ${e.color}30">${e.emoji}</div>
+              <div>
+                <div class="font-bold" style="font-size:15px;color:${e.color}">${e.name}</div>
+                <div class="text-xs text-muted">${e.role}</div>
+              </div>
+            </div>
+            ${e.status === 'active' ? '<span class="badge badge-success"><div class="status-dot success" style="width:5px;height:5px"></div>Active</span>' : ''}
+          </div>
+          <p class="text-secondary" style="font-size:12px;line-height:1.5;margin-bottom:12px">${e.desc}</p>
+          <div class="flex flex-wrap gap-1" style="margin-bottom:14px">
+            ${e.caps.map(c => `<span class="badge badge-gray" style="font-size:10px">${c}</span>`).join('')}
+          </div>
+          <div class="flex items-center justify-between" style="padding-top:12px;border-top:1px solid var(--border)">
+            <span class="font-semibold" style="font-size:13px;color:${e.color}">${e.price}</span>
+            ${e.status === 'active'
+              ? `<button class="btn btn-primary btn-sm" onclick="navigateTo('axiom')">Open AXIOM →</button>`
+              : `<button class="btn btn-secondary btn-sm">Join Waitlist</button>`
+            }
+          </div>
+        </div>
+      </div>
+    `).join('')}
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// AXIOM — CHAT INTERFACE
+// ==========================================
+function renderAxiom() {
+  const sessions = [
+    { id: 1, title: 'Failed pipeline analysis', time: '2m ago', active: true },
+    { id: 2, title: 'Quality check for customer data', time: '1h ago' },
+    { id: 3, title: 'Explain revenue SQL query', time: '3h ago' },
+    { id: 4, title: 'Schema drift investigation', time: 'Yesterday' },
+    { id: 5, title: 'Daily sales aggregation setup', time: 'Mon' },
+  ];
+
+  const messages = [
+    { role: 'user', content: 'Show me all failed pipeline runs grouped by pipeline_id from the last 7 days' },
+    { role: 'assistant', content: `I'll query the pipeline runs table and group by pipeline_id for you.`, type: 'text', sources: ['DataOps Postgres'] },
+    { role: 'tool', type: 'sql', content: `SELECT pipeline_id, COUNT(*) as failures, MAX(created_at) as last_failure\nFROM pipeline_runs\nWHERE status = 'failed'\n  AND created_at >= NOW() - INTERVAL '7 days'\nGROUP BY pipeline_id\nORDER BY failures DESC;` },
+    { role: 'result', type: 'table', headers: ['Pipeline ID', 'Failures', 'Last Failure'], rows: [['pipeline-daily-sales', 5, '2026-06-27 06:00'], ['pipeline-customer-etl', 2, '2026-06-25 12:30'], ['pipeline-inventory', 1, '2026-06-24 08:00']] },
+    { role: 'assistant', content: `Here are the failed pipeline runs over the last 7 days:\n\n- **pipeline-daily-sales**: 5 failures — most recently this morning at 06:00. This is the active incident. Root cause is schema drift: the \`updated_at\` column was added to the source table.\n- **pipeline-customer-etl**: 2 failures — likely connection timeout issues.\n- **pipeline-inventory**: 1 failure — resolved automatically on retry.\n\nWould you like me to investigate the schema drift on pipeline-daily-sales or create an incident?`, type: 'text' },
+  ];
+
+  return `
+<div style="display:flex;height:calc(100vh - var(--topbar-h));overflow:hidden">
+  <!-- Left: Sessions -->
+  <div style="width:240px;border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;background:var(--gray-50)">
+    <div style="padding:14px 12px;border-bottom:1px solid var(--border)">
+      <button class="btn btn-primary btn-sm" style="width:100%" onclick="Toast.show('New chat started','success')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>New Chat
+      </button>
+    </div>
+    <div style="padding:8px 8px 4px;font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em">Recent</div>
+    <div style="flex:1;overflow-y:auto">
+      ${sessions.map(s => `
+        <div style="padding:9px 12px;border-radius:var(--radius-sm);margin:1px 4px;cursor:pointer;background:${s.active ? 'white' : 'transparent'};border:${s.active ? '1px solid var(--border)' : '1px solid transparent'}" onclick="Toast.show('Loading session...','default')">
+          <div class="font-medium truncate" style="font-size:12px">${s.title}</div>
+          <div class="text-xs text-muted" style="margin-top:2px">${s.time}</div>
+        </div>
+      `).join('')}
+    </div>
+    <div style="padding:10px 12px;border-top:1px solid var(--border)">
+      <div style="font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Saved Prompts</div>
+      ${['Daily health check', 'Quality report', 'Schema drift scan'].map(p => `
+        <div style="padding:6px 8px;font-size:11px;color:var(--text-secondary);cursor:pointer;border-radius:4px" onmouseover="this.style.background='white'" onmouseout="this.style.background='transparent'">${p}</div>
+      `).join('')}
+    </div>
+  </div>
+
+  <!-- Middle: Chat -->
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <!-- Chat header -->
+    <div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:white;flex-shrink:0">
+      <div class="flex items-center gap-8" style="gap:8px">
+        <div style="width:28px;height:28px;background:var(--navy-600);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 2a8 8 0 0 1 8 8v12l-4-4H4a8 8 0 0 1 0-16"/></svg></div>
+        <div>
+          <div class="font-semibold" style="font-size:13px">AXIOM DataOps Agent</div>
+          <div class="flex items-center gap-4" style="gap:6px"><div class="status-dot success pulse"></div><span class="text-xs text-muted">Online · Groq Llama 3.1-8b</span></div>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <select class="input select" style="width:auto;font-size:11px;padding:4px 24px 4px 8px">
+          <option>Engineer</option><option>Analyst</option><option>Executive</option>
+        </select>
+        <select class="input select" style="width:auto;font-size:11px;padding:4px 24px 4px 8px">
+          <option>Assisted</option><option>Autonomous</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div id="chat-messages" style="flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px">
+      ${messages.map(m => {
+        if (m.role === 'tool') return `
+          <div style="background:var(--gray-950);border-radius:var(--radius-md);padding:14px;font-family:var(--font-mono);font-size:11px;color:#86efac;line-height:1.6">
+            <div style="color:#6b7280;font-size:10px;margin-bottom:6px;font-family:var(--font);text-transform:uppercase;letter-spacing:0.06em">⚡ SQL Executed</div>
+            <pre style="margin:0;white-space:pre-wrap">${m.content}</pre>
+          </div>`;
+        if (m.role === 'result') return `
+          <div class="card" style="overflow:hidden">
+            <div style="padding:8px 12px;background:var(--gray-50);border-bottom:1px solid var(--border);font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em">📋 Results (${m.rows.length} rows)</div>
+            <div class="table-wrap">
+              <table><thead><tr>${m.headers.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+              <tbody>${m.rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>
+            </div>
+          </div>`;
+        if (m.role === 'user') return `
+          <div style="display:flex;justify-content:flex-end">
+            <div style="background:var(--navy-600);color:white;border-radius:var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);padding:10px 14px;max-width:70%;font-size:13px;line-height:1.5">${m.content}</div>
+          </div>`;
+        return `
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div style="width:26px;height:26px;background:var(--navy-600);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 2a8 8 0 0 1 8 8v12l-4-4H4a8 8 0 0 1 0-16"/></svg></div>
+            <div class="card" style="max-width:75%;padding:12px 14px;font-size:13px;line-height:1.6">${m.content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')}</div>
+          </div>`;
+      }).join('')}
+    </div>
+
+    <!-- Input area -->
+    <div style="padding:14px 20px;border-top:1px solid var(--border);background:white;flex-shrink:0">
+      <div style="background:var(--gray-50);border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px">
+        <textarea id="chat-input" placeholder="Ask AXIOM anything about your data... (↵ to send, Shift+↵ for newline)" style="width:100%;border:none;outline:none;background:transparent;font-family:inherit;font-size:13px;resize:none;min-height:40px;max-height:120px;color:var(--text-primary)" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAxiomMessage()}"></textarea>
+        <div class="flex items-center justify-between" style="margin-top:8px">
+          <div class="flex gap-2">
+            <button class="btn btn-ghost btn-sm btn-icon" title="Attach file"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+            <button class="btn btn-ghost btn-sm btn-icon" title="Add context"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 0 1 8 8v12l-4-4H4a8 8 0 0 1 0-16"/></svg></button>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="sendAxiomMessage()">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send
+          </button>
+        </div>
+      </div>
+      <div class="flex gap-2" style="margin-top:8px;flex-wrap:wrap">
+        ${['Show failed runs today', 'Run quality check', 'Explain last error', 'List schema drifts', 'Generate report'].map(p => `<button class="btn btn-secondary btn-sm" style="font-size:11px" onclick="document.getElementById('chat-input').value='${p}'">${p}</button>`).join('')}
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Context Panel -->
+  <div style="width:260px;border-left:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto;background:var(--gray-50)">
+    <div style="padding:14px 14px 10px;border-bottom:1px solid var(--border)">
+      <div class="font-semibold" style="font-size:12px">Context</div>
+    </div>
+
+    <!-- Connected Source -->
+    <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+      <div class="text-xs font-medium text-muted" style="margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em">Active Source</div>
+      <div class="card" style="padding:10px 12px">
+        <div class="flex items-center gap-2" style="margin-bottom:4px">
+          <div class="status-dot success"></div>
+          <span class="font-medium" style="font-size:12px">DataOps Postgres</span>
+        </div>
+        <div class="text-xs text-muted">pipeline_runs · 1,500 rows</div>
+        <div class="text-xs text-muted" style="margin-top:2px">Last synced 5m ago</div>
+      </div>
+    </div>
+
+    <!-- Memory -->
+    <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+      <div class="text-xs font-medium text-muted" style="margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em">Agent Memory</div>
+      <div class="flex flex-col gap-1">
+        ${['User is querying pipeline_runs', 'Tenant: DataCompany Ltd', 'Focus: failed runs analysis', 'Source connected: Postgres'].map(m => `
+          <div class="flex gap-2" style="font-size:11px;color:var(--text-secondary);padding:4px 6px;background:white;border-radius:4px;border:1px solid var(--border)">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--navy-400)" stroke-width="2" style="margin-top:1px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>${m}
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <!-- Tool Calls -->
+    <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+      <div class="text-xs font-medium text-muted" style="margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em">Tool Calls This Session</div>
+      ${[
+        { tool: 'run_sql', status: 'success', time: '0.4s' },
+        { tool: 'get_source_schema', status: 'success', time: '0.1s' },
+      ].map(t => `
+        <div class="flex items-center justify-between" style="padding:6px 8px;background:white;border-radius:4px;border:1px solid var(--border);margin-bottom:4px">
+          <span class="font-medium text-xs">${t.tool}</span>
+          <div class="flex gap-2 items-center">
+            <span class="text-xs text-muted">${t.time}</span>
+            <div class="status-dot success" style="width:5px;height:5px"></div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    <!-- Confidence -->
+    <div style="padding:12px 14px">
+      <div class="text-xs font-medium text-muted" style="margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em">Confidence</div>
+      <div class="flex items-center justify-between" style="margin-bottom:4px">
+        <span class="text-xs">Last response</span>
+        <span class="font-semibold text-xs" style="color:var(--success)">94%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill success" style="width:94%"></div></div>
+      <div class="text-xs text-muted" style="margin-top:6px">Sources verified · SQL executed</div>
+    </div>
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// SOURCES
+// ==========================================
+function renderSources() {
+  const sources = [
+    { name: 'DataOps Postgres', type: 'postgres', status: 'healthy', tables: 12, lastSync: '5m ago', rows: 48200 },
+    { name: 'Production MySQL', type: 'mysql', status: 'healthy', tables: 28, lastSync: '10m ago', rows: 1240000 },
+    { name: 'Analytics Snowflake', type: 'snowflake', status: 'healthy', tables: 45, lastSync: '1h ago', rows: 8900000 },
+    { name: 'Sales Redshift', type: 'redshift', status: 'warning', tables: 19, lastSync: '3h ago', rows: 2100000 },
+    { name: 'MongoDB Atlas', type: 'mongodb', status: 'healthy', tables: 8, lastSync: '20m ago', rows: 340000 },
+    { name: 'June Sales Data', type: 'csv', status: 'healthy', tables: 1, lastSync: '2d ago', rows: 15000 },
+    { name: 'BigQuery DWH', type: 'bigquery', status: 'healthy', tables: 67, lastSync: '30m ago', rows: 45000000 },
+    { name: 'Legacy SQL Server', type: 'sqlserver', status: 'failed', tables: 0, lastSync: 'Failed', rows: 0 },
+  ];
+
+  const typeColors = { postgres: '#336791', mysql: '#00758f', snowflake: '#29b5e8', redshift: '#8c4fff', mongodb: '#47a248', csv: '#16a34a', bigquery: '#ea580c', sqlserver: '#cc2927' };
+  const typeIcons = { postgres: 'PG', mysql: 'MY', snowflake: '❄', redshift: 'RS', mongodb: 'MG', csv: 'CSV', bigquery: 'BQ', sqlserver: 'SQL' };
+
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Data Sources</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Data Sources</h1>
+    <div class="flex gap-2">
+      <button class="btn btn-secondary btn-sm">Upload File</button>
+      <button class="btn btn-primary btn-sm" onclick="showAddSourceModal()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Connect Source
+      </button>
+    </div>
+  </div>
+</div>
+
+<div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+  <div style="display:flex;gap:12px;align-items:center">
+    <div class="search-bar" style="flex:1;max-width:340px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg><input placeholder="Search sources..."></div>
+    <select class="input select" style="width:auto;font-size:12px">
+      <option>All types</option><option>PostgreSQL</option><option>MySQL</option><option>Cloud DWH</option><option>Files</option>
+    </select>
+    <select class="input select" style="width:auto;font-size:12px">
+      <option>All statuses</option><option>Healthy</option><option>Warning</option><option>Failed</option>
+    </select>
+  </div>
+
+  <div class="grid-3" style="gap:12px">
+    ${sources.map(s => `
+      <div class="card card-hover" style="cursor:pointer" onclick="showSourceDetail('${s.name}')">
+        <div class="card-body">
+          <div class="flex items-start justify-between" style="margin-bottom:12px">
+            <div class="flex items-center gap-10" style="gap:8px">
+              <div style="width:36px;height:36px;background:${typeColors[s.type]}18;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:${typeColors[s.type]}">${typeIcons[s.type]}</div>
+              <div>
+                <div class="font-semibold" style="font-size:13px">${s.name}</div>
+                <div class="text-xs text-muted">${s.type.toUpperCase()}</div>
+              </div>
+            </div>
+            ${s.status === 'healthy' ? '<span class="badge badge-success"><div class="status-dot success" style="width:5px;height:5px"></div>Healthy</span>' : s.status === 'warning' ? '<span class="badge badge-warning">Warning</span>' : '<span class="badge badge-danger">Failed</span>'}
+          </div>
+          <div class="grid-2" style="gap:8px;margin-bottom:12px">
+            <div style="background:var(--gray-50);border-radius:var(--radius-sm);padding:8px">
+              <div class="text-xs text-muted">Tables</div>
+              <div class="font-semibold" style="font-size:14px">${s.tables}</div>
+            </div>
+            <div style="background:var(--gray-50);border-radius:var(--radius-sm);padding:8px">
+              <div class="text-xs text-muted">Rows</div>
+              <div class="font-semibold" style="font-size:14px">${formatNumber(s.rows)}</div>
+            </div>
+          </div>
+          <div class="flex items-center justify-between" style="font-size:11px;color:var(--text-muted);margin-bottom:10px">
+            <span>Last synced: ${s.lastSync}</span>
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary btn-sm" style="flex:1;font-size:11px" onclick="event.stopPropagation();Toast.show('Profiling ${s.name}...','default')">Profile</button>
+            <button class="btn btn-secondary btn-sm" style="flex:1;font-size:11px" onclick="event.stopPropagation();Toast.show('Checking for drift...','default')">Drift Check</button>
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="event.stopPropagation();Toast.show('Syncing...','default')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
+          </div>
+        </div>
+      </div>
+    `).join('')}
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// PIPELINES
+// ==========================================
+function renderPipelines() {
+  const pipelines = [
+    { name: 'Daily Sales Aggregation', status: 'failed', schedule: '0 6 * * *', source: 'DataOps Postgres', lastRun: 'Failed 06:00', nextRun: 'Tomorrow 06:00', successRate: 86, runs: 42 },
+    { name: 'Customer ETL Pipeline', status: 'active', schedule: '*/30 * * * *', source: 'Production MySQL', lastRun: 'Success 05:45', nextRun: '12 min', successRate: 98, runs: 288 },
+    { name: 'Inventory Sync', status: 'active', schedule: '0 * * * *', source: 'MongoDB Atlas', lastRun: 'Success 05:30', nextRun: '28 min', successRate: 99, runs: 168 },
+    { name: 'Revenue Report Builder', status: 'active', schedule: '0 4 * * *', source: 'Analytics Snowflake', lastRun: 'Success 04:00', nextRun: 'Tomorrow 04:00', successRate: 100, runs: 30 },
+    { name: 'User Events Processor', status: 'running', schedule: 'Continuous', source: 'Production MySQL', lastRun: 'Running now', nextRun: 'Continuous', successRate: 95, runs: 1040 },
+    { name: 'ML Feature Store', status: 'paused', schedule: '0 0 * * *', source: 'BigQuery DWH', lastRun: 'Success 3d ago', nextRun: 'Paused', successRate: 94, runs: 60 },
+  ];
+
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Pipelines</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Pipelines</h1>
+    <div class="flex gap-2">
+      <button class="btn btn-secondary btn-sm">Import YAML</button>
+      <button class="btn btn-primary btn-sm" onclick="Toast.show('Opening pipeline builder...','default')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>New Pipeline
+      </button>
+    </div>
+  </div>
+</div>
+
+<div style="padding:20px 24px">
+  <!-- Stats -->
+  <div class="stats-grid" style="margin-bottom:20px;grid-template-columns:repeat(5,1fr)">
+    ${[
+      { l: 'Total Pipelines', v: '13', c: '' },
+      { l: 'Active', v: '10', c: 'var(--success)' },
+      { l: 'Running Now', v: '2', c: 'var(--info)' },
+      { l: 'Failed', v: '1', c: 'var(--danger)' },
+      { l: 'Today\'s Runs', v: '47', c: 'var(--navy-600)' },
+    ].map(s => `<div class="card"><div class="metric-card" style="padding:14px 16px">
+      <div class="metric-value" style="font-size:22px;color:${s.c || 'var(--text-primary)'}">${s.v}</div>
+      <div class="metric-label">${s.l}</div></div></div>`).join('')}
+  </div>
+
+  <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px">
+    <div class="search-bar" style="flex:1;max-width:360px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg><input placeholder="Search pipelines..."></div>
+    <div class="tabs" style="border:none;gap:0">
+      ${['All', 'Active', 'Failed', 'Paused'].map((t,i) => `<div class="tab ${i===0?'active':''}" onclick="document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));this.classList.add('active')">${t}</div>`).join('')}
+    </div>
+  </div>
+
+  <div class="card" style="overflow:hidden">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Pipeline</th><th>Status</th><th>Source</th><th>Schedule</th><th>Last Run</th><th>Success Rate</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${pipelines.map(p => `
+            <tr>
+              <td><div class="font-medium" style="font-size:13px">${p.name}</div><div class="text-xs text-muted">${p.runs} total runs</div></td>
+              <td>${p.status === 'active' ? '<span class="badge badge-success">Active</span>' : p.status === 'failed' ? '<span class="badge badge-danger">Failed</span>' : p.status === 'running' ? '<span class="badge badge-info"><div class="status-dot info pulse" style="width:5px;height:5px"></div>Running</span>' : '<span class="badge badge-gray">Paused</span>'}</td>
+              <td class="text-secondary text-sm">${p.source}</td>
+              <td class="mono text-xs text-secondary">${p.schedule}</td>
+              <td class="text-sm text-secondary">${p.lastRun}</td>
+              <td>
+                <div class="flex items-center gap-8" style="gap:6px;min-width:100px">
+                  <div class="progress-bar" style="flex:1"><div class="progress-fill ${p.successRate >= 95 ? 'success' : p.successRate >= 80 ? 'warning' : 'danger'}" style="width:${p.successRate}%"></div></div>
+                  <span class="text-xs font-medium">${p.successRate}%</span>
+                </div>
+              </td>
+              <td>
+                <div class="flex gap-1">
+                  <button class="btn btn-secondary btn-sm" onclick="Toast.show('Triggering pipeline...','default')">Run</button>
+                  ${p.status === 'active' || p.status === 'running' ? '<button class="btn btn-ghost btn-sm" onclick="Toast.show(\'Pipeline paused\',\'warning\')">Pause</button>' : '<button class="btn btn-ghost btn-sm" onclick="Toast.show(\'Pipeline activated!\',\'success\')">Activate</button>'}
+                  <button class="btn btn-ghost btn-sm btn-icon" onclick="Toast.show('Opening pipeline detail...','default')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></button>
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// QUALITY
+// ==========================================
+function renderQuality() {
+  const rules = [
+    { name: 'Email Not Null Check', pipeline: 'Customer ETL', column: 'email', type: 'not_null', threshold: '99%', lastScore: 99.8, status: 'passing' },
+    { name: 'Revenue Positive', pipeline: 'Daily Sales Agg.', column: 'revenue', type: 'range', threshold: '>0', lastScore: 99.2, status: 'passing' },
+    { name: 'Order ID Unique', pipeline: 'Sales Pipeline', column: 'order_id', type: 'unique', threshold: '100%', lastScore: 100, status: 'passing' },
+    { name: 'Status Valid Values', pipeline: 'Customer ETL', column: 'status', type: 'regex', threshold: '^(active|inactive|pending)$', lastScore: 87, status: 'failing' },
+    { name: 'Data Freshness', pipeline: 'All', column: 'updated_at', type: 'freshness', threshold: '<24h', lastScore: 72, status: 'failing' },
+  ];
+
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Data Quality</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Data Quality</h1>
+    <div class="flex gap-2">
+      <button class="btn btn-secondary btn-sm" onclick="Toast.show('Running all quality checks...','default')">Run All Checks</button>
+      <button class="btn btn-primary btn-sm" onclick="Toast.show('Add quality rule','default')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Add Rule
+      </button>
+    </div>
+  </div>
+</div>
+
+<div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+  <!-- Scores -->
+  <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
+    ${[
+      { l: 'Overall Score', v: '91/100', c: '#0d9488', p: 91 },
+      { l: 'Rules Passing', v: '3/5', c: 'var(--success)', p: 60 },
+      { l: 'Violations (24h)', v: '847', c: 'var(--danger)', p: 8 },
+      { l: 'Contracts Active', v: '4', c: 'var(--navy-600)', p: 100 },
+    ].map(s => `<div class="card">
+      <div class="metric-card">
+        <div class="flex items-center justify-between" style="margin-bottom:8px">
+          <span class="text-sm text-muted">${s.l}</span>
+        </div>
+        <div class="metric-value" style="color:${s.c}">${s.v}</div>
+        <div class="progress-bar" style="margin-top:10px"><div class="progress-fill" style="width:${s.p}%;background:${s.c}"></div></div>
+      </div></div>`).join('')}
+  </div>
+
+  <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
+    <!-- Rules table -->
+    <div class="card" style="overflow:hidden">
+      <div class="card-header"><span class="font-semibold text-sm">Quality Rules</span><span class="badge badge-gray">5 rules</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Rule</th><th>Pipeline</th><th>Type</th><th>Score</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${rules.map(r => `
+              <tr>
+                <td><div class="font-medium text-sm">${r.name}</div><div class="text-xs text-muted">col: ${r.column}</div></td>
+                <td class="text-sm text-secondary">${r.pipeline}</td>
+                <td><span class="badge badge-navy" style="font-size:10px">${r.type}</span></td>
+                <td>
+                  <div class="flex items-center gap-6" style="gap:6px;min-width:80px">
+                    <div class="progress-bar" style="flex:1"><div class="progress-fill ${r.lastScore >= 95 ? 'success' : r.lastScore >= 80 ? 'warning' : 'danger'}" style="width:${r.lastScore}%"></div></div>
+                    <span class="text-xs">${r.lastScore}%</span>
+                  </div>
+                </td>
+                <td>${r.status === 'passing' ? '<span class="badge badge-success">Passing</span>' : '<span class="badge badge-danger">Failing</span>'}</td>
+                <td><button class="btn btn-ghost btn-sm" onclick="Toast.show('Running check...','default')">Run</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Quality donut -->
+    <div class="card">
+      <div class="card-header"><span class="font-semibold text-sm">Score Breakdown</span></div>
+      <div class="card-body"><div class="chart-container" style="height:200px"><canvas id="quality-donut"></canvas></div></div>
+    </div>
+  </div>
+
+  <!-- Trend -->
+  <div class="card">
+    <div class="card-header"><span class="font-semibold text-sm">Quality Trend (30 days)</span></div>
+    <div class="card-body"><div class="chart-container" style="height:160px"><canvas id="quality-trend-main"></canvas></div></div>
+  </div>
+</div>
+  `;
+}
+
+function initQualityCharts() {
+  const qd = document.getElementById('quality-donut');
+  if (qd) createDonut(qd, ['Null Checks', 'Uniqueness', 'Range', 'Regex', 'Freshness'], [99.8,100,99.2,87,72], ['#16a34a','#0d9488','#2351a1','#d97706','#dc2626']);
+  const qt = document.getElementById('quality-trend-main');
+  const days = Array.from({length:30},(_,i)=>`Day ${i+1}`);
+  const vals = Array.from({length:30},(_,i)=>80+Math.sin(i/3)*5+i*0.3+Math.random()*3);
+  if (qt) createLineChart(qt, days, [{label:'Quality Score',data:vals,borderColor:'#0d9488',backgroundColor:'#0d948818',fill:true,tension:0.4,borderWidth:2,pointRadius:0}]);
+}
+
+// ==========================================
+// INCIDENTS
+// ==========================================
+function renderIncidents() {
+  const incidents = [
+    { id: 'INC-001', title: 'Pipeline Daily Sales failed — schema drift', severity: 'high', status: 'open', pipeline: 'Daily Sales Aggregation', created: '2h ago', owner: 'Arjun M.' },
+    { id: 'INC-002', title: 'Legacy SQL Server connection timeout', severity: 'critical', status: 'open', pipeline: 'Legacy ETL', created: '4h ago', owner: 'Priya S.' },
+    { id: 'INC-003', title: 'Quality score dropped below threshold', severity: 'medium', status: 'investigating', pipeline: 'Customer ETL', created: '8h ago', owner: 'Rohan M.' },
+    { id: 'INC-004', title: 'Backfill job took 12x longer than expected', severity: 'low', status: 'resolved', pipeline: 'Revenue Report', created: '1d ago', owner: 'Priya S.' },
+    { id: 'INC-005', title: 'Redis cache miss spike — 4000 req/min', severity: 'medium', status: 'resolved', pipeline: 'Infrastructure', created: '2d ago', owner: 'Arjun M.' },
+  ];
+
+  const sev = { critical: 'badge-danger', high: 'badge-warning', medium: 'badge-info', low: 'badge-gray' };
+  const stat = { open: 'badge-danger', investigating: 'badge-warning', resolved: 'badge-success' };
+
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Incidents</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Incidents</h1>
+    <button class="btn btn-danger btn-sm" onclick="Toast.show('Creating incident...','default')">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>New Incident
+    </button>
+  </div>
+</div>
+
+<div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+  <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
+    ${[{l:'Open',v:'2',c:'var(--danger)'},{l:'Investigating',v:'1',c:'var(--warning)'},{l:'Resolved (7d)',v:'2',c:'var(--success)'},{l:'MTTR avg.',v:'47m',c:'var(--navy-600)'}].map(s=>`
+      <div class="card"><div class="metric-card" style="padding:14px 16px"><div class="metric-value" style="font-size:22px;color:${s.c}">${s.v}</div><div class="metric-label">${s.l}</div></div></div>
+    `).join('')}
+  </div>
+
+  <div class="card" style="overflow:hidden">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Incident</th><th>Severity</th><th>Status</th><th>Pipeline</th><th>Owner</th><th>Created</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${incidents.map(i => `
+            <tr style="cursor:pointer" onclick="showIncidentDetail('${i.id}')">
+              <td class="mono text-xs text-muted">${i.id}</td>
+              <td><div class="font-medium text-sm">${i.title}</div></td>
+              <td><span class="badge ${sev[i.severity]}">${i.severity}</span></td>
+              <td><span class="badge ${stat[i.status]}">${i.status}</span></td>
+              <td class="text-sm text-secondary">${i.pipeline}</td>
+              <td>
+                <div class="flex items-center gap-2"><div class="avatar avatar-sm">${i.owner.split(' ').map(n=>n[0]).join('')}</div><span class="text-sm">${i.owner}</span></div>
+              </td>
+              <td class="text-sm text-muted">${i.created}</td>
+              <td>
+                ${i.status !== 'resolved' ? `<button class="btn btn-success btn-sm" onclick="event.stopPropagation();Toast.show('Incident resolved!','success')">Resolve</button>` : '<span class="text-xs text-muted">Closed</span>'}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// ANALYTICS
+// ==========================================
+function renderAnalytics() {
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Analytics</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Analytics</h1>
+    <div class="flex gap-2">
+      <select class="input select btn-sm" style="width:auto;font-size:12px"><option>Last 30 days</option><option>Last 7 days</option><option>Last 90 days</option></select>
+      <button class="btn btn-secondary btn-sm">Export Report</button>
+    </div>
+  </div>
+</div>
+
+<div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+  <div class="stats-grid">
+    ${[
+      {l:'Total Pipeline Runs',v:'1,847',c:'+12% vs last month'},
+      {l:'Avg. Success Rate',v:'96.8%',c:'+1.2%'},
+      {l:'Data Volume Processed',v:'2.4 TB',c:'+340 GB'},
+      {l:'AXIOM Queries',v:'284',c:'12 sessions'},
+      {l:'LLM Cost',v:'$148.50',c:'8,420 credits used'},
+      {l:'API Calls',v:'48.2K',c:'+8% vs last month'},
+    ].map(s=>`<div class="card"><div class="metric-card" style="padding:14px 16px">
+      <div class="metric-value" style="font-size:20px">${s.v}</div>
+      <div class="metric-label">${s.l}</div>
+      <div class="metric-change up" style="margin-top:4px">${s.c}</div>
+    </div></div>`).join('')}
+  </div>
+
+  <div class="grid-2" style="gap:16px">
+    <div class="card">
+      <div class="card-header"><span class="font-semibold text-sm">Pipeline Runs (30 days)</span></div>
+      <div class="card-body" style="padding-top:8px"><div class="chart-container" style="height:200px"><canvas id="analytics-runs"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="font-semibold text-sm">Quality Score History</span></div>
+      <div class="card-body" style="padding-top:8px"><div class="chart-container" style="height:200px"><canvas id="analytics-quality"></canvas></div></div>
+    </div>
+  </div>
+
+  <div class="grid-2" style="gap:16px">
+    <div class="card">
+      <div class="card-header"><span class="font-semibold text-sm">LLM Token Usage</span></div>
+      <div class="card-body" style="padding-top:8px"><div class="chart-container" style="height:160px"><canvas id="analytics-tokens"></canvas></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span class="font-semibold text-sm">API Usage by Endpoint</span></div>
+      <div class="card-body"><div class="chart-container" style="height:160px"><canvas id="analytics-api"></canvas></div></div>
+    </div>
+  </div>
+</div>
+  `;
+}
+
+function initAnalyticsCharts() {
+  const days = Array.from({length:30},(_,i)=>`${i+1}`);
+  const runs = document.getElementById('analytics-runs');
+  if (runs) createBarChart(runs, days,
+    [{label:'Success',data:days.map(()=>Math.floor(30+Math.random()*25)),backgroundColor:'#16a34a22',borderColor:'#16a34a',borderWidth:1.5,borderRadius:2},
+     {label:'Failed',data:days.map(()=>Math.floor(Math.random()*4)),backgroundColor:'#dc262622',borderColor:'#dc2626',borderWidth:1.5,borderRadius:2}]
+  );
+  const qual = document.getElementById('analytics-quality');
+  if (qual) createLineChart(qual, days, [{label:'Score',data:days.map((_,i)=>80+i*0.35+Math.random()*4),borderColor:'#0d9488',backgroundColor:'#0d948818',fill:true,tension:0.4,borderWidth:2,pointRadius:0}]);
+  const tok = document.getElementById('analytics-tokens');
+  const weeks = ['Wk1','Wk2','Wk3','Wk4'];
+  if (tok) createBarChart(tok, weeks, [{label:'Input Tokens',data:[420,380,510,490],backgroundColor:'#2351a122',borderColor:'#2351a1',borderWidth:2,borderRadius:3},{label:'Output Tokens',data:[280,310,380,340],backgroundColor:'#7c3aed22',borderColor:'#7c3aed',borderWidth:2,borderRadius:3}]);
+  const api = document.getElementById('analytics-api');
+  if (api) createDonut(api, ['/chat','/pipelines','/sources','/quality','/transforms'],[40,22,18,12,8],['#2351a1','#0d9488','#7c3aed','#16a34a','#d97706']);
+}
+
+function initPipelineCharts() { /* covered in dashboard */ }
+
+// ==========================================
+// APPROVALS
+// ==========================================
+function renderApprovals() {
+  const approvals = [
+    { id: 'APR-001', title: 'Deploy pipeline v2 to production', by: 'Priya Sharma', role: 'Data Engineer', impact: 'High', type: 'Deployment', created: '15m ago', urgent: true },
+    { id: 'APR-002', title: 'Schema migration: add updated_at column', by: 'Dev Team Bot', role: 'Automated', impact: 'High', type: 'Schema Change', created: '1h ago', urgent: true },
+    { id: 'APR-003', title: 'Quality threshold change: email null < 2%', by: 'Rohan Mehta', role: 'Data Analyst', impact: 'Medium', type: 'Config Change', created: '2h ago', urgent: false },
+    { id: 'APR-004', title: 'Delete legacy source: Old MySQL v5', by: 'Arjun M.', role: 'Owner', impact: 'High', type: 'Destructive', created: '3h ago', urgent: false },
+  ];
+
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Approvals</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Approvals</h1>
+    <span class="badge badge-warning" style="font-size:12px;padding:4px 10px">${approvals.filter(a=>!a.resolved).length} pending</span>
+  </div>
+</div>
+
+<div style="padding:20px 24px">
+  <div class="tabs" style="margin-bottom:16px">
+    ${['Pending (3)', 'Approved', 'Rejected'].map((t,i) => `<div class="tab ${i===0?'active':''}" onclick="document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));this.classList.add('active')">${t}</div>`).join('')}
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px">
+    ${approvals.map(a => `
+      <div class="card" style="border-left:3px solid ${a.urgent ? 'var(--danger)' : 'var(--border)'}">
+        <div class="card-body">
+          <div class="flex items-start justify-between gap-12">
+            <div style="flex:1;min-width:0">
+              <div class="flex items-center gap-2" style="margin-bottom:6px">
+                <span class="mono text-xs text-muted">${a.id}</span>
+                ${a.urgent ? '<span class="badge badge-danger" style="font-size:10px">Urgent</span>' : ''}
+                <span class="badge badge-gray" style="font-size:10px">${a.type}</span>
+                <span class="badge ${a.impact === 'High' ? 'badge-warning' : 'badge-info'}" style="font-size:10px">${a.impact} Impact</span>
+              </div>
+              <div class="font-semibold" style="font-size:14px;margin-bottom:4px">${a.title}</div>
+              <div class="flex items-center gap-10" style="gap:8px">
+                <div class="avatar avatar-sm">${a.by.split(' ').map(n=>n[0]).join('')}</div>
+                <span class="text-sm text-secondary">${a.by} · ${a.role}</span>
+                <span class="text-xs text-muted">${a.created}</span>
+              </div>
+            </div>
+            <div class="flex gap-2 flex-shrink-0">
+              <button class="btn btn-danger btn-sm" onclick="Toast.show('Rejected with reason','danger')">Reject</button>
+              <button class="btn btn-success btn-sm" onclick="Toast.show('Approved! Action executing...','success')">Approve</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `).join('')}
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// GOVERNANCE
+// ==========================================
+function renderGovernance() {
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Governance</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Governance & Lineage</h1>
+    <div class="flex gap-2">
+      <button class="btn btn-secondary btn-sm" onclick="Toast.show('Exporting lineage graph...','default')">Export Graph</button>
+      <button class="btn btn-primary btn-sm">Add Contract</button>
+    </div>
+  </div>
+</div>
+<div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+  <div class="tabs" style="margin-bottom:4px">
+    ${['Lineage Graph', 'Data Contracts', 'Audit Trail', 'Compliance'].map((t,i) => `<div class="tab ${i===0?'active':''}" data-group="gov" data-tab="gov-${i}" onclick="document.querySelectorAll('.tab[data-group=gov]').forEach(x=>x.classList.remove('active'));this.classList.add('active');document.querySelectorAll('.tab-panel[data-group=gov]').forEach(p=>p.classList.add('hidden'));document.querySelector('.tab-panel[data-tab=gov-${i}]').classList.remove('hidden')">${t}</div>`).join('')}
+  </div>
+
+  <div class="tab-panel" data-group="gov" data-tab="gov-0">
+    <!-- Lineage graph visual -->
+    <div class="card" style="padding:24px">
+      <div style="text-align:center;color:var(--text-muted);font-size:13px;margin-bottom:16px">Data Lineage Graph — pipeline_runs table</div>
+      <div style="overflow-x:auto;padding:10px">
+        <svg width="100%" viewBox="0 0 780 280" style="min-width:600px;font-family:inherit">
+          <!-- Upstream nodes -->
+          <rect x="20" y="110" width="140" height="48" rx="8" fill="#f0f5fd" stroke="#2351a1" stroke-width="1.5"/>
+          <text x="90" y="130" text-anchor="middle" font-size="11" font-weight="600" fill="#0f1e3d">DataOps Postgres</text>
+          <text x="90" y="148" text-anchor="middle" font-size="10" fill="#8892a8">Source DB</text>
+
+          <rect x="20" y="20" width="140" height="48" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+          <text x="90" y="40" text-anchor="middle" font-size="11" font-weight="600" fill="#0f1e3d">raw_events</text>
+          <text x="90" y="58" text-anchor="middle" font-size="10" fill="#8892a8">Source Table</text>
+
+          <!-- Pipeline node -->
+          <rect x="260" y="90" width="160" height="68" rx="8" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2"/>
+          <text x="340" y="116" text-anchor="middle" font-size="12" font-weight="700" fill="#0f1e3d">Daily Sales Agg.</text>
+          <text x="340" y="132" text-anchor="middle" font-size="10" fill="#8892a8">Pipeline · Transform</text>
+          <text x="340" y="148" text-anchor="middle" font-size="10" fill="#dc2626">⚠ Schema drift</text>
+
+          <!-- Arrows in -->
+          <line x1="160" y1="134" x2="258" y2="134" stroke="#2351a1" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowG)"/>
+          <line x1="160" y1="44" x2="220" y2="100" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arrowG)"/>
+          <line x1="220" y1="100" x2="258" y2="120" stroke="#16a34a" stroke-width="1.5"/>
+
+          <!-- Downstream nodes -->
+          <rect x="500" y="20" width="150" height="48" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+          <text x="575" y="40" text-anchor="middle" font-size="11" font-weight="600" fill="#0f1e3d">morning_summary</text>
+          <text x="575" y="58" text-anchor="middle" font-size="10" fill="#8892a8">Report</text>
+
+          <rect x="500" y="90" width="150" height="48" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+          <text x="575" y="110" text-anchor="middle" font-size="11" font-weight="600" fill="#0f1e3d">ML Feature Store</text>
+          <text x="575" y="128" text-anchor="middle" font-size="10" fill="#8892a8">ML Pipeline</text>
+
+          <rect x="500" y="160" width="150" height="48" rx="8" fill="#ecfeff" stroke="#0891b2" stroke-width="1.5"/>
+          <text x="575" y="180" text-anchor="middle" font-size="11" font-weight="600" fill="#0f1e3d">Executive Dashboard</text>
+          <text x="575" y="198" text-anchor="middle" font-size="10" fill="#8892a8">Analytics</text>
+
+          <!-- Arrows out -->
+          <line x1="420" y1="114" x2="498" y2="60" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrowG)"/>
+          <line x1="420" y1="124" x2="498" y2="114" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrowG)"/>
+          <line x1="420" y1="134" x2="498" y2="178" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrowG)"/>
+
+          <defs><marker id="arrowG" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-panel hidden" data-group="gov" data-tab="gov-1">
+    <div class="card" style="overflow:hidden">
+      <div class="card-header"><span class="font-semibold text-sm">Data Contracts</span><button class="btn btn-primary btn-sm">New Contract</button></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Contract</th><th>Source</th><th>Status</th><th>Last Validated</th><th>Actions</th></tr></thead>
+        <tbody>
+          ${[
+            {name:'Sales Data Contract v1',src:'DataOps Postgres',status:'valid',date:'30m ago'},
+            {name:'Customer Schema v2',src:'MySQL Prod',status:'valid',date:'1h ago'},
+            {name:'Revenue Contract v1',src:'Snowflake',status:'pending',date:'Never'},
+            {name:'Events Contract',src:'MongoDB',status:'failed',date:'2d ago'},
+          ].map(c=>`<tr><td class="font-medium text-sm">${c.name}</td><td class="text-sm text-secondary">${c.src}</td>
+            <td>${c.status==='valid'?'<span class="badge badge-success">Valid</span>':c.status==='pending'?'<span class="badge badge-warning">Pending</span>':'<span class="badge badge-danger">Failed</span>'}</td>
+            <td class="text-sm text-muted">${c.date}</td>
+            <td><button class="btn btn-secondary btn-sm" onclick="Toast.show('Validating contract...','default')">Validate</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <div class="tab-panel hidden" data-group="gov" data-tab="gov-2">
+    <div class="card" style="overflow:hidden">
+      <div class="card-header"><span class="font-semibold text-sm">Audit Trail</span><button class="btn btn-secondary btn-sm">Export CSV</button></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Time</th><th>User</th><th>Action</th><th>Resource</th><th>IP</th></tr></thead>
+        <tbody>
+          ${[
+            {time:'06:02:14',user:'Arjun M.',action:'PIPELINE_TRIGGER',resource:'pipeline-daily-sales',ip:'192.168.1.42'},
+            {time:'05:59:01',user:'System',action:'QUALITY_CHECK_RUN',resource:'pipeline-customer-etl',ip:'internal'},
+            {time:'05:45:22',user:'Priya S.',action:'APPROVAL_REQUEST',resource:'deploy-v2',ip:'10.0.0.15'},
+            {time:'05:30:11',user:'Arjun M.',action:'SOURCE_PROFILE',resource:'dataops-postgres',ip:'192.168.1.42'},
+            {time:'04:00:03',user:'System',action:'PIPELINE_SUCCESS',resource:'pipeline-revenue',ip:'internal'},
+          ].map(e=>`<tr>
+            <td class="mono text-xs text-muted">${e.time}</td>
+            <td><div class="flex items-center gap-2"><div class="avatar avatar-sm">${e.user.split(' ').map(n=>n[0]).join('')}</div>${e.user}</div></td>
+            <td><span class="badge badge-navy" style="font-size:10px">${e.action}</span></td>
+            <td class="text-sm mono text-secondary">${e.resource}</td>
+            <td class="text-xs text-muted">${e.ip}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <div class="tab-panel hidden" data-group="gov" data-tab="gov-3">
+    <div class="grid-3" style="gap:12px">
+      ${[{l:'GDPR',status:'compliant'},{l:'SOC 2 Type II',status:'compliant'},{l:'HIPAA Ready',status:'in-progress'},{l:'ISO 27001',status:'planned'},{l:'PCI DSS',status:'n/a'},{l:'Data Residency',status:'compliant'}].map(c=>`
+        <div class="card"><div class="card-body">
+          <div class="flex items-center justify-between">
+            <span class="font-semibold">${c.l}</span>
+            ${c.status==='compliant'?'<span class="badge badge-success">Compliant</span>':c.status==='in-progress'?'<span class="badge badge-warning">In Progress</span>':'<span class="badge badge-gray">${c.status}</span>'}
+          </div>
+        </div></div>
+      `).join('')}
+    </div>
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// CI/CD
+// ==========================================
+function renderCICD() {
+  const deployments = [
+    { id: 'dep-001', commit: 'abc123', msg: 'Fix aggregation logic in daily sales', by: 'dev@company.com', status: 'success', env: 'production', time: '2h ago' },
+    { id: 'dep-002', commit: 'def456', msg: 'Add quality rule for email column', by: 'priya@company.com', status: 'pending', env: 'staging', time: '4h ago' },
+    { id: 'dep-003', commit: 'ghi789', msg: 'Update schema drift detection config', by: 'rohan@company.com', status: 'failed', env: 'production', time: '6h ago' },
+    { id: 'dep-004', commit: 'jkl012', msg: 'Add BigQuery data source connector', by: 'dev@company.com', status: 'success', env: 'production', time: '1d ago' },
+  ];
+
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>CI/CD</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">CI/CD Deployments</h1>
+    <div class="flex gap-2">
+      <button class="btn btn-secondary btn-sm">Configure Webhook</button>
+      <button class="btn btn-primary btn-sm">Deploy Manual</button>
+    </div>
+  </div>
+</div>
+
+<div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+  <div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">
+    ${[{l:'Deploy Frequency',v:'3/day',c:'var(--navy-600)'},{l:'Success Rate',v:'87.5%',c:'var(--success)'},{l:'Mean Deploy Time',v:'4.2m',c:'var(--teal)'},{l:'Rollbacks (30d)',v:'1',c:'var(--warning)'}].map(s=>`
+      <div class="card"><div class="metric-card" style="padding:14px 16px"><div class="metric-value" style="font-size:20px;color:${s.c}">${s.v}</div><div class="metric-label">${s.l}</div></div></div>
+    `).join('')}
+  </div>
+
+  <div class="card" style="overflow:hidden">
+    <div class="card-header"><span class="font-semibold text-sm">Deployments</span><span class="badge badge-warning">1 awaiting approval</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Commit</th><th>Message</th><th>Author</th><th>Environment</th><th>Status</th><th>Time</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${deployments.map(d=>`
+          <tr>
+            <td class="mono text-xs" style="color:var(--navy-600)">${d.commit}</td>
+            <td class="text-sm font-medium">${d.msg}</td>
+            <td class="text-sm text-secondary">${d.by}</td>
+            <td><span class="badge ${d.env==='production'?'badge-navy':'badge-gray'}">${d.env}</span></td>
+            <td>${d.status==='success'?'<span class="badge badge-success">Success</span>':d.status==='failed'?'<span class="badge badge-danger">Failed</span>':'<span class="badge badge-warning">Pending Approval</span>'}</td>
+            <td class="text-sm text-muted">${d.time}</td>
+            <td>
+              <div class="flex gap-1">
+                ${d.status==='pending'?`<button class="btn btn-success btn-sm" onclick="Toast.show('Deployment approved!','success')">Approve</button><button class="btn btn-danger btn-sm" onclick="Toast.show('Deployment rejected','danger')">Reject</button>`:''}
+                ${d.status==='success'?`<button class="btn btn-ghost btn-sm" onclick="Toast.show('Rolling back...','warning')">Rollback</button>`:''}
+                <button class="btn btn-ghost btn-sm btn-icon"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></button>
+              </div>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table></div>
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// TRANSFORMATIONS
+// ==========================================
+function renderTransformations() {
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Transformations</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Transformations</h1>
+    <div class="flex gap-2">
+      <button class="btn btn-secondary btn-sm">Templates</button>
+      <button class="btn btn-primary btn-sm">New Transformation</button>
+    </div>
+  </div>
+</div>
+<div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+  <div class="tabs">
+    ${['Natural Language', 'SQL Editor', 'Python Editor', 'History'].map((t,i)=>`<div class="tab ${i===0?'active':''}" data-group="trans" data-tab="trans-${i}" onclick="document.querySelectorAll('.tab[data-group=trans]').forEach(x=>x.classList.remove('active'));this.classList.add('active');document.querySelectorAll('.tab-panel[data-group=trans]').forEach(p=>p.classList.add('hidden'));document.querySelector('.tab-panel[data-tab=trans-${i}]').classList.remove('hidden')">${t}</div>`).join('')}
+  </div>
+
+  <div class="tab-panel" data-group="trans" data-tab="trans-0">
+    <div class="card"><div class="card-body">
+      <div class="input-group" style="margin-bottom:12px">
+        <label class="input-label">Describe your transformation in plain English</label>
+        <div style="display:flex;gap:8px">
+          <input class="input" id="nl-input" placeholder="e.g. Group pipeline runs by status and count them" style="flex:1">
+          <button class="btn btn-primary" onclick="runNLTransform()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a8 8 0 0 1 8 8v12l-4-4H4a8 8 0 0 1 0-16"/></svg>Generate
+          </button>
+        </div>
+      </div>
+      <div id="nl-result" class="code-block" style="min-height:80px;font-size:12px">
+        <span class="code-comment">-- Generated SQL will appear here</span>
+      </div>
+    </div></div>
+  </div>
+
+  <div class="tab-panel hidden" data-group="trans" data-tab="trans-1">
+    <div class="card"><div class="card-body">
+      <div class="flex items-center justify-between" style="margin-bottom:8px">
+        <select class="input select" style="width:auto;font-size:12px"><option>DataOps Postgres</option><option>MySQL Prod</option><option>Snowflake</option></select>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" onclick="Toast.show('Running EXPLAIN...','default')">Dry Run</button>
+          <button class="btn btn-primary btn-sm" onclick="Toast.show('Executing query...','default')">Execute</button>
+        </div>
+      </div>
+      <textarea class="code-block" style="width:100%;min-height:180px;resize:vertical;outline:none;border:none" spellcheck="false">SELECT status, COUNT(*) as count, MAX(created_at) as latest
+FROM pipeline_runs
+WHERE created_at >= NOW() - INTERVAL '7 days'
+GROUP BY status
+ORDER BY count DESC;</textarea>
+      <div style="margin-top:12px">
+        <div class="font-medium text-sm" style="margin-bottom:6px">Result Preview</div>
+        <div class="table-wrap card" style="overflow:hidden"><table>
+          <thead><tr><th>status</th><th>count</th><th>latest</th></tr></thead>
+          <tbody>
+            <tr><td class="badge badge-success" style="display:table-cell">success</td><td>1420</td><td>2026-06-27 05:45:22</td></tr>
+            <tr><td><span class="badge badge-danger">failed</span></td><td>80</td><td>2026-06-27 06:00:01</td></tr>
+            <tr><td><span class="badge badge-info">running</span></td><td>2</td><td>2026-06-27 06:30:00</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div></div>
+  </div>
+
+  <div class="tab-panel hidden" data-group="trans" data-tab="trans-2">
+    <div class="card"><div class="card-body">
+      <textarea class="code-block" style="width:100%;min-height:200px;resize:vertical;outline:none;border:none" spellcheck="false">import pandas as pd
+
+# Load source data
+df = source_df.copy()
+
+# Add duration in minutes
+df['duration_minutes'] = df['duration_seconds'] / 60
+
+# Filter failed runs
+result = df[df['status'] == 'failed'][['pipeline_id', 'duration_minutes', 'created_at']]
+result = result.sort_values('duration_minutes', ascending=False)
+
+print(f"Found {len(result)} failed runs")</textarea>
+      <div class="flex gap-2" style="margin-top:8px">
+        <button class="btn btn-secondary btn-sm" onclick="Toast.show('Preview ready','default')">Preview (100 rows)</button>
+        <button class="btn btn-primary btn-sm" onclick="Toast.show('Executing Python...','default')">Execute</button>
+        <button class="btn btn-ghost btn-sm" onclick="Toast.show('Explaining code...','default')">✨ Explain</button>
+      </div>
+    </div></div>
+  </div>
+
+  <div class="tab-panel hidden" data-group="trans" data-tab="trans-3">
+    <div class="card" style="overflow:hidden"><div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Rows</th><th>Created</th><th></th></tr></thead>
+      <tbody>
+        ${[
+          {n:'Failed runs by pipeline',t:'SQL',s:'success',r:3,d:'5m ago'},
+          {n:'Revenue by region',t:'SQL',s:'success',r:840,d:'1h ago'},
+          {n:'Customer cohort analysis',t:'Python',s:'success',r:1200,d:'3h ago'},
+          {n:'Null email filter',t:'SQL',s:'failed',r:0,d:'Yesterday'},
+        ].map(r=>`<tr><td class="font-medium text-sm">${r.n}</td><td><span class="badge badge-navy">${r.t}</span></td>
+          <td>${r.s==='success'?'<span class="badge badge-success">Success</span>':'<span class="badge badge-danger">Failed</span>'}</td>
+          <td class="text-sm text-secondary">${r.r}</td><td class="text-sm text-muted">${r.d}</td>
+          <td><button class="btn btn-ghost btn-sm">Replay</button></td></tr>`).join('')}
+      </tbody>
+    </table></div></div>
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// AUDIT
+// ==========================================
+function renderAudit() {
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Audit Logs</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Audit Logs</h1>
+    <div class="flex gap-2"><button class="btn btn-secondary btn-sm">Export CSV</button><button class="btn btn-secondary btn-sm">Filter</button></div>
+  </div>
+</div>
+<div style="padding:20px 24px">
+  <div class="card" style="overflow:hidden"><div class="table-wrap"><table>
+    <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Resource</th><th>Details</th><th>IP</th></tr></thead>
+    <tbody>
+      ${[
+        {ts:'2026-06-27 06:02:14',user:'Arjun M.',action:'PIPELINE_TRIGGER',resource:'pipe-daily-sales',detail:'Manual trigger',ip:'192.168.1.42'},
+        {ts:'2026-06-27 05:59:01',user:'System',action:'QUALITY_CHECK',resource:'rule-email-null',detail:'Score: 99.8%',ip:'internal'},
+        {ts:'2026-06-27 05:45:22',user:'Priya S.',action:'APPROVAL_CREATE',resource:'dep-001',detail:'Deploy pipeline v2',ip:'10.0.0.15'},
+        {ts:'2026-06-27 05:30:11',user:'Arjun M.',action:'SOURCE_UPDATE',resource:'dataops-postgres',detail:'Added table field',ip:'192.168.1.42'},
+        {ts:'2026-06-27 04:01:55',user:'System',action:'PIPELINE_SUCCESS',resource:'pipe-revenue',detail:'1500 rows, 45s',ip:'internal'},
+        {ts:'2026-06-27 00:00:01',user:'System',action:'BACKUP_COMPLETE',resource:'postgres-db',detail:'Full backup 2.4GB',ip:'internal'},
+      ].map(e=>`<tr>
+        <td class="mono text-xs text-muted">${e.ts}</td>
+        <td><div class="flex items-center gap-2"><div class="avatar avatar-sm">${e.user.split(' ').map(n=>n[0]).join('')}</div><span class="text-sm">${e.user}</span></div></td>
+        <td><span class="badge badge-navy" style="font-size:10px">${e.action}</span></td>
+        <td class="mono text-xs text-secondary">${e.resource}</td>
+        <td class="text-sm text-secondary">${e.detail}</td>
+        <td class="text-xs text-muted mono">${e.ip}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table></div></div>
+</div>
+  `;
+}
+
+// ==========================================
+// TEAM
+// ==========================================
+function renderTeam() {
+  const members = [
+    { name: 'Arjun Mehta', email: 'arjun@datacompany.com', role: 'Owner', joined: '3 months ago', status: 'active', initials: 'AM' },
+    { name: 'Priya Sharma', email: 'priya@datacompany.com', role: 'Admin', joined: '2 months ago', status: 'active', initials: 'PS' },
+    { name: 'Rohan Mehta', email: 'rohan@datacompany.com', role: 'Data Engineer', joined: '1 month ago', status: 'active', initials: 'RM' },
+    { name: 'Anisha Patel', email: 'anisha@datacompany.com', role: 'Data Analyst', joined: '2 weeks ago', status: 'active', initials: 'AP' },
+    { name: 'dev@datacompany.com', email: 'dev@datacompany.com', role: 'Viewer', joined: 'Invited', status: 'pending', initials: '?' },
+  ];
+
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Team</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Team</h1>
+    <button class="btn btn-primary btn-sm" onclick="Toast.show('Invite sent!','success')">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>Invite Member
+    </button>
+  </div>
+</div>
+<div style="padding:20px 24px">
+  <div class="card" style="overflow:hidden"><div class="table-wrap"><table>
+    <thead><tr><th>Member</th><th>Role</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead>
+    <tbody>
+      ${members.map(m=>`
+        <tr>
+          <td><div class="flex items-center gap-10" style="gap:10px">
+            <div class="avatar" style="background:var(--navy-${m.status==='pending'?'200':'600'})">${m.initials}</div>
+            <div><div class="font-medium text-sm">${m.name}</div><div class="text-xs text-muted">${m.email}</div></div>
+          </div></td>
+          <td><span class="badge ${m.role==='Owner'?'badge-navy':m.role==='Admin'?'badge-purple':'badge-gray'}">${m.role}</span></td>
+          <td>${m.status==='active'?'<span class="badge badge-success">Active</span>':'<span class="badge badge-warning">Pending</span>'}</td>
+          <td class="text-sm text-muted">${m.joined}</td>
+          <td>
+            <div class="flex gap-2">
+              <select class="input select" style="width:auto;font-size:11px;padding:3px 20px 3px 6px"><option>Change role</option><option>Admin</option><option>Data Engineer</option><option>Viewer</option></select>
+              <button class="btn btn-danger btn-sm" onclick="Toast.show('Member removed','danger')">Remove</button>
+            </div>
+          </td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table></div></div>
+</div>
+  `;
+}
+
+// ==========================================
+// BILLING
+// ==========================================
+function renderBilling() {
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Billing</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Billing & Plans</h1>
+    <button class="btn btn-primary btn-sm">Upgrade Plan</button>
+  </div>
+</div>
+<div style="padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+  <!-- Current Plan -->
+  <div class="card" style="border-color:var(--navy-300)">
+    <div class="card-body">
+      <div class="flex items-start justify-between">
+        <div>
+          <div class="flex items-center gap-2" style="margin-bottom:4px">
+            <span class="font-bold text-lg">Growth Plan</span>
+            <span class="badge badge-navy">Current</span>
+          </div>
+          <div class="text-secondary text-sm">$49/month · Billed monthly · Renews July 27, 2026</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:28px;font-weight:700;color:var(--navy-600)">$49</div>
+          <div class="text-sm text-muted">per month</div>
+        </div>
+      </div>
+      <div class="divider" style="margin:16px 0"></div>
+      <div class="grid-4" style="gap:12px">
+        ${[{l:'AI Credits',u:'1,580',t:'10,000',p:84},{l:'Pipeline Runs',u:'1,847',t:'5,000',p:37},{l:'Data Sources',u:'8',t:'15',p:53},{l:'Team Members',u:'4',t:'10',p:40}].map(s=>`
+          <div>
+            <div class="flex justify-between text-sm" style="margin-bottom:4px"><span class="text-secondary">${s.l}</span><span class="font-medium">${s.u} / ${s.t}</span></div>
+            <div class="progress-bar"><div class="progress-fill ${s.p>80?'danger':s.p>60?'warning':'success'}" style="width:${s.p}%"></div></div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  </div>
+
+  <!-- Invoice history -->
+  <div class="card" style="overflow:hidden">
+    <div class="card-header"><span class="font-semibold text-sm">Invoice History</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        ${[
+          {d:'Jun 1, 2026',desc:'Growth Plan — June 2026',amt:'$49.00',s:'paid'},
+          {d:'May 1, 2026',desc:'Growth Plan — May 2026',amt:'$49.00',s:'paid'},
+          {d:'Apr 1, 2026',desc:'Growth Plan — April 2026',amt:'$49.00',s:'paid'},
+        ].map(i=>`<tr>
+          <td class="text-sm text-secondary">${i.d}</td>
+          <td class="text-sm font-medium">${i.desc}</td>
+          <td class="text-sm font-semibold">${i.amt}</td>
+          <td><span class="badge badge-success">${i.s}</span></td>
+          <td><button class="btn btn-ghost btn-sm" onclick="Toast.show('Downloading invoice...','default')">Download PDF</button></td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// SETTINGS
+// ==========================================
+function renderSettings() {
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Settings</span></div>
+  <h1 class="page-title">Settings</h1>
+</div>
+<div style="padding:20px 24px;display:grid;grid-template-columns:200px 1fr;gap:20px">
+  <div>
+    ${['Workspace','API Keys','Integrations','Security','Notifications','AI Models','Organization','Danger Zone'].map((s,i)=>`
+      <div class="sidebar-item ${i===0?'active':''}" style="border-radius:var(--radius-sm);margin-bottom:2px;color:var(--text-secondary);padding:7px 10px;font-size:13px;cursor:pointer" onclick="document.querySelectorAll('.settings-nav-item').forEach(x=>x.classList.remove('active'));this.classList.add('active')" >${s}</div>
+    `).join('')}
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div class="card"><div class="card-header"><span class="font-semibold text-sm">Workspace Settings</span></div>
+      <div class="card-body">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="input-group"><label class="input-label">Workspace Name</label><input class="input" value="DataCompany Production"></div>
+          <div class="input-group"><label class="input-label">Timezone</label><select class="input select"><option>UTC</option><option>Asia/Kolkata</option><option>America/New_York</option></select></div>
+        </div>
+        <div class="input-group" style="margin-top:12px"><label class="input-label">Description</label><textarea class="input" rows="2">Primary production workspace for DataCompany Ltd's DataOps platform</textarea></div>
+        <div style="margin-top:14px"><button class="btn btn-primary" onclick="Toast.show('Settings saved!','success')">Save Changes</button></div>
+      </div>
+    </div>
+
+    <div class="card"><div class="card-header"><span class="font-semibold text-sm">API Keys</span><button class="btn btn-primary btn-sm" onclick="Toast.show('API key created!','success')">Create Key</button></div>
+      <div class="card-body">
+        ${[{name:'Production Key',key:'wun_prod_xK9mP...4A2j',created:'2 months ago',last:'2m ago'},{name:'CI/CD Integration',key:'wun_ci_mN8kQ...7P3r',created:'1 month ago',last:'1h ago'}].map(k=>`
+          <div class="card" style="padding:12px 14px;margin-bottom:8px">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="font-medium text-sm">${k.name}</div>
+                <div class="mono text-xs text-muted" style="margin-top:2px">${k.key}</div>
+                <div class="text-xs text-muted" style="margin-top:2px">Created ${k.created} · Last used ${k.last}</div>
+              </div>
+              <div class="flex gap-2">
+                <button class="btn btn-ghost btn-sm" onclick="copyToClipboard('${k.key}')">Copy</button>
+                <button class="btn btn-danger btn-sm" onclick="Toast.show('Key revoked','danger')">Revoke</button>
+              </div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="card"><div class="card-header"><span class="font-semibold text-sm">AI Model Configuration</span></div>
+      <div class="card-body">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div class="input-group"><label class="input-label">Primary LLM</label><select class="input select"><option selected>Groq Llama 3.1-8b</option><option>Claude Sonnet</option><option>GPT-4o</option><option>Gemini Pro</option></select></div>
+          <div class="input-group"><label class="input-label">Fallback LLM</label><select class="input select"><option selected>Llama 3.1-8b</option><option>Claude Haiku</option></select></div>
+        </div>
+        <div style="margin-top:14px"><button class="btn btn-primary" onclick="Toast.show('Model settings saved!','success')">Save</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// AUTOMATIONS
+// ==========================================
+function renderAutomations() {
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Automations</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Automations</h1>
+    <button class="btn btn-primary btn-sm">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>New Automation
+    </button>
+  </div>
+</div>
+<div style="padding:20px 24px">
+  <div class="grid-2" style="gap:12px">
+    ${[
+      {name:'Alert on pipeline failure',trigger:'Pipeline Failed',action:'Notify Slack #data-alerts',status:'active',runs:14},
+      {name:'Auto-resolve low-sev incidents',trigger:'Incident: low severity',action:'Resolve after 4h if no updates',status:'active',runs:3},
+      {name:'Quality check on deploy',trigger:'Deployment approved',action:'Run quality checks → block if <80%',status:'active',runs:8},
+      {name:'Weekly health report',trigger:'Every Monday 9AM',action:'Send digest to team email',status:'active',runs:4},
+      {name:'Backfill on schema fix',trigger:'Schema drift resolved',action:'Trigger backfill for affected pipelines',status:'paused',runs:1},
+    ].map(a=>`
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-start justify-between" style="margin-bottom:10px">
+            <div class="font-semibold" style="font-size:13px">${a.name}</div>
+            ${a.status==='active'?'<span class="badge badge-success">Active</span>':'<span class="badge badge-gray">Paused</span>'}
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+            <div style="background:var(--navy-50);border:1px solid var(--navy-100);border-radius:var(--radius-sm);padding:8px">
+              <div class="text-xs font-medium" style="color:var(--navy-600);margin-bottom:2px">⚡ TRIGGER</div>
+              <div class="text-xs text-secondary">${a.trigger}</div>
+            </div>
+            <div style="background:var(--success-bg);border:1px solid var(--success-border);border-radius:var(--radius-sm);padding:8px">
+              <div class="text-xs font-medium" style="color:var(--success);margin-bottom:2px">→ ACTION</div>
+              <div class="text-xs text-secondary">${a.action}</div>
+            </div>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-muted">${a.runs} runs</span>
+            <div class="flex gap-2">
+              <button class="btn btn-ghost btn-sm" onclick="Toast.show('Opening automation editor...','default')">Edit</button>
+              <button class="btn btn-${a.status==='active'?'secondary':'success'} btn-sm" onclick="Toast.show('Automation ${a.status==='active'?'paused':'activated'}!','${a.status==='active'?'warning':'success'}')">${a.status==='active'?'Pause':'Activate'}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `).join('')}
+  </div>
+</div>
+  `;
+}
+
+// ==========================================
+// DATA CATALOG
+// ==========================================
+function renderCatalog() {
+  return `
+<div class="page-header">
+  <div class="breadcrumb"><a onclick="navigateTo('dashboard')">Dashboard</a><span class="breadcrumb-sep">/</span><span>Data Catalog</span></div>
+  <div class="flex items-center justify-between">
+    <h1 class="page-title">Data Catalog</h1>
+    <button class="btn btn-secondary btn-sm">Sync Metadata</button>
+  </div>
+</div>
+<div style="padding:20px 24px">
+  <div class="search-bar" style="margin-bottom:16px;max-width:500px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg><input placeholder="Search tables, columns, descriptions..."></div>
+  <div class="card" style="overflow:hidden"><div class="table-wrap"><table>
+    <thead><tr><th>Table</th><th>Source</th><th>Columns</th><th>Rows</th><th>Owner</th><th>Tags</th><th>Last Profiled</th></tr></thead>
+    <tbody>
+      ${[
+        {t:'pipeline_runs',src:'DataOps Postgres',cols:12,rows:1500,owner:'Arjun M.',tags:['operational','audit'],prof:'5m ago'},
+        {t:'customers',src:'MySQL Prod',cols:28,rows:48200,owner:'Priya S.',tags:['pii','crm'],prof:'1h ago'},
+        {t:'orders',src:'MySQL Prod',cols:18,rows:124000,owner:'Priya S.',tags:['revenue','transactional'],prof:'1h ago'},
+        {t:'events',src:'MongoDB Atlas',cols:8,rows:1200000,owner:'Rohan M.',tags:['clickstream','raw'],prof:'20m ago'},
+        {t:'products',src:'MySQL Prod',cols:15,rows:3200,owner:'Anisha P.',tags:['catalog'],prof:'3h ago'},
+      ].map(r=>`<tr>
+        <td class="font-medium mono text-sm">${r.t}</td>
+        <td class="text-sm text-secondary">${r.src}</td>
+        <td class="text-sm text-secondary">${r.cols}</td>
+        <td class="text-sm text-secondary">${formatNumber(r.rows)}</td>
+        <td><div class="flex items-center gap-2"><div class="avatar avatar-sm">${r.owner.split(' ').map(n=>n[0]).join('')}</div>${r.owner}</div></td>
+        <td>${r.tags.map(t=>`<span class="badge badge-gray" style="font-size:10px;margin-right:3px">${t}</span>`).join('')}</td>
+        <td class="text-xs text-muted">${r.prof}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table></div></div>
+</div>
+  `;
+}
+
+// ==========================================
+// HELPER ACTIONS
+// ==========================================
+function showAddSourceModal() {
+  Modal.open(`
+    <div class="modal-header"><h3 class="font-semibold">Connect Data Source</h3><button class="btn btn-ghost btn-icon btn-sm" onclick="Modal.close()">×</button></div>
+    <div class="modal-body">
+      <div class="grid-3" style="gap:10px;margin-bottom:16px">
+        ${['PostgreSQL','MySQL','SQL Server','Oracle','Snowflake','BigQuery','MongoDB','Redshift','CSV Upload'].map(t=>`
+          <div class="card card-hover" style="padding:12px;text-align:center;cursor:pointer" onclick="Toast.show('Connecting to ${t}...','default');Modal.close()">
+            <div style="font-size:12px;font-weight:600">${t}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+  `, 'md');
+}
+
+function showSourceDetail(name) {
+  Toast.show(`Opening ${name}...`, 'default');
+}
+
+function showIncidentDetail(id) {
+  Toast.show(`Opening incident ${id}...`, 'default');
+}
+
+function sendAxiomMessage() {
+  const input = document.getElementById('chat-input');
+  if (!input || !input.value.trim()) return;
+  const msg = input.value;
+  input.value = '';
+  const msgs = document.getElementById('chat-messages');
+  if (msgs) {
+    const bubble = document.createElement('div');
+    bubble.style.cssText = 'display:flex;justify-content:flex-end;animation:slide-up 0.2s ease';
+    bubble.innerHTML = `<div style="background:var(--navy-600);color:white;border-radius:var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);padding:10px 14px;max-width:70%;font-size:13px">${msg}</div>`;
+    msgs.appendChild(bubble);
+    msgs.scrollTop = msgs.scrollHeight;
+    // Simulate typing
+    setTimeout(() => {
+      const resp = document.createElement('div');
+      resp.style.cssText = 'display:flex;gap:10px;align-items:flex-start;animation:slide-up 0.2s ease';
+      resp.innerHTML = `<div style="width:26px;height:26px;background:var(--navy-600);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 2a8 8 0 0 1 8 8v12l-4-4H4a8 8 0 0 1 0-16"/></svg></div>
+      <div class="card" style="max-width:75%;padding:12px 14px;font-size:13px;line-height:1.6">Analyzing your request... I'll run the appropriate query on your connected sources and return the results. <span style="color:var(--text-muted);font-size:11px">(This is a prototype — connect to the API for live responses)</span></div>`;
+      msgs.appendChild(resp);
+      msgs.scrollTop = msgs.scrollHeight;
+    }, 800);
+  }
+}
+
+function runNLTransform() {
+  const input = document.getElementById('nl-input');
+  const result = document.getElementById('nl-result');
+  if (!input || !result) return;
+  result.innerHTML = '<span style="color:#6b7280">⏳ Generating SQL with AXIOM...</span>';
+  setTimeout(() => {
+    result.innerHTML = `<span class="code-comment">-- Generated by AXIOM from: "${input.value || 'Group pipeline runs by status'}"</span>\n<span class="code-keyword">SELECT</span> <span class="code-string">status</span>, <span class="code-keyword">COUNT</span>(*) <span class="code-keyword">AS</span> count\n<span class="code-keyword">FROM</span> pipeline_runs\n<span class="code-keyword">GROUP BY</span> status\n<span class="code-keyword">ORDER BY</span> count <span class="code-keyword">DESC</span>;`;
+    Toast.show('SQL generated by AXIOM!', 'success');
+  }, 900);
+}
+
+</script>
+
+<script>
+
+window.addEventListener('load', function() {
+  Toast.init();
+  var fab = document.getElementById('axiom-fab');
+  if (fab) fab.addEventListener('click', function() { navigateTo('axiom'); });
+  navigateTo('dashboard');
+  setTimeout(function() {
+    Toast.show('Welcome back, Arjun — AXIOM is monitoring 13 pipelines.', 'success', 4500);
+  }, 900);
+});
+
+</script>
+
+</body>
+</html>

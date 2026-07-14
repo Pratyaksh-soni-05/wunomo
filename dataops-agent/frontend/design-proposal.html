@@ -1,0 +1,241 @@
+<title>Wunomo AI — Palette &amp; Type Proposal</title>
+<style>
+  :root {
+    --page-bg: #f4f4f2;
+    --page-ink: #1a1a1a;
+    --page-muted: #6b6b6b;
+    --page-card: #ffffff;
+    --page-border: #e2e0d8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --page-bg: #121212; --page-ink: #ece9e0; --page-muted: #9a9a92; --page-card: #1a1a1a; --page-border: #2c2b26; }
+  }
+  :root[data-theme="dark"] { --page-bg: #121212; --page-ink: #ece9e0; --page-muted: #9a9a92; --page-card: #1a1a1a; --page-border: #2c2b26; }
+  :root[data-theme="light"] { --page-bg: #f4f4f2; --page-ink: #1a1a1a; --page-muted: #6b6b6b; --page-card: #ffffff; --page-border: #e2e0d8; }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page-bg); color: var(--page-ink);
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    padding: 48px 24px 96px; line-height: 1.5;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .doc-header { margin-bottom: 56px; }
+  .doc-kicker { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--page-muted); margin-bottom: 10px; }
+  .doc-title { font-size: 32px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 10px; text-wrap: balance; }
+  .doc-sub { font-size: 15px; color: var(--page-muted); max-width: 640px; }
+
+  section { margin-bottom: 64px; }
+  .sec-label { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--page-muted); margin-bottom: 6px; }
+  .sec-title { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+  .sec-note { font-size: 13.5px; color: var(--page-muted); max-width: 720px; margin-bottom: 28px; }
+
+  /* ===== PALETTE ===== */
+  .core-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 32px; }
+  .core-swatch { border-radius: 12px; padding: 20px; min-height: 100px; display: flex; flex-direction: column; justify-content: flex-end; border: 1px solid rgba(0,0,0,0.06); }
+  .core-name { font-size: 13px; font-weight: 700; }
+  .core-hex { font-size: 11px; font-family: ui-monospace, "SF Mono", Consolas, monospace; opacity: 0.75; margin-top: 2px; }
+
+  .theme-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 860px) { .theme-panels { grid-template-columns: 1fr; } }
+  .theme-panel { border-radius: 14px; overflow: hidden; border: 1px solid var(--page-border); }
+  .theme-panel-head { padding: 12px 18px; font-size: 12px; font-weight: 700; letter-spacing: 0.03em; }
+  .theme-panel-body { padding: 20px; }
+
+  .scale-row { display: flex; border-radius: 8px; overflow: hidden; margin-bottom: 10px; height: 40px; }
+  .scale-cell { flex: 1; position: relative; }
+  .scale-cell:hover .scale-tip { opacity: 1; }
+  .scale-tip {
+    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: #1a1a1a; color: #fff; font-size: 10px; font-family: ui-monospace, monospace;
+    padding: 3px 6px; border-radius: 4px; white-space: nowrap; opacity: 0; transition: opacity 0.12s; pointer-events: none;
+  }
+  .scale-title { font-size: 11px; font-weight: 600; margin: 18px 0 6px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.65; }
+
+  .semantic-row { display: flex; gap: 8px; margin-top: 4px; }
+  .semantic-chip { flex: 1; border-radius: 8px; padding: 10px 12px; font-size: 11px; font-weight: 600; border: 1px solid; }
+
+  /* ===== TYPE PAIRINGS ===== */
+  .pairing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 980px) { .pairing-grid { grid-template-columns: 1fr; } }
+  .pairing-card { border: 1px solid var(--page-border); background: var(--page-card); border-radius: 14px; padding: 22px; display: flex; flex-direction: column; }
+  .pairing-name { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #5B88B2; margin-bottom: 4px; }
+  .pairing-desc { font-size: 12px; color: var(--page-muted); margin-bottom: 20px; min-height: 48px; }
+  .pairing-sample-title { font-size: 22px; font-weight: 700; margin-bottom: 10px; line-height: 1.2; }
+  .pairing-sample-body { font-size: 13.5px; line-height: 1.6; color: var(--page-ink); opacity: 0.88; margin-bottom: 16px; }
+  .pairing-sample-ui { display: flex; align-items: center; gap: 8px; }
+  .pairing-btn { display: inline-flex; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; background: #122C4F; color: #FBF9E4; }
+  .pairing-label { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--page-muted); border: 1px solid var(--page-border); padding: 4px 8px; border-radius: 5px; }
+  .pairing-fonts { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--page-border); font-size: 10.5px; color: var(--page-muted); font-family: ui-monospace, monospace; }
+  .pairing-fonts b { color: var(--page-ink); font-family: inherit; }
+  .rec-badge { position: absolute; top: 14px; right: 14px; background: #16a34a; color: white; font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+  .pairing-card.recommended { position: relative; border-color: #16a34a; box-shadow: 0 0 0 1px #16a34a; }
+
+  .disclosure { background: rgba(217,119,6,0.08); border: 1px solid rgba(217,119,6,0.25); border-radius: 10px; padding: 14px 18px; font-size: 12.5px; color: var(--page-ink); margin-top: 24px; }
+  .disclosure b { color: #d97706; }
+
+  /* Font stacks approximating each proposal — see disclosure note */
+  .f-inter { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .f-generalsans { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; letter-spacing: -0.01em; }
+  .f-spacegrotesk { font-family: "Century Gothic", "Trebuchet MS", Futura, sans-serif; letter-spacing: -0.005em; }
+  .f-fraunces { font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif; }
+  .f-newsreader { font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; }
+</style>
+
+<div class="wrap">
+
+  <div class="doc-header">
+    <div class="doc-kicker">Wunomo AI · Frontend Phase 0</div>
+    <h1 class="doc-title">Palette &amp; Typography Proposal</h1>
+    <p class="doc-sub">Derived token set for the Midnight / Pearl Perfect / Noir / Ocean palette, plus three type-pairing options for the Anthropic-adjacent editorial-minimalist brief. For sign-off before any frontend code is written.</p>
+  </div>
+
+  <section>
+    <div class="sec-label">01 — Core colors (as given)</div>
+    <div class="sec-title">The four anchors</div>
+    <div class="core-row">
+      <div class="core-swatch" style="background:#122C4F"><div class="core-name" style="color:#FBF9E4">Midnight</div><div class="core-hex" style="color:#FBF9E4">#122C4F</div></div>
+      <div class="core-swatch" style="background:#FBF9E4;border-color:#e2e0c8"><div class="core-name" style="color:#122C4F">Pearl Perfect</div><div class="core-hex" style="color:#122C4F">#FBF9E4</div></div>
+      <div class="core-swatch" style="background:#000000"><div class="core-name" style="color:#FBF9E4">Noir</div><div class="core-hex" style="color:#FBF9E4">#000000</div></div>
+      <div class="core-swatch" style="background:#5B88B2"><div class="core-name" style="color:#FBF9E4">Ocean</div><div class="core-hex" style="color:#FBF9E4">#5B88B2</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">02 — Derived scales</div>
+    <div class="sec-title">Light &amp; dark token sets</div>
+    <p class="sec-note">Text/ink stays cool (derived from Midnight's blue hue) in both themes; surfaces stay warm (derived from Pearl Perfect's cream undertone) in light mode. Ocean is the one accent used for links, active states, and focus rings in both themes — lighter tints in dark mode for contrast against Noir. Semantic colors (success/warning/danger) keep their exact hues; only the background/border tints change per theme.</p>
+
+    <div class="theme-panels">
+      <!-- LIGHT -->
+      <div class="theme-panel">
+        <div class="theme-panel-head" style="background:#FBF9E4;color:#122C4F">☀ Light theme — canvas: Pearl Perfect</div>
+        <div class="theme-panel-body" style="background:#FFFEF5">
+          <div class="scale-title" style="color:#122C4F">Midnight (sidebar, primary actions, headings)</div>
+          <div class="scale-row">
+            <div class="scale-cell" style="background:#0A1B30"><span class="scale-tip">900 · #0A1B30</span></div>
+            <div class="scale-cell" style="background:#0F2440"><span class="scale-tip">800 · #0F2440</span></div>
+            <div class="scale-cell" style="background:#122C4F"><span class="scale-tip">700 · #122C4F (base)</span></div>
+            <div class="scale-cell" style="background:#1B3A63"><span class="scale-tip">600 · #1B3A63</span></div>
+            <div class="scale-cell" style="background:#26507F"><span class="scale-tip">500 · #26507F</span></div>
+            <div class="scale-cell" style="background:#3D6B9E"><span class="scale-tip">400 · #3D6B9E</span></div>
+            <div class="scale-cell" style="background:#6A8FB8"><span class="scale-tip">300 · #6A8FB8</span></div>
+            <div class="scale-cell" style="background:#A3BFDA"><span class="scale-tip">200 · #A3BFDA</span></div>
+            <div class="scale-cell" style="background:#D6E3EF"><span class="scale-tip">100 · #D6E3EF</span></div>
+            <div class="scale-cell" style="background:#EFF4F9"><span class="scale-tip">50 · #EFF4F9</span></div>
+          </div>
+          <div class="scale-title" style="color:#122C4F">Ocean (links, active states, focus rings)</div>
+          <div class="scale-row">
+            <div class="scale-cell" style="background:#35526E"><span class="scale-tip">700 · #35526E</span></div>
+            <div class="scale-cell" style="background:#416487"><span class="scale-tip">650 · #416487</span></div>
+            <div class="scale-cell" style="background:#4C76A0"><span class="scale-tip">600 · #4C76A0</span></div>
+            <div class="scale-cell" style="background:#5B88B2"><span class="scale-tip">500 · #5B88B2 (base)</span></div>
+            <div class="scale-cell" style="background:#7EA0C2"><span class="scale-tip">400 · #7EA0C2</span></div>
+            <div class="scale-cell" style="background:#9FB9D3"><span class="scale-tip">300 · #9FB9D3</span></div>
+            <div class="scale-cell" style="background:#C3D6E5"><span class="scale-tip">200 · #C3D6E5</span></div>
+            <div class="scale-cell" style="background:#E1EBF3"><span class="scale-tip">100 · #E1EBF3</span></div>
+          </div>
+          <div class="scale-title" style="color:#122C4F">Surfaces &amp; borders (warm, from Pearl Perfect)</div>
+          <div class="scale-row">
+            <div class="scale-cell" style="background:#FFFEF5;border:1px solid #ddd"><span class="scale-tip">card · #FFFEF5</span></div>
+            <div class="scale-cell" style="background:#FBF9E4"><span class="scale-tip">page bg · #FBF9E4</span></div>
+            <div class="scale-cell" style="background:#F3F0DC"><span class="scale-tip">hover · #F3F0DC</span></div>
+            <div class="scale-cell" style="background:#E6E1C8"><span class="scale-tip">border · #E6E1C8</span></div>
+            <div class="scale-cell" style="background:#D3CBA8"><span class="scale-tip">border-strong · #D3CBA8</span></div>
+          </div>
+          <div class="scale-title" style="color:#122C4F">Text / ink (cool, from Midnight)</div>
+          <div class="scale-row">
+            <div class="scale-cell" style="background:#16233A"><span class="scale-tip">primary · #16233A</span></div>
+            <div class="scale-cell" style="background:#3A4A63"><span class="scale-tip">secondary · #3A4A63</span></div>
+            <div class="scale-cell" style="background:#6B7C94"><span class="scale-tip">muted · #6B7C94</span></div>
+            <div class="scale-cell" style="background:#A7B4C4"><span class="scale-tip">disabled · #A7B4C4</span></div>
+          </div>
+          <div class="scale-title" style="color:#122C4F">Semantic (unchanged hues, new tints)</div>
+          <div class="semantic-row">
+            <div class="semantic-chip" style="background:#EAF7EE;border-color:#BFE5C9;color:#16a34a">Success #16a34a</div>
+            <div class="semantic-chip" style="background:#FBF1E1;border-color:#F0D9AE;color:#d97706">Warning #d97706</div>
+            <div class="semantic-chip" style="background:#FBEAEA;border-color:#F3C6C6;color:#dc2626">Danger #dc2626</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DARK -->
+      <div class="theme-panel">
+        <div class="theme-panel-head" style="background:#000000;color:#FBF9E4">● Dark theme — canvas: Noir</div>
+        <div class="theme-panel-body" style="background:#0A0A0A">
+          <div class="scale-title" style="color:#F5F3E6">Surfaces (Noir page, Midnight-derived panels)</div>
+          <div class="scale-row">
+            <div class="scale-cell" style="background:#000000;border:1px solid #222"><span class="scale-tip">page bg · #000000</span></div>
+            <div class="scale-cell" style="background:#0F2440"><span class="scale-tip">card · #0F2440</span></div>
+            <div class="scale-cell" style="background:#122C4F"><span class="scale-tip">sidebar (same as light) · #122C4F</span></div>
+            <div class="scale-cell" style="background:#1B3A63"><span class="scale-tip">hover · #1B3A63</span></div>
+            <div class="scale-cell" style="background:#26507F"><span class="scale-tip">border-strong · #26507F</span></div>
+          </div>
+          <div class="scale-title" style="color:#F5F3E6">Ocean (lighter tints for contrast on Noir)</div>
+          <div class="scale-row">
+            <div class="scale-cell" style="background:#7EA0C2"><span class="scale-tip">400 · #7EA0C2</span></div>
+            <div class="scale-cell" style="background:#9FB9D3"><span class="scale-tip">300 · #9FB9D3 (links)</span></div>
+            <div class="scale-cell" style="background:#C3D6E5"><span class="scale-tip">200 · #C3D6E5</span></div>
+            <div class="scale-cell" style="background:#5B88B2"><span class="scale-tip">500 base · #5B88B2</span></div>
+          </div>
+          <div class="scale-title" style="color:#F5F3E6">Text / ink (softened Pearl Perfect)</div>
+          <div class="scale-row">
+            <div class="scale-cell" style="background:#F5F3E6"><span class="scale-tip">primary · #F5F3E6</span></div>
+            <div class="scale-cell" style="background:#B8C2D1"><span class="scale-tip">secondary · #B8C2D1</span></div>
+            <div class="scale-cell" style="background:#7A8CA3"><span class="scale-tip">muted · #7A8CA3</span></div>
+            <div class="scale-cell" style="background:#4A5568"><span class="scale-tip">disabled · #4A5568</span></div>
+          </div>
+          <div class="scale-title" style="color:#F5F3E6">Semantic (unchanged hues, dark tints)</div>
+          <div class="semantic-row">
+            <div class="semantic-chip" style="background:rgba(22,163,74,0.15);border-color:rgba(22,163,74,0.4);color:#4ade80">Success #16a34a</div>
+            <div class="semantic-chip" style="background:rgba(217,119,6,0.15);border-color:rgba(217,119,6,0.4);color:#fbbf24">Warning #d97706</div>
+            <div class="semantic-chip" style="background:rgba(220,38,38,0.15);border-color:rgba(220,38,38,0.4);color:#f87171">Danger #dc2626</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">03 — Typography</div>
+    <div class="sec-title">Three pairing options</div>
+    <p class="sec-note">All three are free (Google Fonts or Fontshare, no licensing cost). Samples use real Wunomo product copy, not lorem ipsum, so you're judging the pairing on its actual job.</p>
+
+    <div class="pairing-grid">
+
+      <div class="pairing-card recommended">
+        <div class="rec-badge">Recommended</div>
+        <div class="pairing-name">A · General Sans + Fraunces</div>
+        <div class="pairing-desc">The closest match to Styrene/Tiempos' character: a warm, humanist grotesque for UI paired with a soft, editorial serif with real personality for headlines — not just another neutral sans.</div>
+        <div class="pairing-sample-title f-fraunces">Schema drift detected in DataOps&nbsp;Postgres</div>
+        <div class="pairing-sample-body f-generalsans">AXIOM found a new column, <code>updated_at</code>, added to the source table at 06:00. The Daily Sales Aggregation pipeline failed because its query doesn't account for it yet.</div>
+        <div class="pairing-sample-ui f-generalsans"><span class="pairing-btn">Investigate</span><span class="pairing-label">SEV 2 · Open</span></div>
+        <div class="pairing-fonts">Display: <b>Fraunces</b> (Google Fonts) &nbsp;·&nbsp; UI/body: <b>General Sans</b> (Fontshare)</div>
+      </div>
+
+      <div class="pairing-card">
+        <div class="pairing-name">B · Inter + Newsreader</div>
+        <div class="pairing-desc">The safest, most battle-tested option for a data-dense dashboard — Inter is exceptionally legible at small sizes in tables; Newsreader adds a quiet literary serif for landing-page moments only.</div>
+        <div class="pairing-sample-title f-newsreader">Schema drift detected in DataOps&nbsp;Postgres</div>
+        <div class="pairing-sample-body f-inter">AXIOM found a new column, <code>updated_at</code>, added to the source table at 06:00. The Daily Sales Aggregation pipeline failed because its query doesn't account for it yet.</div>
+        <div class="pairing-sample-ui f-inter"><span class="pairing-btn">Investigate</span><span class="pairing-label">SEV 2 · Open</span></div>
+        <div class="pairing-fonts">Display: <b>Newsreader</b> (Google Fonts) &nbsp;·&nbsp; UI/body: <b>Inter</b> (Google Fonts)</div>
+      </div>
+
+      <div class="pairing-card">
+        <div class="pairing-name">C · Space Grotesk + Inter</div>
+        <div class="pairing-desc">The most distinctive option — Space Grotesk's geometric, slightly quirky character gives page titles and the landing page real personality, while Inter keeps dense screens calm.</div>
+        <div class="pairing-sample-title f-spacegrotesk">Schema drift detected in DataOps&nbsp;Postgres</div>
+        <div class="pairing-sample-body f-inter">AXIOM found a new column, <code>updated_at</code>, added to the source table at 06:00. The Daily Sales Aggregation pipeline failed because its query doesn't account for it yet.</div>
+        <div class="pairing-sample-ui f-inter"><span class="pairing-btn">Investigate</span><span class="pairing-label">SEV 2 · Open</span></div>
+        <div class="pairing-fonts">Display: <b>Space Grotesk</b> (Google Fonts) &nbsp;·&nbsp; UI/body: <b>Inter</b> (Google Fonts)</div>
+      </div>
+
+    </div>
+
+    <div class="disclosure">
+      <b>Rendering note:</b> this sandbox blocks outbound font requests, so the samples above are drawn in the closest available system-font stand-ins (Fraunces/Newsreader → Georgia-family serif; Space Grotesk → a geometric system sans; General Sans/Inter → the OS default UI sans), not the real webfonts. The pairing <i>logic</i> — weight contrast, serif personality, letterform warmth — reads accurately; exact letterforms will look better once the real fonts load in the actual build (self-hosted via <code>next/font</code>, no external request at runtime).
+    </div>
+  </section>
+
+</div>

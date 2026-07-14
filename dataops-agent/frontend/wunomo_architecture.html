@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wunomo AI — Enterprise Architecture</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #1c2230; --surface3: #21293a;
+    --border: #30363d; --border2: #3a4250;
+    --text: #e6edf3; --text2: #8b949e; --text3: #6e7681;
+    --blue: #1f6feb; --blue-l: #388bfd; --blue-ll: #58a6ff;
+    --purple: #7c3aed; --purple-l: #a78bfa; --purple-ll: #c4b5fd;
+    --teal: #0d9488; --teal-l: #2dd4bf; --teal-ll: #5eead4;
+    --amber: #d97706; --amber-l: #f59e0b; --amber-ll: #fbbf24;
+    --coral: #dc4a26; --coral-l: #f97316; --coral-ll: #fb923c;
+    --green: #166534; --green-l: #22c55e; --green-ll: #4ade80;
+    --pink: #9d174d; --pink-l: #ec4899; --pink-ll: #f472b6;
+    --gray: #374151; --gray-l: #6b7280; --gray-ll: #9ca3af;
+    --red: #dc2626; --red-l: #f87171;
+    --r: 6px; --r2: 10px;
+    --pad: 10px 14px;
+    --fs-xs: 9px; --fs-sm: 10px; --fs-md: 11px; --fs-lg: 12px;
+    --fw-n: 400; --fw-m: 500; --fw-b: 600;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: var(--fs-md); overflow: hidden; user-select: none; }
+  #toolbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+    background: rgba(13,17,23,0.95); border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+  }
+  #toolbar .logo { font-size: 15px; font-weight: 700; color: var(--blue-ll); letter-spacing: -0.3px; margin-right: 4px; }
+  #toolbar .subtitle { font-size: 11px; color: var(--text2); }
+  #toolbar .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+  #toolbar button {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text2);
+    border-radius: 5px; padding: 4px 10px; font-size: 11px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  #toolbar button:hover { background: var(--surface3); color: var(--text); border-color: var(--border2); }
+  #zoom-label { font-size: 11px; color: var(--text2); min-width: 42px; text-align: center; }
+  .legend-strip { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+  .leg { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text2); }
+  .leg-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  #canvas-wrap { position: fixed; top: 44px; left: 0; right: 0; bottom: 0; overflow: hidden; cursor: grab; }
+  #canvas-wrap.dragging { cursor: grabbing; }
+  #canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+  .arch-canvas { width: 5600px; }
+
+  /* Layers */
+  .layer {
+    position: relative;
+    padding: 18px 20px 16px;
+    margin-bottom: 6px;
+    border-radius: var(--r2);
+    border: 1.5px dashed;
+  }
+  .layer-label {
+    position: absolute; top: -10px; left: 18px;
+    font-size: var(--fs-sm); font-weight: var(--fw-b); letter-spacing: 0.5px;
+    padding: 1px 8px; border-radius: 4px; text-transform: uppercase;
+  }
+  .layer-row { display: flex; align-items: flex-start; gap: 8px; flex-wrap: nowrap; }
+
+  /* Service Groups */
+  .sg {
+    border: 1px solid var(--border2); border-radius: var(--r2);
+    padding: 8px 10px 10px; background: rgba(255,255,255,0.02);
+    flex-shrink: 0; position: relative;
+  }
+  .sg-title {
+    font-size: var(--fs-sm); font-weight: var(--fw-b); margin-bottom: 8px;
+    padding-bottom: 5px; border-bottom: 1px solid var(--border); letter-spacing: 0.3px;
+  }
+  .sg-grid { display: grid; gap: 4px; }
+  .sg-grid-2 { grid-template-columns: 1fr 1fr; }
+  .sg-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+  /* Components */
+  .c {
+    border-radius: var(--r);
+    padding: 5px 9px;
+    font-size: var(--fs-sm); font-weight: var(--fw-m);
+    border: 1px solid;
+    display: flex; align-items: center; gap: 5px;
+    white-space: nowrap; position: relative;
+    transition: filter 0.1s;
+  }
+  .c:hover { filter: brightness(1.15); }
+  .c .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .c-sub { font-size: var(--fs-xs); color: var(--text3); font-weight: var(--fw-n); display: block; margin-top: 1px; }
+
+  /* ============ COLOR THEMES ============ */
+  /* User Layer — amber */
+  .l-user { background: rgba(217,119,6,0.06); border-color: rgba(217,119,6,0.3); }
+  .l-user .layer-label { background: rgba(217,119,6,0.15); color: var(--amber-ll); border: 1px solid rgba(217,119,6,0.3); }
+  .l-user .sg-title { color: var(--amber-ll); }
+  .c-user { background: rgba(217,119,6,0.1); border-color: rgba(217,119,6,0.3); color: var(--amber-ll); }
+  .c-user .dot { background: var(--amber-ll); }
+
+  /* Security — red */
+  .l-sec { background: rgba(220,38,38,0.06); border-color: rgba(220,38,38,0.3); }
+  .l-sec .layer-label { background: rgba(220,38,38,0.15); color: var(--red-l); border: 1px solid rgba(220,38,38,0.3); }
+  .l-sec .sg-title { color: var(--red-l); }
+  .c-sec { background: rgba(220,38,38,0.1); border-color: rgba(220,38,38,0.3); color: var(--red-l); }
+  .c-sec .dot { background: var(--red-l); }
+
+  /* API Gateway — blue */
+  .l-api { background: rgba(31,111,235,0.06); border-color: rgba(31,111,235,0.3); }
+  .l-api .layer-label { background: rgba(31,111,235,0.15); color: var(--blue-ll); border: 1px solid rgba(31,111,235,0.3); }
+  .l-api .sg-title { color: var(--blue-ll); }
+  .c-api { background: rgba(31,111,235,0.1); border-color: rgba(31,111,235,0.3); color: var(--blue-ll); }
+  .c-api .dot { background: var(--blue-ll); }
+
+  /* Core Platform — teal */
+  .l-core { background: rgba(13,148,136,0.06); border-color: rgba(13,148,136,0.3); }
+  .l-core .layer-label { background: rgba(13,148,136,0.15); color: var(--teal-ll); border: 1px solid rgba(13,148,136,0.3); }
+  .l-core .sg-title { color: var(--teal-ll); }
+  .c-core { background: rgba(13,148,136,0.1); border-color: rgba(13,148,136,0.3); color: var(--teal-ll); }
+  .c-core .dot { background: var(--teal-ll); }
+
+  /* AI Orchestration — purple */
+  .l-ai { background: rgba(124,58,237,0.07); border-color: rgba(124,58,237,0.35); }
+  .l-ai .layer-label { background: rgba(124,58,237,0.18); color: var(--purple-ll); border: 1px solid rgba(124,58,237,0.35); }
+  .l-ai .sg-title { color: var(--purple-ll); }
+  .c-ai { background: rgba(124,58,237,0.12); border-color: rgba(124,58,237,0.35); color: var(--purple-ll); }
+  .c-ai .dot { background: var(--purple-ll); }
+
+  /* LLM Layer — pink */
+  .l-llm { background: rgba(157,23,77,0.07); border-color: rgba(157,23,77,0.35); }
+  .l-llm .layer-label { background: rgba(157,23,77,0.18); color: var(--pink-ll); border: 1px solid rgba(157,23,77,0.35); }
+  .l-llm .sg-title { color: var(--pink-ll); }
+  .c-llm { background: rgba(157,23,77,0.12); border-color: rgba(157,23,77,0.35); color: var(--pink-ll); }
+  .c-llm .dot { background: var(--pink-ll); }
+
+  /* DataOps — green */
+  .l-ops { background: rgba(22,101,52,0.07); border-color: rgba(22,101,52,0.35); }
+  .l-ops .layer-label { background: rgba(22,101,52,0.18); color: var(--green-ll); border: 1px solid rgba(22,101,52,0.35); }
+  .l-ops .sg-title { color: var(--green-ll); }
+  .c-ops { background: rgba(22,101,52,0.12); border-color: rgba(22,101,52,0.35); color: var(--green-ll); }
+  .c-ops .dot { background: var(--green-ll); }
+
+  /* Infra / Data — gray */
+  .l-infra { background: rgba(55,65,81,0.07); border-color: rgba(55,65,81,0.4); }
+  .l-infra .layer-label { background: rgba(55,65,81,0.25); color: var(--gray-ll); border: 1px solid rgba(55,65,81,0.4); }
+  .l-infra .sg-title { color: var(--gray-ll); }
+  .c-infra { background: rgba(55,65,81,0.2); border-color: rgba(55,65,81,0.4); color: var(--gray-ll); }
+  .c-infra .dot { background: var(--gray-ll); }
+
+  /* Observability — coral */
+  .l-obs { background: rgba(220,74,38,0.06); border-color: rgba(220,74,38,0.3); }
+  .l-obs .layer-label { background: rgba(220,74,38,0.15); color: var(--coral-ll); border: 1px solid rgba(220,74,38,0.3); }
+  .l-obs .sg-title { color: var(--coral-ll); }
+  .c-obs { background: rgba(220,74,38,0.1); border-color: rgba(220,74,38,0.3); color: var(--coral-ll); }
+  .c-obs .dot { background: var(--coral-ll); }
+
+  /* Future / Locked */
+  .c-locked {
+    background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.1);
+    color: var(--text3); opacity: 0.6;
+  }
+  .c-locked .dot { background: var(--text3); }
+  .locked-badge {
+    font-size: 8px; font-weight: 700; color: var(--text3);
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 3px; padding: 1px 4px; letter-spacing: 0.4px; text-transform: uppercase;
+  }
+
+  /* Connector arrows overlay */
+  #arrows-svg {
+    position: absolute; top: 0; left: 0;
+    width: 5600px; pointer-events: none;
+    overflow: visible;
+  }
+
+  /* Vertical connector lines between layers */
+  .flow-arrow { stroke-width: 1.2; fill: none; marker-end: url(#arrowhead); opacity: 0.45; }
+
+  /* Scrollbar style */
+  ::-webkit-scrollbar { width: 0; }
+
+  .mcp-tag {
+    font-size: 8px; padding: 1px 5px; border-radius: 3px; font-weight: 700;
+    background: rgba(124,58,237,0.3); color: var(--purple-ll); border: 1px solid rgba(124,58,237,0.4);
+    text-transform: uppercase; letter-spacing: 0.4px;
+  }
+
+  /* Badge label for LLM models */
+  .model-badge {
+    font-size: 8px; padding: 1px 5px; border-radius: 3px; font-weight: 700;
+    background: rgba(157,23,77,0.3); color: var(--pink-ll); border: 1px solid rgba(157,23,77,0.35);
+    letter-spacing: 0.2px;
+  }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <span class="logo">⬡ WUNOMO AI</span>
+  <span class="subtitle">Enterprise Architecture · Production</span>
+  <div class="sep"></div>
+  <button onclick="zoom(1.15)">＋ Zoom in</button>
+  <span id="zoom-label">65%</span>
+  <button onclick="zoom(1/1.15)">－ Zoom out</button>
+  <button onclick="resetView()">⊙ Reset</button>
+  <button onclick="fitView()">⤢ Fit</button>
+  <div class="sep"></div>
+  <div class="legend-strip">
+    <div class="leg"><div class="leg-dot" style="background:var(--amber-l)"></div>Users</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--red-l)"></div>Security</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--blue-l)"></div>API Gateway</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--teal-l)"></div>Core Platform</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--purple-l)"></div>AI Orchestration</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--pink-l)"></div>LLM</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--green-l)"></div>DataOps</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--gray-l)"></div>Infra / Data</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--coral-l)"></div>Observability</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--text3)"></div>Locked</div>
+  </div>
+</div>
+
+<div id="canvas-wrap">
+<div id="canvas">
+<div class="arch-canvas" style="padding: 22px 24px 40px;">
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 1 — USER LAYER
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-user" style="margin-bottom:8px;">
+  <span class="layer-label">1 · User & Access Layer</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:290px;">
+      <div class="sg-title">Human Roles</div>
+      <div class="sg-grid sg-grid-2" style="grid-template-columns:1fr 1fr 1fr;">
+        <div class="c c-user"><span class="dot"></span>Platform Owner</div>
+        <div class="c c-user"><span class="dot"></span>Org Owner</div>
+        <div class="c c-user"><span class="dot"></span>Admin</div>
+        <div class="c c-user"><span class="dot"></span>Data Engineer</div>
+        <div class="c c-user"><span class="dot"></span>Data Analyst</div>
+        <div class="c c-user"><span class="dot"></span>ML Engineer</div>
+        <div class="c c-user"><span class="dot"></span>Biz Analyst</div>
+        <div class="c c-user"><span class="dot"></span>Executive</div>
+        <div class="c c-user"><span class="dot"></span>Auditor</div>
+        <div class="c c-user"><span class="dot"></span>Viewer</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:270px;">
+      <div class="sg-title">Client Interfaces</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-user"><span class="dot"></span>Web Dashboard</div>
+        <div class="c c-user"><span class="dot"></span>Swagger UI</div>
+        <div class="c c-user"><span class="dot"></span>REST Client</div>
+        <div class="c c-user"><span class="dot"></span>CLI / SDK</div>
+        <div class="c c-user"><span class="dot"></span>3rd-Party Apps</div>
+        <div class="c c-user"><span class="dot"></span>Ext. API Consumers</div>
+        <div class="c c-locked"><span class="dot"></span>Mobile App <span class="locked-badge">Soon</span></div>
+        <div class="c c-locked"><span class="dot"></span>Desktop Agent <span class="locked-badge">Soon</span></div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:380px; border-color: rgba(255,255,255,0.12);">
+      <div class="sg-title" style="color:var(--text3);">Future AI Employees (Locked)</div>
+      <div class="sg-grid" style="grid-template-columns:repeat(6,1fr); gap:4px;">
+        <div class="c c-locked"><span class="dot"></span>Finance</div>
+        <div class="c c-locked"><span class="dot"></span>DevOps</div>
+        <div class="c c-locked"><span class="dot"></span>CloudOps</div>
+        <div class="c c-locked"><span class="dot"></span>Database</div>
+        <div class="c c-locked"><span class="dot"></span>Security</div>
+        <div class="c c-locked"><span class="dot"></span>Sales</div>
+        <div class="c c-locked"><span class="dot"></span>Marketing</div>
+        <div class="c c-locked"><span class="dot"></span>HR</div>
+        <div class="c c-locked"><span class="dot"></span>Legal</div>
+        <div class="c c-locked"><span class="dot"></span>CX Support</div>
+        <div class="c c-locked"><span class="dot"></span>MLOps</div>
+        <div class="c c-locked"><span class="dot"></span>Analytics</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 2 — SECURITY & IDENTITY
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-sec" style="margin-bottom:8px;">
+  <span class="layer-label">2 · Security & Identity Layer</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:210px;">
+      <div class="sg-title">Authentication</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-sec"><span class="dot"></span>JWT Engine</div>
+        <div class="c c-sec"><span class="dot"></span>OAuth2 Provider</div>
+        <div class="c c-sec"><span class="dot"></span>Login Handler</div>
+        <div class="c c-sec"><span class="dot"></span>Token Refresh</div>
+        <div class="c c-sec"><span class="dot"></span>Session Manager</div>
+        <div class="c c-sec"><span class="dot"></span>MFA Ready</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:210px;">
+      <div class="sg-title">Authorization & RBAC</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-sec"><span class="dot"></span>RBAC Engine</div>
+        <div class="c c-sec"><span class="dot"></span>Permission Engine</div>
+        <div class="c c-sec"><span class="dot"></span>Tenant Resolver</div>
+        <div class="c c-sec"><span class="dot"></span>Tenant Isolation</div>
+        <div class="c c-sec"><span class="dot"></span>Identity Service</div>
+        <div class="c c-sec"><span class="dot"></span>API Key Manager</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:210px;">
+      <div class="sg-title">Secrets & Policies</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-sec"><span class="dot"></span>Secrets Manager</div>
+        <div class="c c-sec"><span class="dot"></span>Secrets Validator</div>
+        <div class="c c-sec"><span class="dot"></span>Credential Vault</div>
+        <div class="c c-sec"><span class="dot"></span>Rate Limiter</div>
+        <div class="c c-sec"><span class="dot"></span>Security Policies</div>
+        <div class="c c-sec"><span class="dot"></span>Zero Trust Gate</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">Encryption</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-sec"><span class="dot"></span>Bcrypt Hasher</div>
+        <div class="c c-sec"><span class="dot"></span>Enc. at Rest</div>
+        <div class="c c-sec"><span class="dot"></span>TLS/Enc. Transit</div>
+        <div class="c c-sec"><span class="dot"></span>Conn. Encryptor</div>
+        <div class="c c-sec"><span class="dot"></span>Audit Auth Log</div>
+        <div class="c c-sec"><span class="dot"></span>python-jose</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 3 — API GATEWAY
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-api" style="margin-bottom:8px;">
+  <span class="layer-label">3 · API Gateway Layer</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:220px;">
+      <div class="sg-title">Edge Infrastructure</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-api"><span class="dot"></span>NGINX</div>
+        <div class="c c-api"><span class="dot"></span>Load Balancer</div>
+        <div class="c c-api"><span class="dot"></span>Ingress Controller</div>
+        <div class="c c-api"><span class="dot"></span>Circuit Breaker</div>
+        <div class="c c-api"><span class="dot"></span>Connection Pool</div>
+        <div class="c c-api"><span class="dot"></span>Request IDs</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:220px;">
+      <div class="sg-title">API Gateway / FastAPI</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-api"><span class="dot"></span>REST API Layer</div>
+        <div class="c c-api"><span class="dot"></span>OpenAPI / Swagger</div>
+        <div class="c c-api"><span class="dot"></span>Version Router</div>
+        <div class="c c-api"><span class="dot"></span>Request Validator</div>
+        <div class="c c-api"><span class="dot"></span>Response Formatter</div>
+        <div class="c c-api"><span class="dot"></span>Compression</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:230px;">
+      <div class="sg-title">Policies & Observability</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-api"><span class="dot"></span>Gateway Policies</div>
+        <div class="c c-api"><span class="dot"></span>Retry Policies</div>
+        <div class="c c-api"><span class="dot"></span>Request Timeout</div>
+        <div class="c c-api"><span class="dot"></span>Distributed Cache</div>
+        <div class="c c-api"><span class="dot"></span>Request Logger</div>
+        <div class="c c-api"><span class="dot"></span>API Metrics</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 4 — CORE PLATFORM SERVICES
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-core" style="margin-bottom:8px;">
+  <span class="layer-label">4 · Core Platform Services</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">Tenant & Org</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-core"><span class="dot"></span>Tenant Manager</div>
+        <div class="c c-core"><span class="dot"></span>Workspace Mgr</div>
+        <div class="c c-core"><span class="dot"></span>Org Manager</div>
+        <div class="c c-core"><span class="dot"></span>Tenant Registry</div>
+        <div class="c c-core"><span class="dot"></span>Tenant Isolation</div>
+        <div class="c c-core"><span class="dot"></span>Multi-Tenancy</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">Subscription & Billing</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-core"><span class="dot"></span>Subscription Mgr</div>
+        <div class="c c-core"><span class="dot"></span>Plan Manager</div>
+        <div class="c c-core"><span class="dot"></span>Usage Metering</div>
+        <div class="c c-core"><span class="dot"></span>Billing Hooks</div>
+        <div class="c c-core"><span class="dot"></span>License Manager</div>
+        <div class="c c-core"><span class="dot"></span>Feature Flags</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">User & Role</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-core"><span class="dot"></span>User Manager</div>
+        <div class="c c-core"><span class="dot"></span>Role Manager</div>
+        <div class="c c-core"><span class="dot"></span>Profile Service</div>
+        <div class="c c-core"><span class="dot"></span>Access Policies</div>
+        <div class="c c-core"><span class="dot"></span>Settings Service</div>
+        <div class="c c-core"><span class="dot"></span>Config Service</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">Communication</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-core"><span class="dot"></span>Notification Svc</div>
+        <div class="c c-core"><span class="dot"></span>Email Service</div>
+        <div class="c c-core"><span class="dot"></span>Webhook Dispatcher</div>
+        <div class="c c-core"><span class="dot"></span>Slack Notifier</div>
+        <div class="c c-core"><span class="dot"></span>Teams Notifier</div>
+        <div class="c c-core"><span class="dot"></span>Audit Logger</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 5 — AI ORCHESTRATION
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-ai" style="margin-bottom:8px;">
+  <span class="layer-label">5 · AI Orchestration Layer (AXIOM DataOps Agent)</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:210px;">
+      <div class="sg-title">AXIOM Core (LangGraph)</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ai"><span class="dot"></span>Agent Controller</div>
+        <div class="c c-ai"><span class="dot"></span>LangGraph Runtime</div>
+        <div class="c c-ai"><span class="dot"></span>LangChain Chains</div>
+        <div class="c c-ai"><span class="dot"></span>Task Planner</div>
+        <div class="c c-ai"><span class="dot"></span>Execution Planner</div>
+        <div class="c c-ai"><span class="dot"></span>Reasoning Engine</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:205px;">
+      <div class="sg-title">Prompt System</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ai"><span class="dot"></span>Prompt Builder</div>
+        <div class="c c-ai"><span class="dot"></span>Prompt Templates</div>
+        <div class="c c-ai"><span class="dot"></span>Prompt Optimizer</div>
+        <div class="c c-ai"><span class="dot"></span>Prompt Versioning</div>
+        <div class="c c-ai"><span class="dot"></span>Prompt Cache</div>
+        <div class="c c-ai"><span class="dot"></span>Context Builder</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:205px;">
+      <div class="sg-title">Memory & Context</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ai"><span class="dot"></span>Memory Manager</div>
+        <div class="c c-ai"><span class="dot"></span>Conv. Manager</div>
+        <div class="c c-ai"><span class="dot"></span>Context Window Mgr</div>
+        <div class="c c-ai"><span class="dot"></span>Ctx Compression</div>
+        <div class="c c-ai"><span class="dot"></span>Embedding Cache</div>
+        <div class="c c-ai"><span class="dot"></span>Semantic Retrieval</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:205px;">
+      <div class="sg-title">Output & Safety</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ai"><span class="dot"></span>Output Formatter</div>
+        <div class="c c-ai"><span class="dot"></span>Response Validator</div>
+        <div class="c c-ai"><span class="dot"></span>Struct. Output Parser</div>
+        <div class="c c-ai"><span class="dot"></span>Confidence Scorer</div>
+        <div class="c c-ai"><span class="dot"></span>Safety Guardrails</div>
+        <div class="c c-ai"><span class="dot"></span>Hallucination Detect</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">Personality & Policy</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ai"><span class="dot"></span>Personality System</div>
+        <div class="c c-ai"><span class="dot"></span>Engineer Mode</div>
+        <div class="c c-ai"><span class="dot"></span>Analyst Mode</div>
+        <div class="c c-ai"><span class="dot"></span>Executive Mode</div>
+        <div class="c c-ai"><span class="dot"></span>Policy Engine</div>
+        <div class="c c-ai"><span class="dot"></span>Fallback Manager</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">Tool Selection</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ai"><span class="dot"></span>Tool Selector</div>
+        <div class="c c-ai"><span class="dot"></span>Tool Registry</div>
+        <div class="c c-ai"><span class="dot"></span>SQL Tool</div>
+        <div class="c c-ai"><span class="dot"></span>Pandas Tool</div>
+        <div class="c c-ai"><span class="dot"></span>Quality Tool</div>
+        <div class="c c-ai"><span class="dot"></span>Retry Manager</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 6 — MCP LAYER
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-ai" style="margin-bottom:8px; border-style: dotted;">
+  <span class="layer-label" style="background: rgba(124,58,237,0.25);">6 · MCP Layer</span>
+  <div class="layer-row">
+    <div class="sg" style="width:215px;">
+      <div class="sg-title">MCP Server <span class="mcp-tag">MCP</span></div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ai"><span class="dot"></span>Tool Discovery</div>
+        <div class="c c-ai"><span class="dot"></span>Tool Authorization</div>
+        <div class="c c-ai"><span class="dot"></span>Tool Executor</div>
+        <div class="c c-ai"><span class="dot"></span>Context Provider</div>
+        <div class="c c-ai"><span class="dot"></span>Memory Provider</div>
+        <div class="c c-ai"><span class="dot"></span>Plugin Manager</div>
+      </div>
+    </div>
+    <div class="sg" style="width:200px; border-style: dashed; border-color: rgba(255,255,255,0.1);">
+      <div class="sg-title" style="color:var(--text3);">Future MCP Plugins <span class="locked-badge">Soon</span></div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-locked"><span class="dot"></span>Snowflake MCP</div>
+        <div class="c c-locked"><span class="dot"></span>BigQuery MCP</div>
+        <div class="c c-locked"><span class="dot"></span>Redshift MCP</div>
+        <div class="c c-locked"><span class="dot"></span>MongoDB MCP</div>
+        <div class="c c-locked"><span class="dot"></span>GitHub MCP</div>
+        <div class="c c-locked"><span class="dot"></span>Slack MCP</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 7 — LLM LAYER
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-llm" style="margin-bottom:8px;">
+  <span class="layer-label">7 · LLM Inference Layer</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:220px;">
+      <div class="sg-title">Active Models</div>
+      <div class="sg-grid" style="grid-template-columns:1fr 1fr;">
+        <div class="c c-llm"><span class="dot"></span>Groq <span class="model-badge">Primary</span></div>
+        <div class="c c-llm"><span class="dot"></span>Llama 3.1-8b</div>
+        <div class="c c-llm"><span class="dot"></span>Gemini</div>
+        <div class="c c-llm"><span class="dot"></span>Claude</div>
+        <div class="c c-llm"><span class="dot"></span>GPT-4o</div>
+        <div class="c c-llm"><span class="dot"></span>OpenRouter</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:190px; border-style:dashed; border-color: rgba(157,23,77,0.2);">
+      <div class="sg-title" style="color:var(--text3);">Future Models <span class="locked-badge">Soon</span></div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-locked"><span class="dot"></span>Mistral</div>
+        <div class="c c-locked"><span class="dot"></span>DeepSeek</div>
+        <div class="c c-locked"><span class="dot"></span>Gemma</div>
+        <div class="c c-locked"><span class="dot"></span>Enterprise</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:215px;">
+      <div class="sg-title">LLM Router (llm_service.py)</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-llm"><span class="dot"></span>Model Router</div>
+        <div class="c c-llm"><span class="dot"></span>Cost Optimizer</div>
+        <div class="c c-llm"><span class="dot"></span>Latency Optimizer</div>
+        <div class="c c-llm"><span class="dot"></span>Fallback Chain</div>
+        <div class="c c-llm"><span class="dot"></span>Model Health Mon.</div>
+        <div class="c c-llm"><span class="dot"></span>Token Manager</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:215px;">
+      <div class="sg-title">Inference Ops</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-llm"><span class="dot"></span>Inference Metrics</div>
+        <div class="c c-llm"><span class="dot"></span>Inference Logger</div>
+        <div class="c c-llm"><span class="dot"></span>Cost Tracker</div>
+        <div class="c c-llm"><span class="dot"></span>TPM Monitor</div>
+        <div class="c c-llm"><span class="dot"></span>Prompt Cache</div>
+        <div class="c c-llm"><span class="dot"></span>Context Limiter</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 8 — DATAOPS FUNCTIONAL SERVICES
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-ops" style="margin-bottom:8px;">
+  <span class="layer-label">8 · DataOps Functional Services (Microservices)</span>
+  <div class="layer-row" style="align-items:flex-start; flex-wrap:wrap; gap:8px;">
+
+    <!-- Auth Microservice -->
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">/auth — Identity</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Register Handler</div>
+        <div class="c c-ops"><span class="dot"></span>Login Handler</div>
+        <div class="c c-ops"><span class="dot"></span>Me Endpoint</div>
+        <div class="c c-ops"><span class="dot"></span>JWT Generator</div>
+        <div class="c c-ops"><span class="dot"></span>Token Validator</div>
+        <div class="c c-ops"><span class="dot"></span>get_current_user</div>
+      </div>
+    </div>
+
+    <!-- Uploads Microservice -->
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">/uploads — File Ingestion</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Upload Handler</div>
+        <div class="c c-ops"><span class="dot"></span>File Validator</div>
+        <div class="c c-ops"><span class="dot"></span>Tenant Scoped Store</div>
+        <div class="c c-ops"><span class="dot"></span>Metadata Writer</div>
+        <div class="c c-ops"><span class="dot"></span>Source Registrar</div>
+        <div class="c c-ops"><span class="dot"></span>File ID Generator</div>
+      </div>
+    </div>
+
+    <!-- Sources Microservice -->
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">/sources — Connections</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Connection Manager</div>
+        <div class="c c-ops"><span class="dot"></span>Connection Pool</div>
+        <div class="c c-ops"><span class="dot"></span>Schema Reader</div>
+        <div class="c c-ops"><span class="dot"></span>Schema Cache</div>
+        <div class="c c-ops"><span class="dot"></span>Credential Enc.</div>
+        <div class="c c-ops"><span class="dot"></span>Conn. Validator</div>
+        <div class="c c-ops"><span class="dot"></span>Profile Generator</div>
+        <div class="c c-ops"><span class="dot"></span>Schema Drift Detect</div>
+        <div class="c c-ops"><span class="dot"></span>Metadata Scanner</div>
+        <div class="c c-ops"><span class="dot"></span>Source Registry</div>
+        <div class="c c-ops"><span class="dot"></span>Preview Engine</div>
+        <div class="c c-ops"><span class="dot"></span>Metadata Sync</div>
+      </div>
+    </div>
+
+    <!-- Pipelines Microservice -->
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">/pipelines — Orchestration</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Pipeline Builder</div>
+        <div class="c c-ops"><span class="dot"></span>Pipeline Scheduler</div>
+        <div class="c c-ops"><span class="dot"></span>Cron Scheduler</div>
+        <div class="c c-ops"><span class="dot"></span>Pipeline Executor</div>
+        <div class="c c-ops"><span class="dot"></span>Trigger Handler</div>
+        <div class="c c-ops"><span class="dot"></span>Pause / Activate</div>
+        <div class="c c-ops"><span class="dot"></span>Schedule Updater</div>
+        <div class="c c-ops"><span class="dot"></span>Run History</div>
+        <div class="c c-ops"><span class="dot"></span>Backfill Engine</div>
+        <div class="c c-ops"><span class="dot"></span>Pipeline Versioning</div>
+        <div class="c c-ops"><span class="dot"></span>Dependency Resolver</div>
+        <div class="c c-ops"><span class="dot"></span>State Manager</div>
+      </div>
+    </div>
+
+    <!-- Runs Microservice -->
+    <div class="sg" style="width:195px;">
+      <div class="sg-title">/runs — Execution Records</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Run Tracker</div>
+        <div class="c c-ops"><span class="dot"></span>Run Logger</div>
+        <div class="c c-ops"><span class="dot"></span>Status Manager</div>
+        <div class="c c-ops"><span class="dot"></span>Metric Recorder</div>
+        <div class="c c-ops"><span class="dot"></span>Checkpoint Manager</div>
+        <div class="c c-ops"><span class="dot"></span>Dead Letter Queue</div>
+        <div class="c c-ops"><span class="dot"></span>Retry Engine</div>
+        <div class="c c-ops"><span class="dot"></span>Failure Recovery</div>
+      </div>
+    </div>
+
+    <!-- Quality Microservice -->
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">/quality — Data Quality</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Quality Rules</div>
+        <div class="c c-ops"><span class="dot"></span>Data Contracts</div>
+        <div class="c c-ops"><span class="dot"></span>Validation Engine</div>
+        <div class="c c-ops"><span class="dot"></span>Null Checker</div>
+        <div class="c c-ops"><span class="dot"></span>Range Validator</div>
+        <div class="c c-ops"><span class="dot"></span>Regex Validator</div>
+        <div class="c c-ops"><span class="dot"></span>Duplicate Detector</div>
+        <div class="c c-ops"><span class="dot"></span>Freshness Check</div>
+        <div class="c c-ops"><span class="dot"></span>Ref. Integrity</div>
+        <div class="c c-ops"><span class="dot"></span>Quality Scorer</div>
+        <div class="c c-ops"><span class="dot"></span>Violation Reporter</div>
+        <div class="c c-ops"><span class="dot"></span>Quality Reports</div>
+      </div>
+    </div>
+
+    <!-- Incidents Microservice -->
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">/incidents — Incident Mgmt</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Alert Manager</div>
+        <div class="c c-ops"><span class="dot"></span>Incident Tracker</div>
+        <div class="c c-ops"><span class="dot"></span>Severity Manager</div>
+        <div class="c c-ops"><span class="dot"></span>Root Cause Analyzer</div>
+        <div class="c c-ops"><span class="dot"></span>Failure Classifier</div>
+        <div class="c c-ops"><span class="dot"></span>Notif. Engine</div>
+        <div class="c c-ops"><span class="dot"></span>Escalation Engine</div>
+        <div class="c c-ops"><span class="dot"></span>Resolution Tracker</div>
+        <div class="c c-ops"><span class="dot"></span>MTTR Calculator</div>
+        <div class="c c-ops"><span class="dot"></span>Recovery Workflow</div>
+      </div>
+    </div>
+
+    <!-- Governance Microservice -->
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">/governance — Lineage</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Lineage Builder</div>
+        <div class="c c-ops"><span class="dot"></span>Lineage Graph</div>
+        <div class="c c-ops"><span class="dot"></span>Knowledge Graph</div>
+        <div class="c c-ops"><span class="dot"></span>Data Catalog</div>
+        <div class="c c-ops"><span class="dot"></span>Contract Validator</div>
+        <div class="c c-ops"><span class="dot"></span>Audit Trail</div>
+        <div class="c c-ops"><span class="dot"></span>Compliance Engine</div>
+        <div class="c c-ops"><span class="dot"></span>GDPR Handler</div>
+        <div class="c c-ops"><span class="dot"></span>SOC2 Handler</div>
+        <div class="c c-ops"><span class="dot"></span>HIPAA Ready</div>
+        <div class="c c-ops"><span class="dot"></span>Approval Records</div>
+        <div class="c c-ops"><span class="dot"></span>Gov. Reports</div>
+      </div>
+    </div>
+
+    <!-- Approvals Microservice -->
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">/approvals — Human-in-Loop</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Approval Queue</div>
+        <div class="c c-ops"><span class="dot"></span>Approval Detail</div>
+        <div class="c c-ops"><span class="dot"></span>Approve Handler</div>
+        <div class="c c-ops"><span class="dot"></span>Reject Handler</div>
+        <div class="c c-ops"><span class="dot"></span>Role Verifier</div>
+        <div class="c c-ops"><span class="dot"></span>Action Trigger</div>
+        <div class="c c-ops"><span class="dot"></span>Approval Audit Log</div>
+        <div class="c c-ops"><span class="dot"></span>Notif. Dispatch</div>
+      </div>
+    </div>
+
+    <!-- Analytics Microservice -->
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">/analytics — Insights</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>System Health</div>
+        <div class="c c-ops"><span class="dot"></span>Pipeline KPIs</div>
+        <div class="c c-ops"><span class="dot"></span>Quality Trends</div>
+        <div class="c c-ops"><span class="dot"></span>Usage Metrics</div>
+        <div class="c c-ops"><span class="dot"></span>API Metrics</div>
+        <div class="c c-ops"><span class="dot"></span>Tenant Metrics</div>
+        <div class="c c-ops"><span class="dot"></span>Business Metrics</div>
+        <div class="c c-ops"><span class="dot"></span>KPI Recorder</div>
+        <div class="c c-ops"><span class="dot"></span>Trend Analysis</div>
+        <div class="c c-ops"><span class="dot"></span>Reporting Engine</div>
+        <div class="c c-ops"><span class="dot"></span>Executive Dashboard</div>
+        <div class="c c-ops"><span class="dot"></span>Insights Engine</div>
+      </div>
+    </div>
+
+    <!-- CI/CD Microservice -->
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">/cicd — Deployments</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Webhook Receiver</div>
+        <div class="c c-ops"><span class="dot"></span>Sig. Validator</div>
+        <div class="c c-ops"><span class="dot"></span>Commit Registry</div>
+        <div class="c c-ops"><span class="dot"></span>Deploy Approver</div>
+        <div class="c c-ops"><span class="dot"></span>Deploy Rejector</div>
+        <div class="c c-ops"><span class="dot"></span>Deployment Engine</div>
+        <div class="c c-ops"><span class="dot"></span>Deployment History</div>
+        <div class="c c-ops"><span class="dot"></span>Run Recorder</div>
+        <div class="c c-ops"><span class="dot"></span>Deploy Health</div>
+        <div class="c c-ops"><span class="dot"></span>CI/CD Incidents</div>
+        <div class="c c-ops"><span class="dot"></span>Status Dashboard</div>
+        <div class="c c-ops"><span class="dot"></span>MTTD Calculator</div>
+      </div>
+    </div>
+
+    <!-- Chat Microservice -->
+    <div class="sg" style="width:200px; border-color: rgba(124,58,237,0.4);">
+      <div class="sg-title" style="color:var(--purple-ll);">/chat — AXIOM Interface</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Chat Handler</div>
+        <div class="c c-ops"><span class="dot"></span>Session Manager</div>
+        <div class="c c-ops"><span class="dot"></span>History Loader</div>
+        <div class="c c-ops"><span class="dot"></span>Msg Persister</div>
+        <div class="c c-ops"><span class="dot"></span>Context Injector</div>
+        <div class="c c-ops"><span class="dot"></span>Agent Invoker</div>
+        <div class="c c-ops"><span class="dot"></span>Personality Router</div>
+        <div class="c c-ops"><span class="dot"></span>Op Mode Handler</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 9 — TRANSFORMATION ENGINE
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-ops" style="margin-bottom:8px; border-style: solid; border-color: rgba(22,101,52,0.5);">
+  <span class="layer-label">9 · Transformation Engine (/transformations)</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:215px;">
+      <div class="sg-title">NL Generation (AXIOM)</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>NL Parser</div>
+        <div class="c c-ops"><span class="dot"></span>SQL Generator</div>
+        <div class="c c-ops"><span class="dot"></span>Pandas Generator</div>
+        <div class="c c-ops"><span class="dot"></span>Schema Contextualizer</div>
+        <div class="c c-ops"><span class="dot"></span>Code Explainer</div>
+        <div class="c c-ops"><span class="dot"></span>SQL Explainer</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:215px;">
+      <div class="sg-title">Execution Engines</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>SQL Runner</div>
+        <div class="c c-ops"><span class="dot"></span>Python Runner</div>
+        <div class="c c-ops"><span class="dot"></span>Execution Sandbox</div>
+        <div class="c c-ops"><span class="dot"></span>Dry Run Engine</div>
+        <div class="c c-ops"><span class="dot"></span>Preview Engine</div>
+        <div class="c c-ops"><span class="dot"></span>Query Optimizer</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:215px;">
+      <div class="sg-title">Connectors & Output</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>postgres_connector</div>
+        <div class="c c-ops"><span class="dot"></span>psycopg2 Driver</div>
+        <div class="c c-ops"><span class="dot"></span>SQLAlchemy Async</div>
+        <div class="c c-ops"><span class="dot"></span>EXPLAIN Analyzer</div>
+        <div class="c c-ops"><span class="dot"></span>Result Formatter</div>
+        <div class="c c-ops"><span class="dot"></span>Schema Validator</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">History & Versioning</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-ops"><span class="dot"></span>Transform History</div>
+        <div class="c c-ops"><span class="dot"></span>Workflow Versioning</div>
+        <div class="c c-ops"><span class="dot"></span>Schema Registry</div>
+        <div class="c c-ops"><span class="dot"></span>Metadata Catalog</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 10 — COMMUNICATION / EVENT BUS
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-infra" style="margin-bottom:8px;">
+  <span class="layer-label">10 · Communication & Event Layer</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:215px;">
+      <div class="sg-title">Async Messaging</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>Event Bus</div>
+        <div class="c c-infra"><span class="dot"></span>Redis Pub/Sub</div>
+        <div class="c c-infra"><span class="dot"></span>Message Queue</div>
+        <div class="c c-infra"><span class="dot"></span>Background Workers</div>
+        <div class="c c-infra"><span class="dot"></span>Async Tasks</div>
+        <div class="c c-infra"><span class="dot"></span>Dead Letter Queue</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">Internal APIs</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>REST Internal</div>
+        <div class="c c-infra"><span class="dot"></span>Service Mesh</div>
+        <div class="c c-infra"><span class="dot"></span>Webhook Dispatch</div>
+        <div class="c c-infra"><span class="dot"></span>Notification Bus</div>
+        <div class="c c-infra"><span class="dot"></span>Event Streams</div>
+        <div class="c c-infra"><span class="dot"></span>Service Discovery</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">External Integrations</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>GitHub Webhooks</div>
+        <div class="c c-infra"><span class="dot"></span>GitLab Webhooks</div>
+        <div class="c c-infra"><span class="dot"></span>Slack API</div>
+        <div class="c c-infra"><span class="dot"></span>Teams API</div>
+        <div class="c c-infra"><span class="dot"></span>SMTP / Email</div>
+        <div class="c c-infra"><span class="dot"></span>Webhook APIs</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 11 — DATA LAYER
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-infra" style="margin-bottom:8px;">
+  <span class="layer-label">11 · Data Storage Layer</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:205px;">
+      <div class="sg-title">Primary DB — PostgreSQL</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>Users Table</div>
+        <div class="c c-infra"><span class="dot"></span>Tenants Table</div>
+        <div class="c c-infra"><span class="dot"></span>Sources Table</div>
+        <div class="c c-infra"><span class="dot"></span>Pipelines Table</div>
+        <div class="c c-infra"><span class="dot"></span>Pipeline Runs</div>
+        <div class="c c-infra"><span class="dot"></span>Quality Rules</div>
+        <div class="c c-infra"><span class="dot"></span>Incidents Table</div>
+        <div class="c c-infra"><span class="dot"></span>Approvals Table</div>
+        <div class="c c-infra"><span class="dot"></span>Chat Messages</div>
+        <div class="c c-infra"><span class="dot"></span>Audit Log</div>
+        <div class="c c-infra"><span class="dot"></span>asyncpg Driver</div>
+        <div class="c c-infra"><span class="dot"></span>SQLAlchemy ORM</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:195px;">
+      <div class="sg-title">Cache — Redis</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>Session Cache</div>
+        <div class="c c-infra"><span class="dot"></span>Embedding Cache</div>
+        <div class="c c-infra"><span class="dot"></span>Prompt Cache</div>
+        <div class="c c-infra"><span class="dot"></span>Query Cache</div>
+        <div class="c c-infra"><span class="dot"></span>Schema Cache</div>
+        <div class="c c-infra"><span class="dot"></span>Rate Limit Store</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:195px;">
+      <div class="sg-title">Vector Store</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>Vector Database</div>
+        <div class="c c-infra"><span class="dot"></span>Embeddings Store</div>
+        <div class="c c-infra"><span class="dot"></span>Vector Search</div>
+        <div class="c c-infra"><span class="dot"></span>Semantic Index</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:195px;">
+      <div class="sg-title">Object / File Storage</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>Blob Storage</div>
+        <div class="c c-infra"><span class="dot"></span>File Upload Store</div>
+        <div class="c c-infra"><span class="dot"></span>Object Storage</div>
+        <div class="c c-infra"><span class="dot"></span>Backup Storage</div>
+        <div class="c c-infra"><span class="dot"></span>Snapshot Store</div>
+        <div class="c c-infra"><span class="dot"></span>Analytics DB</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 12 — INFRASTRUCTURE
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-infra" style="margin-bottom:8px;">
+  <span class="layer-label">12 · Infrastructure Layer</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:210px;">
+      <div class="sg-title">Container Runtime</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>Docker</div>
+        <div class="c c-infra"><span class="dot"></span>Docker Compose</div>
+        <div class="c c-infra"><span class="dot"></span>Backend Container</div>
+        <div class="c c-infra"><span class="dot"></span>Postgres Container</div>
+        <div class="c c-infra"><span class="dot"></span>Redis Container</div>
+        <div class="c c-infra"><span class="dot"></span>.env Config</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:195px;">
+      <div class="sg-title">Kubernetes (AKS Ready)</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>Kubernetes</div>
+        <div class="c c-infra"><span class="dot"></span>AKS</div>
+        <div class="c c-infra"><span class="dot"></span>Ingress</div>
+        <div class="c c-infra"><span class="dot"></span>Autoscaling</div>
+        <div class="c c-infra"><span class="dot"></span>Load Balancer</div>
+        <div class="c c-infra"><span class="dot"></span>Service Discovery</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:195px;">
+      <div class="sg-title">Reliability</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>Health Checks</div>
+        <div class="c c-infra"><span class="dot"></span>High Availability</div>
+        <div class="c c-infra"><span class="dot"></span>Disaster Recovery</div>
+        <div class="c c-infra"><span class="dot"></span>Horiz. Scaling</div>
+        <div class="c c-infra"><span class="dot"></span>DB Replication</div>
+        <div class="c c-infra"><span class="dot"></span>Backup Strategy</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:195px;">
+      <div class="sg-title">Runtime — Python</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>Python 3.11</div>
+        <div class="c c-infra"><span class="dot"></span>FastAPI App</div>
+        <div class="c c-infra"><span class="dot"></span>Uvicorn / Workers</div>
+        <div class="c c-infra"><span class="dot"></span>passlib / bcrypt</div>
+        <div class="c c-infra"><span class="dot"></span>python-jose</div>
+        <div class="c c-infra"><span class="dot"></span>Environment Config</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 13 — OBSERVABILITY
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-obs" style="margin-bottom:8px;">
+  <span class="layer-label">13 · Observability & Monitoring Layer</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:210px;">
+      <div class="sg-title">Metrics & Tracing</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-obs"><span class="dot"></span>Prometheus</div>
+        <div class="c c-obs"><span class="dot"></span>Grafana</div>
+        <div class="c c-obs"><span class="dot"></span>OpenTelemetry</div>
+        <div class="c c-obs"><span class="dot"></span>Distributed Tracing</div>
+        <div class="c c-obs"><span class="dot"></span>App Insights</div>
+        <div class="c c-obs"><span class="dot"></span>Metrics Collector</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">Logging & Alerting</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-obs"><span class="dot"></span>Logging Agent</div>
+        <div class="c c-obs"><span class="dot"></span>Log Aggregator</div>
+        <div class="c c-obs"><span class="dot"></span>Alert Manager</div>
+        <div class="c c-obs"><span class="dot"></span>Error Tracking</div>
+        <div class="c c-obs"><span class="dot"></span>Performance Mon.</div>
+        <div class="c c-obs"><span class="dot"></span>Cost Monitoring</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">Health & Cost</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-obs"><span class="dot"></span>Health Monitor</div>
+        <div class="c c-obs"><span class="dot"></span>Uptime Tracker</div>
+        <div class="c c-obs"><span class="dot"></span>SLA Monitor</div>
+        <div class="c c-obs"><span class="dot"></span>LLM Cost Tracker</div>
+        <div class="c c-obs"><span class="dot"></span>Pipeline Health</div>
+        <div class="c c-obs"><span class="dot"></span>Model Monitor</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     LAYER 14 — EXTERNAL DATA SOURCES
+══════════════════════════════════════════════════════════════ -->
+<div class="layer l-infra" style="margin-bottom:8px; border-style: dashed;">
+  <span class="layer-label">14 · External Data Sources & Integrations</span>
+  <div class="layer-row">
+
+    <div class="sg" style="width:215px;">
+      <div class="sg-title">Relational Databases</div>
+      <div class="sg-grid" style="grid-template-columns:repeat(3,1fr);">
+        <div class="c c-infra"><span class="dot"></span>PostgreSQL</div>
+        <div class="c c-infra"><span class="dot"></span>MySQL</div>
+        <div class="c c-infra"><span class="dot"></span>SQL Server</div>
+        <div class="c c-infra"><span class="dot"></span>Oracle</div>
+        <div class="c c-infra"><span class="dot"></span>SQLite</div>
+        <div class="c c-infra"><span class="dot"></span>MariaDB</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">Cloud Data Warehouses</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>Snowflake</div>
+        <div class="c c-infra"><span class="dot"></span>BigQuery</div>
+        <div class="c c-infra"><span class="dot"></span>Redshift</div>
+        <div class="c c-infra"><span class="dot"></span>Databricks</div>
+        <div class="c c-infra"><span class="dot"></span>MongoDB</div>
+        <div class="c c-infra"><span class="dot"></span>Cassandra</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">File / Object Sources</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>CSV / Excel</div>
+        <div class="c c-infra"><span class="dot"></span>JSON / Parquet</div>
+        <div class="c c-infra"><span class="dot"></span>AWS S3</div>
+        <div class="c c-infra"><span class="dot"></span>Azure Blob</div>
+        <div class="c c-infra"><span class="dot"></span>GCS</div>
+        <div class="c c-infra"><span class="dot"></span>SFTP</div>
+      </div>
+    </div>
+
+    <div class="sg" style="width:200px;">
+      <div class="sg-title">DevOps & Comm.</div>
+      <div class="sg-grid sg-grid-2">
+        <div class="c c-infra"><span class="dot"></span>GitHub</div>
+        <div class="c c-infra"><span class="dot"></span>GitLab</div>
+        <div class="c c-infra"><span class="dot"></span>Slack</div>
+        <div class="c c-infra"><span class="dot"></span>Teams</div>
+        <div class="c c-infra"><span class="dot"></span>Email / SMTP</div>
+        <div class="c c-infra"><span class="dot"></span>Custom Webhooks</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</div><!-- arch-canvas -->
+
+<!-- Connector SVG overlaid on canvas — vertical flow arrows between key layers -->
+<svg id="arrows-svg" height="5000">
+  <defs>
+    <marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+</svg>
+
+</div><!-- canvas -->
+</div><!-- canvas-wrap -->
+
+<script>
+const wrap = document.getElementById('canvas-wrap');
+const canvas = document.getElementById('canvas');
+let scale = 0.65, tx = 20, ty = 20;
+let dragging = false, startX, startY, startTx, startTy;
+
+function applyTransform() {
+  canvas.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  document.getElementById('zoom-label').textContent = Math.round(scale * 100) + '%';
+}
+
+function zoom(factor, cx, cy) {
+  if (cx === undefined) { cx = wrap.clientWidth / 2; cy = wrap.clientHeight / 2; }
+  const newScale = Math.min(2, Math.max(0.2, scale * factor));
+  tx = cx - (cx - tx) * (newScale / scale);
+  ty = cy - (cy - ty) * (newScale / scale);
+  scale = newScale;
+  applyTransform();
+}
+
+function resetView() { scale = 0.65; tx = 20; ty = 20; applyTransform(); }
+
+function fitView() {
+  const cw = wrap.clientWidth - 40;
+  const ch = wrap.clientHeight - 40;
+  const dw = canvas.scrollWidth || 5600;
+  const dh = canvas.scrollHeight || 4200;
+  const s = Math.min(cw / dw, ch / dh, 1);
+  scale = s;
+  tx = (cw - dw * s) / 2 + 20;
+  ty = 20;
+  applyTransform();
+}
+
+wrap.addEventListener('wheel', e => {
+  e.preventDefault();
+  const rect = wrap.getBoundingClientRect();
+  zoom(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX - rect.left, e.clientY - rect.top);
+}, { passive: false });
+
+wrap.addEventListener('mousedown', e => {
+  dragging = true; wrap.classList.add('dragging');
+  startX = e.clientX; startY = e.clientY;
+  startTx = tx; startTy = ty;
+});
+window.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  tx = startTx + (e.clientX - startX);
+  ty = startTy + (e.clientY - startY);
+  applyTransform();
+});
+window.addEventListener('mouseup', () => { dragging = false; wrap.classList.remove('dragging'); });
+
+// Touch
+wrap.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) {
+    dragging = true;
+    startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+    startTx = tx; startTy = ty;
+  }
+});
+wrap.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (e.touches.length === 1 && dragging) {
+    tx = startTx + (e.touches[0].clientX - startX);
+    ty = startTy + (e.touches[0].clientY - startY);
+    applyTransform();
+  }
+}, { passive: false });
+wrap.addEventListener('touchend', () => { dragging = false; });
+
+applyTransform();
+</script>
+</body>
+</html>
