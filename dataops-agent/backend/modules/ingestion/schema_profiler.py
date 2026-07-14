@@ -78,7 +78,8 @@ class SchemaProfiler:
 
     async def _profile_postgres(self, cfg: dict) -> dict:
         import asyncpg
-        dsn = f"postgresql://{cfg['user']}:{cfg['password']}@{cfg['host']}:{cfg.get('port',5432)}/{cfg['database']}"
+        user = cfg.get("username", cfg.get("user", ""))
+        dsn = f"postgresql://{user}:{cfg['password']}@{cfg['host']}:{cfg.get('port',5432)}/{cfg['database']}"
         schema = cfg.get("schema", "public")
         conn = await asyncpg.connect(dsn)
         tables_rows = await conn.fetch(
@@ -128,7 +129,7 @@ class SchemaProfiler:
         import aiomysql
         conn = await aiomysql.connect(
             host=cfg["host"], port=int(cfg.get("port", 3306)),
-            user=cfg["user"], password=cfg["password"], db=cfg["database"]
+            user=cfg.get("username", cfg.get("user", "")), password=cfg["password"], db=cfg["database"]
         )
         result = {}
         async with conn.cursor() as cur:
