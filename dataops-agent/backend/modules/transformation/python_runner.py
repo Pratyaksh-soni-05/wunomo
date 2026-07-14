@@ -409,8 +409,11 @@ class PythonRunner:
 
             if source_type in ("csv", "excel", "json"):
                 from modules.ingestion.connectors.file_connector import FileConnector
-                connector = FileConnector(source_type, config)
-                df = await connector.fetch(row_limit=row_limit)
+                connector = FileConnector(config, source_type)
+                result = await connector.preview(limit=row_limit)
+                if "error" in result:
+                    return result
+                df = pd.DataFrame(result.get("rows", []), columns=result.get("columns") or None)
             elif source_type == "postgres":
                 import asyncpg
                 host = config.get("host", "localhost")
@@ -432,9 +435,13 @@ class PythonRunner:
                 finally:
                     await conn.close()
             elif source_type == "mysql":
-                from modules.ingestion.connectors.mysql_connector import MysqlConnector
-                connector = MysqlConnector(config)
-                df = await connector.fetch(row_limit=row_limit)
+                from modules.ingestion.connectors.mysql_connector import MySQLConnector
+                table = config.get("table", config.get("default_table", ""))
+                if not table:
+                    return {"error": "MySQL source has no 'table' specified in connection_config"}
+                connector = MySQLConnector(config)
+                result = await connector.preview(table, limit=row_limit)
+                df = pd.DataFrame(result.get("rows", []), columns=result.get("columns") or None)
             else:
                 return {"error": f"PythonRunner does not support source type '{source_type}'"}
 
