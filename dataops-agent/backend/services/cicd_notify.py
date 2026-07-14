@@ -21,15 +21,15 @@ async def send_slack_notification(webhook_url: str, event: str, payload: dict):
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.post(webhook_url, json={"text": text})
             resp.raise_for_status()
-            log.info("cicd.slack_sent", event=event)
+            log.info("cicd.slack_sent", notify_event=event)
     except Exception as e:
-        log.warning("cicd.slack_failed", event=event, error=str(e))
+        log.warning("cicd.slack_failed", notify_event=event, error=str(e))
 
 
 async def notify(event: str, payload: dict):
     """Send notification if Slack is configured."""
     try:
-        from ..config import settings
+        from config import settings
         url = getattr(settings, "SLACK_WEBHOOK_URL", None)
         if url:
             await send_slack_notification(url, event, payload)
