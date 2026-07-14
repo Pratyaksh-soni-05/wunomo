@@ -6,10 +6,10 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
-from models.cicd import PipelineCommit, CICDStatus
-from models.pipeline import Pipeline  # adjust import path to match yours
+from models.cicd import PipelineCommit, PipelineDeployment, CICDStatus
+from models.all_models import Pipeline
 from schemas.cicd import GitHubWebhookPayload
 
 log = structlog.get_logger()
@@ -109,3 +109,45 @@ async def get_commit(db: AsyncSession, tenant_id: UUID, commit_id: UUID) -> Opti
         )
     )
     return result.scalar_one_or_none()
+
+
+async def get_status_summary(db: AsyncSession, tenant_id: UUID) -> dict:
+    """CI/CD status summary for a tenant — shared by the REST endpoint
+    (api/v1/cicd.py) and the agent's get_cicd_status tool, so both read the
+    same tenant-scoped queries instead of the tool making an unauthenticated
+    HTTP call back into the REST endpoint."""
+    commit_result = await db.execute(
+        select(PipelineCommit.ci_status, func.count(PipelineCommit.id).label("count"))
+        .where(PipelineCommit.tenant_id == tenant_id)
+        .group_by(PipelineCommit.ci_status)
+    )
+    commit_stats = {row.ci_status: row.count for row in commit_result}
+
+    active = await db.execute(
+        select(func.count(PipelineDeployment.id)).where(
+            PipelineDeployment.tenant_id == tenant_id,
+            PipelineDeployment.status == "active",
+        )
+    )
+    rollbacks = await db.execute(
+        select(func.count(PipelineDeployment.id)).where(
+            PipelineDeployment.tenant_id == tenant_id,
+            PipelineDeployment.status == "rolled_back",
+        )
+    )
+    pending = await db.execute(
+        select(func.count(PipelineCommit.id)).where(
+            PipelineCommit.tenant_id == tenant_id,
+            PipelineCommit.gate_decision == "pending_approval",
+        )
+    )
+    active_deployments = active.scalar() or 0
+    total_rollbacks    = rollbacks.scalar() or 0
+    pending_approvals  = pending.scalar() or 0
+    return {
+        "commit_stats": commit_stats,
+        "active_deployments": active_deployments,
+        "total_rollbacks":   total_rollbacks,
+        "pending_approvals": pending_approvals,
+        "health": "degraded" if (total_rollbacks > 0 or pending_approvals > 0) else "healthy",
+    }

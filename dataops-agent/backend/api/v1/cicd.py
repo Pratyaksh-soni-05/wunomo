@@ -137,11 +137,26 @@ async def github_webhook(
     repo_url       = (raw.get("repository") or {}).get("clone_url", "")
     commit_message = raw.get("commits", [{}])[-1].get("message", "") if raw.get("commits") else ""
 
+    # ── Resolve which Pipeline this push belongs to ──────────────────────
+    # Pipelines opt in by setting {"repo_url": "..."} in their pipeline_config.
+    matched_pipeline_id = None
+    if repo_url:
+        from models.all_models import Pipeline
+        result = await db.execute(
+            select(Pipeline).where(Pipeline.tenant_id == tenant_id_str)
+        )
+        for p in result.scalars().all():
+            if (p.pipeline_config or {}).get("repo_url") == repo_url:
+                matched_pipeline_id = p.id
+                break
+        if not matched_pipeline_id:
+            log.warning("cicd.webhook_no_pipeline_match", repo_url=repo_url, tenant_id=tenant_id_str)
+
     import uuid
     commit = PipelineCommit(
         id=str(uuid.uuid4()),
         tenant_id=tenant_id_str,
-        pipeline_id=None,
+        pipeline_id=matched_pipeline_id,
         commit_sha=commit_sha,
         branch=branch,
         author=author,
@@ -492,38 +507,5 @@ async def cicd_status_summary(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    commit_result = await db.execute(
-        select(PipelineCommit.ci_status, func.count(PipelineCommit.id).label("count"))
-        .where(PipelineCommit.tenant_id == current_user["tenant_id"])
-        .group_by(PipelineCommit.ci_status)
-    )
-    commit_stats = {row.ci_status: row.count for row in commit_result}
-
-    active = await db.execute(
-        select(func.count(PipelineDeployment.id)).where(
-            PipelineDeployment.tenant_id == current_user["tenant_id"],
-            PipelineDeployment.status == "active",
-        )
-    )
-    rollbacks = await db.execute(
-        select(func.count(PipelineDeployment.id)).where(
-            PipelineDeployment.tenant_id == current_user["tenant_id"],
-            PipelineDeployment.status == "rolled_back",
-        )
-    )
-    pending = await db.execute(
-        select(func.count(PipelineCommit.id)).where(
-            PipelineCommit.tenant_id == current_user["tenant_id"],
-            PipelineCommit.gate_decision == "pending_approval",
-        )
-    )
-    active_deployments = active.scalar() or 0
-    total_rollbacks    = rollbacks.scalar() or 0
-    pending_approvals  = pending.scalar() or 0
-    return {
-        "commit_stats": commit_stats,
-        "active_deployments": active_deployments,
-        "total_rollbacks":   total_rollbacks,
-        "pending_approvals": pending_approvals,
-        "health": "degraded" if (total_rollbacks > 0 or pending_approvals > 0) else "healthy",
-    }
+    from services.cicd_service import get_status_summary
+    return await get_status_summary(db, current_user["tenant_id"])

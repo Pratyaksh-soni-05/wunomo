@@ -3,6 +3,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
 
 from agent import dataops_agent
+from agent.tools.cicd_tools import get_cicd_status
 
 
 @tool
@@ -164,3 +165,43 @@ async def test_client_supplied_context_tenant_id_override_is_ignored(monkeypatch
 
     tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert tool_messages[0].content == "real-tenant-abc"
+
+
+@pytest.mark.asyncio
+async def test_get_cicd_status_tool_uses_real_tenant_id(monkeypatch):
+    """Regression test for the get_cicd_status tenant-isolation gap: this tool
+    used to take no tenant_id at all and call back into the app's own REST API
+    with no auth header, silently returning empty defaults from the 401 it got
+    instead of an error. It's now a normal tool with tenant_id as its first
+    argument (querying via services.cicd_service.get_status_summary directly,
+    no HTTP), so it must be covered by the same force-override mechanism as
+    every other tool — confirm agent_node corrects a wrong/hallucinated
+    tenant_id before the real tool executes, and that the real tool runs
+    successfully end-to-end (against the live test DB) rather than raising.
+    """
+    fake_llm = FakeToolCallLLM([
+        AIMessage(content="", tool_calls=[
+            {"name": "get_cicd_status", "args": {"tenant_id": "hallucinated-placeholder", "query": "status"}, "id": "call_1"},
+        ]),
+        AIMessage(content="Done."),
+    ])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [get_cicd_status])
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    result = await dataops_agent.run_agent(
+        user_message="what's my CICD status?",
+        tenant_id="real-tenant-abc", user_id="u1", session_id="s1",
+    )
+
+    # The tool call's args must have been corrected to the real tenant_id
+    # before ToolNode ever executed it.
+    ai_with_call = next(m for m in result["messages"] if getattr(m, "tool_calls", None))
+    assert ai_with_call.tool_calls[0]["args"]["tenant_id"] == "real-tenant-abc"
+
+    # The real tool actually ran (no exception, no leftover httpx 401) and
+    # returned a well-formed summary.
+    tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert len(tool_messages) == 1
+    assert "CICD Status Summary" in tool_messages[0].content
