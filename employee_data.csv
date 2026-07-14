@@ -1,0 +1,9 @@
+emp_id,name,department,salary,join_date,email,active
+E001,Daksh Gupta,Engineering,75000,2022-03-01,daksh@company.com,true
+E002,Rahul Shah,Marketing,55000,2021-06-15,rahul@company.com,true
+E003,Priya Mehta,Engineering,80000,2020-01-10,priya@company.com,true
+E004,Amit Singh,HR,45000,2023-01-20,amit@company.com,true
+E005,Sneha Kumar,Engineering,90000,2019-05-12,sneha@company.com,true
+E006,Raj Patel,Marketing,52000,2022-11-30,raj@company.com,false
+E007,Deepa Joshi,HR,47000,2021-08-22,,true
+E008,Vikram Nair,Engineering,85000,2023-03-15,vikram@company.com,true

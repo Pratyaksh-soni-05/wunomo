@@ -1,0 +1,63 @@
+services:
+  backend:
+    build: ./backend
+    container_name: dataops_backend
+    restart: unless-stopped
+    env_file: .env
+    ports: [ "8000:8000" ]
+    depends_on: [ postgres, redis ]
+    volumes: [ "./backend:/app" ]
+    networks: [ dataops_net ]
+
+  # frontend:
+  #   build: ./frontend
+  #   container_name: dataops_frontend
+  #   restart: unless-stopped
+  #   ports: [ "3000:3000" ]
+  #   depends_on: [ backend ]
+  #   networks: [ dataops_net ]
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: dataops_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dataops}
+      POSTGRES_USER: ${POSTGRES_USER:-dataops_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes: [ pg_data:/var/lib/postgresql/data ]
+    ports: [ "5432:5432" ]
+    networks: [ dataops_net ]
+
+  redis:
+    image: redis:7-alpine
+    container_name: dataops_redis
+    restart: unless-stopped
+    ports: [ "6379:6379" ]
+    networks: [ dataops_net ]
+
+  celery_worker:
+    build: ./backend
+    container_name: dataops_celery
+    restart: unless-stopped
+    command: celery -A services.celery_app worker --loglevel=info --concurrency=4
+    env_file: .env
+    depends_on: [ postgres, redis ]
+    volumes: [ "./backend:/app" ]
+    networks: [ dataops_net ]
+
+  celery_beat:
+    build: ./backend
+    container_name: dataops_beat
+    restart: unless-stopped
+    command: celery -A services.celery_app beat --loglevel=info
+    env_file: .env
+    depends_on: [ postgres, redis ]
+    volumes: [ "./backend:/app" ]
+    networks: [ dataops_net ]
+
+volumes:
+  pg_data:
+networks:
+  dataops_net:
+    driver: bridge

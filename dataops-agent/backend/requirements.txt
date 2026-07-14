@@ -1,0 +1,66 @@
+# ─── Web Framework ────────────────────────────────────────────────────────────
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+
+# ─── Database ─────────────────────────────────────────────────────────────────
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+psycopg2-binary==2.9.10
+
+# ─── Queue / Cache ────────────────────────────────────────────────────────────
+redis==5.2.1
+celery[redis]==5.4.0
+
+# ─── LangChain / AI stack ─────────────────────────────────────────────────────
+# Bumped 0.3.15 → 0.3.25: drops numpy<2 constraint (numpy<2 existed in py<3.12)
+langchain==0.3.25
+langchain-google-genai==2.1.4
+langchain-groq==0.3.2
+langchain-community==0.3.25
+langgraph==0.2.73
+
+# ─── Data processing ──────────────────────────────────────────────────────────
+pandas==2.2.3
+# numpy 2.x is now compatible with langchain 0.3.25+
+numpy==2.1.3
+openpyxl==3.1.5
+xlrd==2.0.1
+pdfplumber==0.11.4
+python-docx==1.1.2
+
+# ─── Database connectors ──────────────────────────────────────────────────────
+pymysql==1.1.1
+
+# ─── HTTP clients ─────────────────────────────────────────────────────────────
+httpx==0.27.2
+aiohttp==3.11.7
+requests==2.32.3
+
+# ─── Auth / Security ──────────────────────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# ─── Config / Utils ───────────────────────────────────────────────────────────
+python-dotenv==1.0.1
+apscheduler==3.10.4
+croniter==3.0.3
+slack-sdk==3.33.3
+
+# ─── Pydantic / Validation ────────────────────────────────────────────────────
+pydantic==2.10.2
+pydantic-settings==2.6.1
+email-validator==2.2.0
+
+# ─── Testing ──────────────────────────────────────────────────────────────────
+pytest==8.3.3
+pytest-asyncio==0.24.0
+faker==33.0.0
+httpx==0.27.2
+
+# ─── Logging / Templating ─────────────────────────────────────────────────────
+structlog==24.4.0
+tenacity==9.0.0
+jinja2==3.1.4
+python-slugify==8.0.4

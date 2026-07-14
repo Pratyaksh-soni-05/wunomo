@@ -1,0 +1,11 @@
+order_id,customer_name,product,quantity,price,date,status
+1001,Rahul Sharma,Laptop,2,45000,2024-01-15,completed
+1002,Priya Singh,Mouse,5,800,2024-01-16,completed
+1003,Amit Kumar,Keyboard,3,1500,2024-01-16,pending
+1004,Sneha Patel,Monitor,1,12000,2024-01-17,completed
+1005,Raj Verma,Laptop,1,45000,2024-01-17,cancelled
+1006,Deepa Nair,Headphones,4,2500,2024-01-18,completed
+1007,Vikram Joshi,Mouse,2,800,2024-01-18,pending
+1008,,Keyboard,1,1500,2024-01-19,completed
+1009,Anita Desai,Monitor,2,12000,2024-01-19,completed
+1010,Karan Mehta,Laptop,1,45000,2024-01-20,completed

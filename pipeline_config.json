@@ -1,0 +1,6 @@
+{
+  "name": "Sales Data Pipeline",
+  "description": "Monitors and validates daily sales data",
+  "schedule": "daily",
+  "source": "sales_data"
+}

@@ -1,0 +1,93 @@
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    container_name: dataops-backend
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - dataops-net
+
+  celery-worker:
+    build: ./backend
+    container_name: dataops-celery
+    restart: unless-stopped
+    command: celery -A services.celery_app worker --loglevel=info --concurrency=4
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - dataops-net
+
+  celery-beat:
+    build: ./backend
+    container_name: dataops-beat
+    restart: unless-stopped
+    command: celery -A services.celery_app beat --loglevel=info
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - dataops-net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: dataops-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dataops}
+      POSTGRES_USER: ${POSTGRES_USER:-dataopsuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - dataops-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dataopsuser} -d ${POSTGRES_DB:-dataops}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: dataops-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - dataops-net
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+
+
+networks:
+  dataops-net:
+    driver: bridge
