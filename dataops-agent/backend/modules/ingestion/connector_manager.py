@@ -1,16 +1,30 @@
 import uuid
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from sqlalchemy import select, text
 import structlog
 
 from database import AsyncSessionLocal
 from models.all_models import DataSource, SourceType
+from config import settings
 
 log = structlog.get_logger()
 
 def utcnow(): return datetime.now(timezone.utc).replace(tzinfo=None)
+
+# Security guard: never let a tenant-registered source point at the app's own
+# control-plane database — that's every tenant's data, not just theirs.
+_APP_DB_URL = urlparse(settings.DATABASE_URL.replace("+asyncpg", "").replace("+psycopg2", ""))
+
+
+def _points_at_app_database(source_type: str, cfg: dict) -> bool:
+    if source_type not in ("postgres", "mysql"):
+        return False
+    host = str(cfg.get("host", ""))
+    database = str(cfg.get("database", ""))
+    return host == _APP_DB_URL.hostname and database == (_APP_DB_URL.path or "").lstrip("/")
 
 SUPPORTED_EXTS = {
     "csv": SourceType.CSV, "xlsx": SourceType.EXCEL, "xls": SourceType.EXCEL,
@@ -48,6 +62,10 @@ class ConnectorManager:
 
     # ── REGISTER ──────────────────────────────────────────────────────────────
     async def register_source(self, name: str, source_type: str, connection_config: dict) -> dict:
+        if _points_at_app_database(source_type, connection_config or {}):
+            return {"error": "This connection points at the application's own internal "
+                              "database, which holds every tenant's data. Registering it "
+                              "as a source is not allowed."}
         async with AsyncSessionLocal() as db:
             existing = await db.execute(select(DataSource).where(
                 DataSource.tenant_id == self.tenant_id,
