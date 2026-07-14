@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import shutil, os, uuid, math
@@ -35,7 +35,7 @@ async def upload_file(file: UploadFile = File(...), user=Depends(get_current_use
 @router.post("/register")
 async def upload_and_register(
     file: UploadFile = File(...),
-    name: Optional[str] = None,
+    name: Optional[str] = Form(None),
     user=Depends(get_current_user)
 ):
     ext = file.filename.rsplit(".", 1)[-1].lower()
@@ -50,6 +50,8 @@ async def upload_and_register(
         source_type=ext.lower(),
         connection_config={"file_path": dest, "original_name": file.filename}
     )
+    if "error" in source_result:
+        raise HTTPException(status_code=409, detail=source_result["error"])
     return sanitize_floats({
         "filename": file.filename,
         "source_id": source_result["id"],
