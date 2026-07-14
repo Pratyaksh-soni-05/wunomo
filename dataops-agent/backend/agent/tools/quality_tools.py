@@ -1,12 +1,13 @@
 from langchain_core.tools import tool
 from typing import Optional
+from agent.tools._utils import cap_tool_result
 
 
 @tool
 async def run_quality_checks(tenant_id: str, pipeline_id: str, run_id: Optional[str] = None) -> dict:
     """Run all active quality rules for a pipeline. Returns pass/fail per rule + quality score."""
     from modules.quality.test_runner import QualityTestRunner
-    return await QualityTestRunner(tenant_id, pipeline_id).run_all(run_id)
+    return cap_tool_result(await QualityTestRunner(tenant_id, pipeline_id).run_all(run_id))
 
 
 @tool
@@ -30,14 +31,14 @@ async def create_quality_rule(
 async def get_quality_report(tenant_id: str, pipeline_id: str) -> dict:
     """Get the quality report for a pipeline with pass/fail stats and trend data."""
     from modules.quality.rule_engine import RuleEngine
-    return await RuleEngine(tenant_id).get_report(pipeline_id)
+    return cap_tool_result(await RuleEngine(tenant_id).get_report(pipeline_id))
 
 
 @tool
 async def validate_business_rule(tenant_id: str, rule_name: str, dataset_id: str) -> dict:
     """Run a named business rule: reconciliation_match|revenue_consistency|duplicate_detection|kpi_sanity_check."""
     from modules.quality.business_rules import BusinessRuleLibrary
-    return await BusinessRuleLibrary(tenant_id).run(rule_name, dataset_id)
+    return cap_tool_result(await BusinessRuleLibrary(tenant_id).run(rule_name, dataset_id))
 
 
 @tool
