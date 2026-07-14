@@ -17,36 +17,38 @@ MONITORING_RUN_WINDOW = 3
 MAX_ALLOWED_FAILURES  = 2
 
 
-def _make_session() -> AsyncSession:
-    """Create a fresh async engine + session bound to the current event loop."""
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    return Session()
-
-
 @shared_task(name="cicd.check_post_deploy_health")
 def check_post_deploy_health():
     """Celery Beat task — runs every 60s to monitor post-deploy health."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(_check_all_monitored())
-    finally:
-        loop.close()
+    # Bug fix: this used to hand-roll asyncio.new_event_loop()/set_event_loop()/
+    # loop.close() without ever clearing the process-global "current loop"
+    # afterward. Celery's prefork pool reuses this same worker process for many
+    # tasks, so the dangling closed-loop reference corrupted whichever task ran
+    # next on this worker (surfacing as unrelated-looking crashes like
+    # "No module named 'modules'"). asyncio.run() tears down cleanly instead.
+    asyncio.run(_check_all_monitored())
 
 
 async def _check_all_monitored():
-    async with _make_session() as db:
-        result = await db.execute(
-            select(PipelineDeployment).where(
-                PipelineDeployment.monitoring_active == True,
-                PipelineDeployment.status == DeploymentStatus.active,
+    # Fresh engine per invocation (this runs in a long-lived Celery worker
+    # process, invoked repeatedly by Beat) — must dispose it when done so we
+    # don't leak a new connection pool every 60 seconds.
+    engine = create_async_engine(settings.DATABASE_URL, echo=False)
+    try:
+        Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with Session() as db:
+            result = await db.execute(
+                select(PipelineDeployment).where(
+                    PipelineDeployment.monitoring_active == True,
+                    PipelineDeployment.status == DeploymentStatus.active,
+                )
             )
-        )
-        monitored = result.scalars().all()
-        log.info("cicd.post_deploy_check", count=len(monitored))
-        for deployment in monitored:
-            await _check_one(db, deployment)
+            monitored = result.scalars().all()
+            log.info("cicd.post_deploy_check", count=len(monitored))
+            for deployment in monitored:
+                await _check_one(db, deployment)
+    finally:
+        await engine.dispose()
 
 
 async def _check_one(db, deployment: PipelineDeployment):
@@ -165,4 +167,4 @@ async def _safe_notify(event: str, payload: dict) -> None:
         from services.cicd_notify import notify
         await notify(event, payload)
     except Exception as e:
-        log.warning("cicd.notify_skipped", event=event, error=str(e))
+        log.warning("cicd.notify_skipped", notify_event=event, error=str(e))

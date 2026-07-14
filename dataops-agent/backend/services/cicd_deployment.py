@@ -12,8 +12,16 @@ log = structlog.get_logger()
 @shared_task(bind=True, name="cicd.deploy_pipeline", max_retries=2)
 def deploy_pipeline(self, commit_id: str, tenant_id: str, approved_by: str = "auto"):
     import asyncio
+
+    async def _run():
+        # Drop pooled connections bound to a previous (closed) event loop
+        # before this task/retry's fresh asyncio.run() loop uses them.
+        from database import engine
+        await engine.dispose()
+        await _deploy(commit_id, tenant_id, approved_by)
+
     try:
-        asyncio.run(_deploy(commit_id, tenant_id, approved_by))
+        asyncio.run(_run())
     except Exception as exc:
         log.error("cicd.deploy_task_failed", commit_id=commit_id, error=str(exc))
         raise self.retry(exc=exc, countdown=30)
