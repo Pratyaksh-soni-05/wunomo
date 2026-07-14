@@ -13,8 +13,19 @@ def utcnow(): return datetime.now(timezone.utc).replace(tzinfo=None)
 def execute_pipeline_run(self, run_id: str, pipeline_id: str, tenant_id: str):
     """Execute a pipeline run — called by trigger_run()."""
     import asyncio
+    from database import engine
+
+    async def _run():
+        # Celery calls asyncio.run() fresh per task invocation/retry, but the
+        # shared async engine's connection pool is a long-lived singleton —
+        # without disposing first, a pooled connection checked out under a
+        # previous (now-closed) loop gets reused here and blows up with
+        # "attached to a different loop" / "Event loop is closed".
+        await engine.dispose()
+        await _execute_run(run_id, pipeline_id, tenant_id)
+
     try:
-        asyncio.run(_execute_run(run_id, pipeline_id, tenant_id))
+        asyncio.run(_run())
     except Exception as exc:
         log.error("pipeline_run_failed", run_id=run_id, error=str(exc))
         raise self.retry(exc=exc)
@@ -49,8 +60,15 @@ async def _execute_run(run_id: str, pipeline_id: str, tenant_id: str):
             sync_result = await ConnectorManager(tenant_id).sync(
                 pipeline.source_id, mode="incremental"
             )
-            rows_processed = sync_result.get("total_rows", 0)
             output_summary["sync"] = sync_result
+            # ConnectorManager.sync() catches its own exceptions and returns
+            # {"error": ..., "status": "failed"} as a normal dict instead of
+            # raising — without this check the run was unconditionally
+            # marked SUCCESS even when the sync never actually happened
+            # (e.g. the uploaded file wasn't visible to this container).
+            if sync_result.get("error"):
+                raise RuntimeError(f"Source sync failed: {sync_result['error']}")
+            rows_processed = sync_result.get("total_rows", 0)
             await dag.update_run_status(
                 run_id, RunStatus.RUNNING,
                 log_entry={"event": "source_synced", "result": sync_result}
@@ -89,7 +107,13 @@ async def _execute_run(run_id: str, pipeline_id: str, tenant_id: str):
 @celery_app.task
 def check_all_freshness():
     import asyncio
-    asyncio.run(_check_freshness())
+    from database import engine
+
+    async def _run():
+        await engine.dispose()
+        await _check_freshness()
+
+    asyncio.run(_run())
 
 
 async def _check_freshness():

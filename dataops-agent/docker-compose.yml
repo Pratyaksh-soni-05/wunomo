@@ -6,7 +6,12 @@ services:
     env_file: .env
     ports: [ "8000:8000" ]
     depends_on: [ postgres, redis ]
-    volumes: [ "./backend:/app" ]
+    # upload_data is shared with celery_worker: uploads.py writes to
+    # ~/dataops_uploads (i.e. /root/dataops_uploads), which is NOT under
+    # /app — without this, files uploaded via this container are invisible
+    # to celery_worker, so any pipeline sync against an uploaded file fails
+    # immediately (not just after a rebuild).
+    volumes: [ "./backend:/app", "upload_data:/root/dataops_uploads" ]
     networks: [ dataops_net ]
 
   # frontend:
@@ -43,7 +48,7 @@ services:
     command: celery -A services.celery_app worker --loglevel=info --concurrency=4
     env_file: .env
     depends_on: [ postgres, redis ]
-    volumes: [ "./backend:/app" ]
+    volumes: [ "./backend:/app", "upload_data:/root/dataops_uploads" ]
     networks: [ dataops_net ]
 
   celery_beat:
@@ -58,6 +63,7 @@ services:
 
 volumes:
   pg_data:
+  upload_data:
 networks:
   dataops_net:
     driver: bridge

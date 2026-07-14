@@ -13,8 +13,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # upload_data is shared with celery-worker: uploads.py writes to
+    # ~/dataops_uploads (i.e. /root/dataops_uploads), which is NOT under
+    # /app — without this, files uploaded via this container are invisible
+    # to celery-worker, so any pipeline sync against an uploaded file fails
+    # immediately (not just after a rebuild).
     volumes:
       - ./backend:/app
+      - upload_data:/root/dataops_uploads
     networks:
       - dataops-net
 
@@ -31,6 +37,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - upload_data:/root/dataops_uploads
     networks:
       - dataops-net
 
@@ -86,6 +93,7 @@ services:
 
 volumes:
   pgdata:
+  upload_data:
 
 
 networks:
