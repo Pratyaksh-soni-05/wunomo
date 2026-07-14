@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import TypedDict, Annotated, Sequence
 import operator, json
-from datetime import datetime, timezone 
+from datetime import datetime, timezone
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
@@ -26,45 +26,52 @@ class AgentState(TypedDict):
     pending_approvals: list
     iteration_count: int
     context: dict
+    system_prompt: str
 
 
 def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.ASSISTED):
     llm = get_llm_for_agent(temperature=0.0)
     llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
+    # `messages` uses the `operator.add` reducer, so LangGraph automatically
+    # appends whatever a node returns onto the existing accumulated value.
+    # Every node below must therefore return only the *new* message(s) for
+    # this turn, never `state["messages"] + [...]` — returning the full
+    # history back causes the reducer to concatenate old+new onto the
+    # already-accumulated state, doubling history on every single node hop
+    # (a 3-message conversation ballooned to 63 messages in 3 turns before
+    # this fix). The system prompt is intentionally kept out of the
+    # reducer-managed `messages` channel entirely (stored in `system_prompt`
+    # instead and prepended only for the LLM call) since `operator.add`
+    # appends at the end, not the start, and would put it out of order.
     def inject_system_prompt(state):
         sys_prompt = build_system_prompt(
             PersonalityMode(state["personality_mode"]),
             OperationMode(state["operation_mode"]),
         )
         ctx = f"\n\n[CONTEXT]\n{json.dumps(state['context'])}" if state.get("context") else ""
-        existing = [m for m in state["messages"] if isinstance(m, SystemMessage)]
-        if not existing:
-            return {**state, "messages": [SystemMessage(content=sys_prompt + ctx)] + list(state["messages"])}
-        return state
+        return {"system_prompt": sys_prompt + ctx}
 
     async def agent_node(state):
         if state.get("iteration_count", 0) > 20:
-            return {**state, "messages": state["messages"] + [
-                AIMessage(content="Max reasoning steps reached. Please clarify your request.")
-            ]}
-        response = await llm_with_tools.ainvoke(state["messages"])
-        return {**state, "messages": state["messages"] + [response],
-                "iteration_count": state.get("iteration_count", 0) + 1}
+            return {"messages": [AIMessage(content="Max reasoning steps reached. Please clarify your request.")]}
+        llm_input = [SystemMessage(content=state["system_prompt"])] + list(state["messages"])
+        response = await llm_with_tools.ainvoke(llm_input)
+        return {"messages": [response], "iteration_count": state.get("iteration_count", 0) + 1}
 
     def approval_gate_node(state):
         last_msg = state["messages"][-1]
         if not hasattr(last_msg, "tool_calls") or not last_msg.tool_calls:
-            return state
+            return {}
         op_mode = OperationMode(state["operation_mode"])
         blocked = [c for c in last_msg.tool_calls if requires_approval(c["name"], op_mode)]
         if blocked:
             msg = (f"**Approval Required** for {len(blocked)} action(s):\n"
                    + "\n".join(f"- `{c['name']}`" for c in blocked)
                    + "\n\nApprove or reject in the approval center.")
-            return {**state, "pending_approvals": state.get("pending_approvals", []) + blocked,
-                    "messages": state["messages"] + [AIMessage(content=msg)]}
-        return state
+            return {"pending_approvals": state.get("pending_approvals", []) + blocked,
+                    "messages": [AIMessage(content=msg)]}
+        return {}
 
     def should_continue(state):
         last = state["messages"][-1]
@@ -103,7 +110,7 @@ async def run_agent(user_message, tenant_id, user_id, session_id,
         "messages": messages, "tenant_id": tenant_id, "user_id": user_id,
         "session_id": session_id, "personality_mode": personality_mode,
         "operation_mode": operation_mode, "pending_approvals": [],
-        "iteration_count": 0, "context": context or {},
+        "iteration_count": 0, "context": context or {}, "system_prompt": "",
     })
     last_ai = next((m for m in reversed(final["messages"]) if isinstance(m, AIMessage)), None)
     return {
