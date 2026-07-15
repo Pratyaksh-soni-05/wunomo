@@ -1,9 +1,12 @@
+import structlog
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from config import settings
 from jose import JWTError, jwt
 from typing import Optional
+
+log = structlog.get_logger()
 from services.auth_service import (
     hash_password, issue_token_for_user,
     create_new_tenant_and_user, find_existing_tenants_for_email,
@@ -152,7 +155,8 @@ async def google_callback(req: GoogleCallback):
     try:
         tokens = await exchange_google_code(req.code)
         claims = await verify_google_id_token(tokens["id_token"])
-    except Exception:
+    except Exception as exc:
+        log.error("google_auth_failed", error=str(exc), error_type=type(exc).__name__)
         raise HTTPException(status_code=400, detail="Google authentication failed")
 
     email = claims["email"]

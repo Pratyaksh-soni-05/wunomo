@@ -2,7 +2,10 @@ import uuid
 import pytest
 
 import api.v1.auth as auth_router
-from services.auth_service import create_new_tenant_and_user, hash_password, get_google_authorize_url
+from services.auth_service import (
+    create_new_tenant_and_user, hash_password, get_google_authorize_url,
+    _verify_google_id_token_sync,
+)
 
 
 def unique_email():
@@ -18,6 +21,26 @@ def _mock_google(monkeypatch, email: str, google_sub: str, email_verified: bool 
 
     monkeypatch.setattr(auth_router, "exchange_google_code", fake_exchange)
     monkeypatch.setattr(auth_router, "verify_google_id_token", fake_verify)
+
+
+def test_verify_google_id_token_tolerates_small_clock_skew(monkeypatch):
+    """verify_oauth2_token() defaults to zero clock-skew tolerance, which
+    fails real, valid tokens whenever this server's clock drifts even a
+    second behind Google's (observed live in a Docker/WSL2 dev environment:
+    "Token used too early"). Confirms the fix actually passes a nonzero
+    clock_skew_in_seconds through, rather than just asserting behavior that
+    happens to work when the clock is perfectly synced."""
+    captured = {}
+
+    def fake_verify_oauth2_token(id_token_str, request, audience=None, clock_skew_in_seconds=0):
+        captured["clock_skew_in_seconds"] = clock_skew_in_seconds
+        return {"sub": "x", "email": "x@example.com", "email_verified": True}
+
+    import google.oauth2.id_token as google_id_token
+    monkeypatch.setattr(google_id_token, "verify_oauth2_token", fake_verify_oauth2_token)
+
+    _verify_google_id_token_sync("fake-token")
+    assert captured["clock_skew_in_seconds"] > 0
 
 
 @pytest.mark.asyncio

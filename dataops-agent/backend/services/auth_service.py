@@ -445,8 +445,14 @@ def _verify_google_id_token_sync(id_token_str: str) -> dict:
     from google.auth.transport import requests as google_requests
     from google.oauth2 import id_token as google_id_token
 
+    # verify_oauth2_token() defaults to clock_skew_in_seconds=0 — any drift
+    # between this server's clock and Google's (common in Docker/WSL2 dev
+    # environments after host sleep; possible in production too without
+    # perfect NTP sync) fails real, valid tokens with "Token used too early".
+    # A small tolerance is standard JWT practice, not a security weakening.
     return google_id_token.verify_oauth2_token(
         id_token_str, google_requests.Request(), audience=settings.GOOGLE_OAUTH_CLIENT_ID,
+        clock_skew_in_seconds=10,
     )
 
 
