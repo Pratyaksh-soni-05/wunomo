@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -215,6 +216,55 @@ async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_
         "status": "single", "token": issue_token_for_user(user, auth_method),
         "user_id": user.id, "tenant_id": user.tenant_id,
     }
+
+
+# ---------------------------------------------------------------------------
+# Pending-identity resolution token — closes a real gap: when resolve_identity()
+# returns "choose" for email-code or Google, the proof that got us there (the
+# email code, Google's authorization code) is already single-use and consumed
+# by that point, so the client can't just resubmit the same proof a second
+# time with a tenant_id the way password login can (password verification is
+# stateless and safe to repeat). Instead, stash the already-proven identity
+# server-side under a short-lived, single-use random token and let the client
+# finalize the tenant choice against that token via resolve_pending_identity()
+# (wired to POST /auth/resolve-workspace). Not needed for password login's own
+# "choose" path, which resubmits the real password and needs nothing extra.
+# ---------------------------------------------------------------------------
+
+PENDING_IDENTITY_TTL_SECONDS = 300
+
+
+async def store_pending_identity(
+    email: str, auth_method: str, google_id: Optional[str] = None,
+    provider_email_verified: bool = False,
+) -> str:
+    token = secrets.token_urlsafe(24)
+    payload = json.dumps({
+        "email": email, "auth_method": auth_method,
+        "google_id": google_id, "provider_email_verified": provider_email_verified,
+    })
+    await _redis().set(f"pending_identity:{token}", payload, ex=PENDING_IDENTITY_TTL_SECONDS)
+    return token
+
+
+async def resolve_pending_identity(token: str, tenant_id: str) -> dict:
+    key = f"pending_identity:{token}"
+    raw = await _redis().get(key)
+    if not raw:
+        return {"status": "invalid"}
+    await _redis().delete(key)
+    data = json.loads(raw)
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(User).where(
+            User.tenant_id == tenant_id, User.email == data["email"],
+        ))
+        user = r.scalars().first()
+        if user is None:
+            return {"status": "invalid"}
+        return await _link_and_issue(
+            db, user, data["auth_method"], data.get("google_id"), data.get("provider_email_verified", False),
+        )
 
 
 # ---------------------------------------------------------------------------

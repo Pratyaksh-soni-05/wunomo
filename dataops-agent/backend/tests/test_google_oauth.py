@@ -160,3 +160,21 @@ async def test_multiple_tenant_matches_returns_choose_workspace(client, monkeypa
     assert r.json()["status"] == "choose_workspace"
     tenant_ids = {opt["tenant_id"] for opt in r.json()["options"]}
     assert tenant_ids == {tenant_a.id, tenant_b.id}
+
+    # Google's code+state are single-use and already consumed — a second
+    # /google/callback with the same values must fail, proving finalization
+    # has to go through the resolution token instead.
+    replay = await client.post("/api/v1/auth/google/callback", json={"code": "fake", "state": url_resp.json()["state"]})
+    assert replay.status_code == 400
+
+    resolution_token = r.json()["resolution_token"]
+    resolved = await client.post("/api/v1/auth/resolve-workspace", json={
+        "resolution_token": resolution_token, "tenant_id": tenant_a.id,
+    })
+    assert resolved.status_code == 200
+    assert resolved.json()["tenant_id"] == tenant_a.id
+
+    replay_resolution = await client.post("/api/v1/auth/resolve-workspace", json={
+        "resolution_token": resolution_token, "tenant_id": tenant_b.id,
+    })
+    assert replay_resolution.status_code == 400

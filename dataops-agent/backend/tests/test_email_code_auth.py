@@ -141,6 +141,29 @@ async def test_multiple_tenant_matches_returns_choose_workspace(client, captured
     tenant_ids = {opt["tenant_id"] for opt in verify.json()["options"]}
     assert tenant_ids == {tenant_a.id, tenant_b.id}
 
+    # The code is already single-use consumed by this point — resubmitting it
+    # a second time must fail, proving the resolution-token path is genuinely
+    # necessary and not just a redundant convenience.
+    replay = await client.post("/api/v1/auth/email-code/verify", json={
+        "email": email, "code": code, "tenant_id": tenant_a.id,
+    })
+    assert replay.status_code == 400
+
+    # Finalizing via the resolution token must work instead.
+    resolution_token = verify.json()["resolution_token"]
+    resolved = await client.post("/api/v1/auth/resolve-workspace", json={
+        "resolution_token": resolution_token, "tenant_id": tenant_a.id,
+    })
+    assert resolved.status_code == 200
+    assert resolved.json()["tenant_id"] == tenant_a.id
+    assert "access_token" in resolved.json()
+
+    # Single-use: replaying the same resolution token must fail.
+    replay_resolution = await client.post("/api/v1/auth/resolve-workspace", json={
+        "resolution_token": resolution_token, "tenant_id": tenant_b.id,
+    })
+    assert replay_resolution.status_code == 400
+
 
 @pytest.mark.asyncio
 async def test_auto_link_sets_email_verified_on_existing_password_account(client, captured_code):

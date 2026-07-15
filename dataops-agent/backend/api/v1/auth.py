@@ -10,6 +10,7 @@ from services.auth_service import (
     resolve_password_login, resolve_identity,
     check_email_code_request_allowed, send_login_code, verify_login_code,
     get_google_authorize_url, consume_oauth_state, exchange_google_code, verify_google_id_token,
+    store_pending_identity, resolve_pending_identity,
 )
 
 
@@ -110,7 +111,12 @@ async def verify_email_code(req: EmailCodeVerify):
             "user_id": identity["user_id"], "tenant_id": identity["tenant_id"],
         }
     if identity["status"] == "choose":
-        return {"status": "choose_workspace", "options": identity["options"]}
+        # The email code was already single-use consumed by verify_login_code()
+        # above, so the client can't resubmit it a second time with a
+        # tenant_id — stash the now-proven identity and hand back a
+        # short-lived token to finalize the pick via /resolve-workspace.
+        resolution_token = await store_pending_identity(req.email, "email_code")
+        return {"status": "choose_workspace", "options": identity["options"], "resolution_token": resolution_token}
 
     # status == "none": no existing tenant-account for this email.
     if req.new_tenant_name:
@@ -164,7 +170,12 @@ async def google_callback(req: GoogleCallback):
             "user_id": identity["user_id"], "tenant_id": identity["tenant_id"],
         }
     if identity["status"] == "choose":
-        return {"status": "choose_workspace", "options": identity["options"]}
+        # Google's authorization code + state are both single-use and already
+        # consumed above — same resolution-token handoff as email-code.
+        resolution_token = await store_pending_identity(
+            email, "google", google_id=google_id, provider_email_verified=provider_email_verified,
+        )
+        return {"status": "choose_workspace", "options": identity["options"], "resolution_token": resolution_token}
     if identity["status"] == "blocked_unverified":
         raise HTTPException(
             status_code=403,
@@ -184,6 +195,25 @@ async def google_callback(req: GoogleCallback):
             "user_id": user.id, "tenant_id": tenant.id,
         }
     return {"status": "no_account", "detail": "No workspace found for this email. Resubmit with new_tenant_name to create one."}
+
+
+class ResolveWorkspaceRequest(BaseModel):
+    resolution_token: str
+    tenant_id: str
+
+
+@router.post("/resolve-workspace")
+async def resolve_workspace(req: ResolveWorkspaceRequest):
+    """Finalizes a choose_workspace pick from email-code or Google login, where
+    the original proof (email code, Google auth code) was already single-use
+    consumed by the time multiple tenant matches were found."""
+    result = await resolve_pending_identity(req.resolution_token, req.tenant_id)
+    if result["status"] != "single":
+        raise HTTPException(status_code=400, detail="Invalid or expired selection")
+    return {
+        "access_token": result["token"], "token_type": "bearer",
+        "user_id": result["user_id"], "tenant_id": result["tenant_id"],
+    }
 
 
 @router.get("/me")
