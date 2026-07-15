@@ -254,7 +254,7 @@ same commit as the change.
 | 3 | **Unified auth design** (proposal only) | None | Propose JWT claims shape, tenant-resolution rules across OAuth / invite-join / new-signup, the `email_verified` linking rule — sign-off, no code | N/A (design approval) | None |
 | 4 | **Onboarding profile storage** | None | New columns/table for role, company, size, use case, data stack — schema proposed for approval first | Register a user, POST onboarding answers, confirm persisted; confirm register/login unaffected | Phase 3 |
 | 5 | **Non-password auth: Google OAuth + email-code** — **done, fully live-verified** | None | Real Google OAuth flow, callback endpoint, `email_verified`-gated account linking, built against real `GOOGLE_OAUTH_CLIENT_ID`/`SECRET` env vars; **plus** the email-code method (Resend integration, `EmailLoginCode` table + rate limiting, auto-link on verify) — bundled into one phase since both share the `User` schema migration (nullable `hashed_password`, `google_id`, `email_verified`), the JWT `auth_method` handling, and the auto-link machinery designed together in Phase 3 | Both methods fully live-verified end-to-end. Email-code: a real, fully-automated Resend delivery round-trip (code sent, retrieved via Resend's own API, verified, JWT issued). Google: the user clicked through the real consent screen; the resulting code was exchanged and verified for real against Google's production endpoints, correctly auto-linking onto an account originally created via email-code (not password) rather than creating a redundant tenant — confirms auto-link works from either originating method | Phase 3 |
-| 6 | **Auth + Onboarding UI** | Signup/login wired to real endpoints; onboarding wired to Phase 4 (real persistence from day one); Google button **and email-code flow** wired to Phase 5 | — | Real signup, login, onboarding persistence, all live-verified | Phase 2, 4; OAuth functional once Phase 5 + real credentials land (email-code live-verifiable independently of Google credentials) |
+| 6 | **Auth + Onboarding UI** — **done, fully live-verified** | Signup/login wired to real endpoints; onboarding wired to Phase 4 (real persistence from day one); Google button **and email-code flow** wired to Phase 5 | — | Real signup, login, onboarding persistence, all live-verified | Phase 2, 4; OAuth functional once Phase 5 + real credentials land (email-code live-verifiable independently of Google credentials) |
 | 7 | **App shell** | Sidebar/topbar/routing/command palette/toasts/notifications/AXIOM FAB, light/dark theme switching (client-side, upgraded to server-persisted in Phase 16) | None | Visual + interaction comparison to prototype | Phase 2 |
 | 8 | **Chat sessions + tool trace** | None | `GET /chat/sessions` (tenant-scoped session list); real tool-call trace included in chat response | Multi-session real chat; session list correctly tenant-scoped; tool trace reflects tools actually executed | None |
 | 9 | **Dashboard** | Wired to real KPIs (pipelines/quality/incidents/approvals/sources) + AXIOM Activity via Phase 8 | — | Live dashboard against real tenant data | Phase 7; Phase 8 for AXIOM Activity |
@@ -273,10 +273,10 @@ same commit as the change.
 
 ## Outstanding items (user's side)
 
-- **Google OAuth client id/secret** — being created in Google Cloud Console;
-  will be provided via `.env` (`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`)
-  when ready. Phase 5 can be built and unit-tested without these; full live
-  verification is blocked until they arrive.
+- ~~**Google OAuth client id/secret**~~ — resolved. Real credentials configured and
+  fully live-verified through both Phase 5 (backend) and Phase 6 (UI click-through),
+  including a real fix for a clock-skew bug found during the Phase 6 UI test — see
+  `CLAUDE.md` Gotchas.
 - **Gemini billing** — still unresolved on Google Cloud's side (the API key shows
   `limit: 0` on the free tier even after rotation — an account/billing-tier issue,
   not a code issue). Groq fallback works correctly and is the effective primary
