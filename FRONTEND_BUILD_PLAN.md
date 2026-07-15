@@ -67,6 +67,62 @@ Everything else on every screen ships real, wired to a real backend endpoint.
 
 ---
 
+## Phase 3 decisions (locked)
+
+Auth design proposal, approved. Grounded in a full read of `api/v1/auth.py`, which
+surfaced two pre-existing bugs now tracked in CLAUDE.md's Known-broken table (see
+below) — the design closes both rather than just describing them.
+
+**Core principle:** identity is scoped to `(email, tenant)`, not to email alone. The
+same email existing in multiple tenants is not a conflict — it's independent workspace
+memberships (Slack's model). "Linking" only ever means attaching a second login method
+to one specific existing `(email, tenant)` account; it never merges or blocks across
+tenants.
+
+**JWT claims:** `sub` (user.id), `tenant_id`, `email`, `role` — all unchanged. Adds
+`auth_method` (`"password" | "google"`, extended to a third value below) and `iat`.
+Deliberately not adding `personality_mode`/`operation_mode` (already correctly read
+fresh per-request elsewhere — embedding them would create staleness) or an
+`email_verified` claim (checked server-side at linking time, not worth persisting into
+every token).
+
+**`User` model changes required** (migration proposed separately before it lands):
+`hashed_password` becomes nullable (Google-only accounts have none); new `google_id:
+str | None`, indexed but **not** globally unique (the same Google identity can
+legitimately link to more than one tenant-account); new `email_verified: bool = False`,
+set `True` only when Google's own `email_verified` claim was `true` at linking time.
+
+**Three signup/login paths:**
+1. **Fresh email/password signup** — unchanged (new tenant, role `owner`), plus a
+   **non-blocking informational nudge** if the email already exists in another tenant
+   ("you already have a workspace under this email — log in instead, or continue").
+2. **Google OAuth** — splits on context, not on the token: *"create new workspace"* via
+   Google always makes a fresh tenant (never conflicts, same reasoning as #1). *"Continue
+   with Google" against a specific existing tenant* (invite flow, or a workspace-scoped
+   login) looks up `(tenant_id, email)`; auto-links to an existing password account
+   **iff** Google's `email_verified` claim is `true`; if `false`, blocks the auto-link
+   and redirects to password login — never silently links on an unverified email, never
+   silently creates a duplicate (the unique constraint wouldn't allow one in the same
+   tenant anyway).
+3. **Invite-based join** — tenant_id and role come from the invite token, never user
+   input. Invites are email-locked (same spoofing-prevention spirit as the OAuth rule).
+   Redeeming against an email already a member of that same tenant → rejected as
+   "already a member"; against other tenants → irrelevant, proceeds as an independent
+   membership. (Invite table/endpoints themselves are Phase 15's build; this is the
+   resolution logic Phase 15 implements against.)
+
+**Login disambiguation (built now, not deferred — fixes the pre-existing arbitrary-match
+bug):** to avoid leaking "this email exists somewhere" to an unauthenticated caller,
+resolution happens only *after* a credential match, never before. Client submits
+email+password in one call; server checks the password against every `User` row with
+that email across tenants. Exactly one match → issue the JWT immediately (identical to
+today's UX). Multiple matches → return a workspace list with **no token yet**; client
+resubmits with a chosen `tenant_id`; server re-verifies scoped to that tenant and issues
+the token. Zero matches → the same generic "invalid credentials" as today, no
+distinction leaked between wrong-password and no-such-email.
+
+---
+
 ## Role-check audit (feeds Phase 15 prioritization)
 
 Grepped every `@router.post/put/patch/delete` across `api/v1/*.py` against every
