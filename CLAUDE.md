@@ -58,10 +58,10 @@ live-verified — see Status Table — with 2 of 3 call sites (`incident_triage`
 allows (regression-tested and code-identical to the proven path in the meantime).
 Phase 4 (onboarding profile storage) is next per the original plan — Phase 3 only
 gated Phase 4 and Phase 5, both now unblocked, and onboarding doesn't depend on which
-of the 3 auth methods created the tenant. Phase 5's scope (previously "Google OAuth"
-only) should be widened to cover email-code too before it starts, since Phase 3's
-design bundled both — not yet applied to the phase table, flag this when Phase 5
-starts. Note: Zustand/Chart.js/react-chartjs-2
+of the 3 auth methods created the tenant. Phase 5 has been widened to "Non-password
+auth: Google OAuth + email-code" (both bundled — they share the `User` schema
+migration, JWT `auth_method` handling, and auto-link machinery from Phase 3's design);
+Phase 6's description updated to match. Note: Zustand/Chart.js/react-chartjs-2
 aren't installed yet — Phase 2's actual scope (scaffold + design system + component
 library) didn't need them; they land whenever the phase that first uses them arrives
 (state management, Dashboard charts), not before.
