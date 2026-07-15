@@ -9,6 +9,7 @@ from services.auth_service import (
     create_new_tenant_and_user, find_existing_tenants_for_email,
     resolve_password_login, resolve_identity,
     check_email_code_request_allowed, send_login_code, verify_login_code,
+    get_google_authorize_url, consume_oauth_state, exchange_google_code, verify_google_id_token,
 )
 
 
@@ -118,6 +119,66 @@ async def verify_email_code(req: EmailCodeVerify):
             email_verified=True,
         )
         token = issue_token_for_user(user, "email_code")
+        return {
+            "access_token": token, "token_type": "bearer",
+            "user_id": user.id, "tenant_id": tenant.id,
+        }
+    return {"status": "no_account", "detail": "No workspace found for this email. Resubmit with new_tenant_name to create one."}
+
+
+@router.get("/google/login-url")
+async def google_login_url():
+    return await get_google_authorize_url()
+
+
+class GoogleCallback(BaseModel):
+    code: str
+    state: str
+    intended_tenant_id: Optional[str] = None
+    new_tenant_name: Optional[str] = None
+
+
+@router.post("/google/callback")
+async def google_callback(req: GoogleCallback):
+    if not await consume_oauth_state(req.state):
+        raise HTTPException(status_code=400, detail="Invalid or expired state")
+
+    try:
+        tokens = await exchange_google_code(req.code)
+        claims = await verify_google_id_token(tokens["id_token"])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Google authentication failed")
+
+    email = claims["email"]
+    google_id = claims["sub"]
+    provider_email_verified = bool(claims.get("email_verified"))
+
+    identity = await resolve_identity(
+        email, "google", intended_tenant_id=req.intended_tenant_id,
+        google_id=google_id, provider_email_verified=provider_email_verified,
+    )
+
+    if identity["status"] == "single":
+        return {
+            "access_token": identity["token"], "token_type": "bearer",
+            "user_id": identity["user_id"], "tenant_id": identity["tenant_id"],
+        }
+    if identity["status"] == "choose":
+        return {"status": "choose_workspace", "options": identity["options"]}
+    if identity["status"] == "blocked_unverified":
+        raise HTTPException(
+            status_code=403,
+            detail="This email already has a password account and Google hasn't verified ownership of it. Log in with your password instead.",
+        )
+
+    # status == "none": no existing tenant-account for this email.
+    if req.new_tenant_name:
+        tenant, user = await create_new_tenant_and_user(
+            tenant_name=req.new_tenant_name, email=email, auth_method="google",
+            google_id=google_id, email_verified=provider_email_verified,
+            full_name=claims.get("name"),
+        )
+        token = issue_token_for_user(user, "google")
         return {
             "access_token": token, "token_type": "bearer",
             "user_id": user.id, "tenant_id": tenant.id,

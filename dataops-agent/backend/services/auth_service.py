@@ -341,3 +341,66 @@ async def verify_login_code(email: str, code: str) -> dict:
 
     await clear_exhausted_streak(email)
     return {"status": "ok", "intended_tenant_id": record.intended_tenant_id}
+
+
+# ---------------------------------------------------------------------------
+# Google OAuth — authorization URL generation (with CSRF state, same
+# single-use/TTL pattern as email-code), code exchange, ID token
+# verification.
+# ---------------------------------------------------------------------------
+
+GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+OAUTH_STATE_TTL_SECONDS = 600
+
+
+async def get_google_authorize_url() -> dict:
+    state = secrets.token_urlsafe(24)
+    await _redis().set(f"oauth_state:google:{state}", "1", ex=OAUTH_STATE_TTL_SECONDS)
+    params = {
+        "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
+        "redirect_uri": settings.GOOGLE_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "access_type": "online",
+        "prompt": "select_account",
+    }
+    return {"url": f"{GOOGLE_AUTH_ENDPOINT}?{httpx.QueryParams(params)}", "state": state}
+
+
+async def consume_oauth_state(state: str) -> bool:
+    """Single-use CSRF check — same pattern as email-code's single-use
+    consumed_at marker, just Redis-backed since there's no other persistent
+    record needed for this short-lived value."""
+    key = f"oauth_state:google:{state}"
+    deleted = await _redis().delete(key)
+    return deleted > 0
+
+
+async def exchange_google_code(code: str) -> dict:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(GOOGLE_TOKEN_ENDPOINT, data={
+            "code": code,
+            "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
+            "client_secret": settings.GOOGLE_OAUTH_CLIENT_SECRET,
+            "redirect_uri": settings.GOOGLE_OAUTH_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        })
+        r.raise_for_status()
+        return r.json()
+
+
+def _verify_google_id_token_sync(id_token_str: str) -> dict:
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token as google_id_token
+
+    return google_id_token.verify_oauth2_token(
+        id_token_str, google_requests.Request(), audience=settings.GOOGLE_OAUTH_CLIENT_ID,
+    )
+
+
+async def verify_google_id_token(id_token_str: str) -> dict:
+    """verify_oauth2_token() is synchronous (blocking cert fetch/verify) —
+    run off the event loop rather than block it."""
+    return await asyncio.to_thread(_verify_google_id_token_sync, id_token_str)
