@@ -20,6 +20,13 @@ export default function RootLayout({
         <link rel="preload" href="/fonts/GeneralSans-400.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
         <link rel="preload" href="/fonts/GeneralSans-600.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
         <link rel="preload" href="/fonts/Fraunces-600.woff2" as="font" type="font/woff2" crossOrigin="anonymous" />
+        {/* Runs before paint to avoid a flash of the wrong theme — reads the
+            same localStorage key ThemeToggle writes to. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('axiom_theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}})();`,
+          }}
+        />
       </head>
       <body>
         <ToastProvider>{children}</ToastProvider>

@@ -177,6 +177,21 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+export interface DecodedUser {
+  email: string;
+  role: string;
+  tenant_id: string;
+}
+
+export function decodeUserFromToken(token: string): DecodedUser | null {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return { email: payload.email, role: payload.role, tenant_id: payload.tenant_id };
+  } catch {
+    return null;
+  }
+}
+
 export function clearSession() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(TENANT_KEY);

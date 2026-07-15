@@ -11,22 +11,18 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const token = getToken();
-    if (!token) {
-      router.push("/login");
-      return;
-    }
-    getOnboarding(token).then(setProfile).catch(() => {});
-  }, [router]);
+    if (token) getOnboarding(token).then(setProfile).catch(() => {});
+  }, []);
 
   return (
-    <div className="onboarding-shell">
-      <Card className="onboarding-card">
+    <div style={{ padding: 24, display: "flex", justifyContent: "center" }}>
+      <Card style={{ maxWidth: 560, width: "100%" }}>
         <CardBody>
           <h2 className="font-display text-2xl mb-2">Welcome to Wunomo AI</h2>
           <p className="text-muted mb-4">
             You&apos;re signed in. AXIOM — your autonomous DataOps AI employee — is one of the personalities on the
-            platform. The real dashboard (pipelines, quality, incidents) lands in a later phase — this is just
-            confirmation the auth flow completed.
+            platform. The real dashboard (pipelines, quality, incidents) is wired up in Phase 9 — this page and the
+            rest of the app shell around it (Phase 7) are what make that possible.
           </p>
           {profile && (
             <p className="text-sm text-secondary mb-4">
