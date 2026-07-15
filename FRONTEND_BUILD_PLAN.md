@@ -121,6 +121,82 @@ resubmits with a chosen `tenant_id`; server re-verifies scoped to that tenant an
 the token. Zero matches → the same generic "invalid credentials" as today, no
 distinction leaked between wrong-password and no-such-email.
 
+**Third method — email + one-time code (passwordless), added after the above was
+approved.** Uses the Resend service already planned for Phase 15, free-tier only, no
+phone/SMS OTP. `auth_method` gets a third value, `"email_code"`. No new `User` columns
+beyond what Google already requires — a successful verification also sets
+`email_verified = true` on the linked row (reusing that column, not duplicating it).
+
+*Tenant resolution* mirrors the Google split, plus one addition Google didn't need:
+"create new workspace" always makes a fresh tenant (never conflicts); "continue" against
+a specific existing tenant resolves `(tenant_id, email)` and auto-links (see below); a
+**general, non-tenant-scoped login** — a code only proves *which email*, not *which
+tenant* — resolves every tenant-account for that email after verification: one match
+logs straight in, multiple show a workspace picker, zero can safely say "no workspace
+found for this email, create one?" **because by that point ownership is already
+proven** — the enumeration risk that shapes the password-login design doesn't apply
+post-verification.
+
+*Auto-link on first `email_code` login against an existing password/Google account:*
+**approved, reasoned independently, not by default-matching the Google rule.**
+Email-code is a direct, first-party, real-time proof (we generate the secret, choose
+the channel, verify the round-trip immediately) — at least as strong as, arguably
+stronger than, trusting Google's indirect historical claim, and structurally the same
+trust mechanism the industry already uses for "forgot password" flows, which authorize
+strictly more sensitive actions (full account takeover) than adding a second login
+method. Anyone who could abuse auto-link via a received code could equally abuse a
+future password-reset email, so this doesn't lower the system's trust bar, just
+applies the one it already implies elsewhere.
+
+*Rate limiting / abuse prevention* (defaults below — sensible starting points, tunable
+later without a redesign). Two storage layers matching what's already in this stack:
+Redis (already used for Celery/cache, DB 0) for ephemeral counters, Postgres for the
+durable code record.
+
+`EmailLoginCode` table: `email` (indexed), `code_hash` (SHA-256, deliberately not
+bcrypt — protection comes from TTL + attempt caps, not hash slowness, and slow hashing
+only hurts legitimate retry latency), `intended_tenant_id` (nullable — null means
+new-workspace/general context), `expires_at`, `attempts_used`, `consumed_at`
+(single-use, set on success, blocks replay), `request_ip` (audit — see Gotchas for the
+X-Forwarded-For caveat on this field).
+
+| Control | Default | Stops |
+|---|---|---|
+| Code TTL | 10 min | Stale-code brute-forcing |
+| Max verify attempts per code | 5 | Guessing within a code's lifetime (6-digit space, 5 attempts ≈ 0.0005% success) |
+| Resend cooldown | 60s per email | Inbox-bombing, rapid-fire request+guess cycles |
+| Requests per email | 5/hour | Sustained abuse against one target, Resend free-tier quota protection |
+| Requests per IP | 20/hour | One attacker spraying many different emails |
+| Lockout | 30 min, after 3 consecutive fully-exhausted codes for the same email | Closes the loophole where an attacker just requests fresh codes for fresh attempt budgets |
+
+Enumeration safety is symmetric with the password design: all rate-limit/lockout
+bookkeeping is keyed by the *raw submitted email string*, independent of whether it
+resolves to a real account, so a non-existent email rate-limits/locks out exactly like
+a real one under the same request pattern. The request endpoint only ever returns
+"code sent" (always, real account or not) or "rate limited" (depends only on request
+pattern) — neither leaks account existence. Verification failures are uniform too:
+expired, wrong, and locked-out all return the same generic "invalid or expired code."
+
+**Summary — all three methods:**
+
+| | Password | Google OAuth | Email code |
+|---|---|---|---|
+| `auth_method` | `"password"` | `"google"` | `"email_code"` |
+| Proves | knowledge of a per-`(tenant,email)` secret | Google's historical claim | real-time inbox control |
+| New-workspace signup | always fresh tenant | always fresh tenant | always fresh tenant |
+| Existing-tenant login | check hash, disambiguate if >1 tenant matches | auto-link iff `email_verified` from Google | auto-link (reasoned above) |
+| Sets `User.email_verified` | no | yes, from Google's claim | yes, on successful verify |
+
+**Latent bugs this design closes** (found while reading `api/v1/auth.py` to ground the
+design, now tracked in CLAUDE.md's Known-broken table — locked as bugs to fix when this
+lands, not yet fixed): `login()` has no tenant scoping on its email lookup and silently
+authenticates into an arbitrary tenant-account if the same email exists in more than
+one tenant (the schema explicitly allows this); `register()` never checks for an
+existing email before creating a new tenant, so duplicate signups under the same email
+silently produce orphan tenants with no warning. Both fix directions are specified
+above (login disambiguation; the non-blocking signup nudge) and are approved to build
+now, not deferred.
+
 ---
 
 ## Role-check audit (feeds Phase 15 prioritization)
