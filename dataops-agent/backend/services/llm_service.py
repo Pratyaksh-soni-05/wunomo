@@ -1,4 +1,5 @@
 import asyncio
+import time
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_core.messages import BaseMessage
@@ -10,6 +11,42 @@ from groq import AuthenticationError as GroqAuthError
 
 
 log = structlog.get_logger()
+
+
+def _provider_for_model(model: str) -> str:
+    """Same routing rule _build_llm() uses, exposed for usage logging."""
+    if "llama" in model or "mixtral" in model or "gemma" in model:
+        return "groq"
+    return "gemini"
+
+
+async def log_llm_usage(
+    *, tenant_id: str | None, user_id: str | None = None, session_id: str | None = None,
+    request_type: str, provider: str, model: str, used_fallback: bool,
+    latency_ms: int, success: bool, usage_metadata: dict | None = None,
+    error_message: str | None = None,
+) -> None:
+    """Best-effort usage logging — a DB hiccup here must never break the
+    actual LLM call it's describing, so failures are logged and swallowed."""
+    if not tenant_id:
+        return
+    try:
+        from database import AsyncSessionLocal
+        from models.all_models import LlmUsageEvent
+        usage_metadata = usage_metadata or {}
+        async with AsyncSessionLocal() as db:
+            db.add(LlmUsageEvent(
+                tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+                request_type=request_type, provider=provider, model=model,
+                used_fallback=used_fallback,
+                input_tokens=usage_metadata.get("input_tokens"),
+                output_tokens=usage_metadata.get("output_tokens"),
+                total_tokens=usage_metadata.get("total_tokens"),
+                latency_ms=latency_ms, success=success, error_message=error_message,
+            ))
+            await db.commit()
+    except Exception as exc:
+        log.warning("log_llm_usage_failed", error=str(exc))
 
 # A failing/quota-exhausted Gemini call doesn't fail fast: google-api-core's own
 # gRPC retry layer respects the server's suggested `retry_delay` (we've seen it
@@ -52,16 +89,50 @@ def get_fallback_llm(temperature=0.0):
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-async def invoke_llm(messages: list, temperature=0.0) -> str:
+async def invoke_llm(
+    messages: list, temperature=0.0, *, tenant_id: str | None = None,
+    user_id: str | None = None, session_id: str | None = None,
+    request_type: str = "general_completion",
+) -> str:
+    start = time.monotonic()
+    used_fallback = False
+    model = settings.PRIMARY_LLM_MODEL
     try:
         llm = get_primary_llm(temperature)
         r = await llm.ainvoke(messages)
+        latency_ms = int((time.monotonic() - start) * 1000)
+        await log_llm_usage(
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+            request_type=request_type, provider=_provider_for_model(model), model=model,
+            used_fallback=False, latency_ms=latency_ms, success=True,
+            usage_metadata=getattr(r, "usage_metadata", None),
+        )
         return r.content
     except Exception as e:
         log.warning("primary_llm_failed", error=str(e))
-        llm = get_fallback_llm(temperature)
-        r = await llm.ainvoke(messages)
-        return r.content
+        used_fallback = True
+        model = settings.FALLBACK_LLM_MODEL
+        fallback_start = time.monotonic()
+        try:
+            llm = get_fallback_llm(temperature)
+            r = await llm.ainvoke(messages)
+            latency_ms = int((time.monotonic() - fallback_start) * 1000)
+            await log_llm_usage(
+                tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+                request_type=request_type, provider=_provider_for_model(model), model=model,
+                used_fallback=True, latency_ms=latency_ms, success=True,
+                usage_metadata=getattr(r, "usage_metadata", None),
+            )
+            return r.content
+        except Exception as fallback_exc:
+            latency_ms = int((time.monotonic() - fallback_start) * 1000)
+            await log_llm_usage(
+                tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+                request_type=request_type, provider=_provider_for_model(model), model=model,
+                used_fallback=True, latency_ms=latency_ms, success=False,
+                error_message=str(fallback_exc),
+            )
+            raise
 
 
 class _TimeoutFallbackChatModel:
@@ -74,27 +145,55 @@ class _TimeoutFallbackChatModel:
     `agent/dataops_agent.py` actually calls.
     """
 
-    def __init__(self, primary, fallback, timeout_seconds):
+    def __init__(self, primary, fallback, timeout_seconds, primary_model=None, fallback_model=None):
         self._primary = primary
         self._fallback = fallback
         self._timeout = timeout_seconds
+        self._primary_model = primary_model or settings.PRIMARY_LLM_MODEL
+        self._fallback_model = fallback_model or settings.FALLBACK_LLM_MODEL
 
     def bind_tools(self, tools):
         return _TimeoutFallbackChatModel(
             self._primary.bind_tools(tools),
             self._fallback.bind_tools(tools),
             self._timeout,
+            self._primary_model, self._fallback_model,
         )
 
     async def ainvoke(self, messages, *args, **kwargs):
+        # No tenant/session context reaches this class (it's built once and
+        # cached across tenants via get_agent() — see CLAUDE.md gotcha on
+        # _cache). Usage details are stashed on the response's
+        # additional_kwargs instead; the caller (agent_node, which does have
+        # tenant context) is responsible for popping and logging them.
+        start = time.monotonic()
         try:
-            return await asyncio.wait_for(
+            response = await asyncio.wait_for(
                 self._primary.ainvoke(messages, *args, **kwargs),
                 timeout=self._timeout,
             )
+            response.additional_kwargs["_llm_usage"] = {
+                "provider": _provider_for_model(self._primary_model),
+                "model": self._primary_model,
+                "used_fallback": False,
+                "latency_ms": int((time.monotonic() - start) * 1000),
+                "success": True,
+                "usage_metadata": getattr(response, "usage_metadata", None) or {},
+            }
+            return response
         except Exception as e:
             log.warning("primary_llm_failed_or_timed_out", error=str(e), timeout=self._timeout)
-            return await self._fallback.ainvoke(messages, *args, **kwargs)
+            fallback_start = time.monotonic()
+            response = await self._fallback.ainvoke(messages, *args, **kwargs)
+            response.additional_kwargs["_llm_usage"] = {
+                "provider": _provider_for_model(self._fallback_model),
+                "model": self._fallback_model,
+                "used_fallback": True,
+                "latency_ms": int((time.monotonic() - fallback_start) * 1000),
+                "success": True,
+                "usage_metadata": getattr(response, "usage_metadata", None) or {},
+            }
+            return response
 
 
 def get_llm_for_agent(temperature=0.0):
@@ -113,6 +212,14 @@ class LLMService:
     primary->fallback->retry path rather than introducing a third LLM
     invocation mechanism alongside get_llm_for_agent() and invoke_llm()."""
 
-    async def complete(self, prompt: str, temperature: float = 0.0) -> str:
+    async def complete(
+        self, prompt: str, temperature: float = 0.0, *, tenant_id: str | None = None,
+        user_id: str | None = None, session_id: str | None = None,
+        request_type: str = "general_completion",
+    ) -> str:
         from langchain_core.messages import HumanMessage
-        return await invoke_llm([HumanMessage(content=prompt)], temperature=temperature)
+        return await invoke_llm(
+            [HumanMessage(content=prompt)], temperature=temperature,
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+            request_type=request_type,
+        )

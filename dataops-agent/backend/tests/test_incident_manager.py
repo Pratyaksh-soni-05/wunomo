@@ -32,16 +32,19 @@ async def test_llm_service_complete_delegates_to_invoke_llm(monkeypatch):
     must delegate to the already-tested invoke_llm() primary->fallback path."""
     captured = {}
 
-    async def fake_invoke_llm(messages, temperature=0.0):
+    async def fake_invoke_llm(messages, temperature=0.0, **kwargs):
         captured["messages"] = messages
         captured["temperature"] = temperature
+        captured["kwargs"] = kwargs
         return "fake completion"
 
     monkeypatch.setattr(llm_service_module, "invoke_llm", fake_invoke_llm)
 
-    result = await LLMService().complete("do the thing")
+    result = await LLMService().complete("do the thing", tenant_id="t1", request_type="incident_triage")
     assert result == "fake completion"
     assert captured["messages"][0].content == "do the thing"
+    assert captured["kwargs"]["tenant_id"] == "t1"
+    assert captured["kwargs"]["request_type"] == "incident_triage"
 
 
 @pytest.mark.asyncio
@@ -89,7 +92,7 @@ async def test_triage_incident_updates_status_via_llm(client, monkeypatch):
     tenant_id = reg.json()["tenant_id"]
     incident = await _make_incident(tenant_id, status=IncidentStatus.OPEN)
 
-    async def fake_complete(self, prompt, temperature=0.0):
+    async def fake_complete(self, prompt, temperature=0.0, **kwargs):
         return (
             '{"root_cause": "disk full", "remediation_actions": ["free space"], '
             '"suggested_severity": "high", "confidence": "high", "summary": "disk full"}'
@@ -134,7 +137,7 @@ async def test_observability_tools_call_real_incident_manager_methods(client, mo
     assert isinstance(listed, list)
     assert any(i["incident_id"] == incident.id for i in listed)
 
-    async def fake_complete(self, prompt, temperature=0.0):
+    async def fake_complete(self, prompt, temperature=0.0, **kwargs):
         return '{"root_cause": "x", "remediation_actions": [], "suggested_severity": "low", "confidence": "low", "summary": "x"}'
     monkeypatch.setattr(LLMService, "complete", fake_complete)
 

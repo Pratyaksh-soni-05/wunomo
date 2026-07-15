@@ -76,7 +76,9 @@ class TransformGenerator:
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_message),
         ]
-        return await invoke_llm(messages)
+        return await invoke_llm(
+            messages, tenant_id=self.tenant_id, request_type="transform_generation",
+        )
 
     async def generate_sql(
         self,

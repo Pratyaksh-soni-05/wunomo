@@ -67,6 +67,7 @@ async def chat(req: ChatRequest, user=Depends(get_current_user)):
     return {
         "session_id": session_id,
         "response": result["response"],
+        "provider": result.get("provider"),
         "pending_approvals": result["pending_approvals"],
         "timestamp": result["timestamp"],
     }

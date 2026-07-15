@@ -241,7 +241,9 @@ class IncidentManager:
 
                 # Call LLM
                 log.info("triage_incident.llm_call", incident_id=incident_id)
-                llm_response = await self.llm.complete(prompt)
+                llm_response = await self.llm.complete(
+                    prompt, tenant_id=self.tenant_id, request_type="incident_triage",
+                )
 
                 # Parse JSON from LLM response
                 triage_data = self._parse_llm_json(llm_response)

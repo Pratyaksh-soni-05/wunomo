@@ -9,7 +9,7 @@ from langgraph.prebuilt import ToolNode
 
 from agent.personality import build_system_prompt, requires_approval
 from agent.tools import ALL_TOOLS
-from services.llm_service import get_llm_for_agent
+from services.llm_service import get_llm_for_agent, log_llm_usage
 from models.all_models import PersonalityMode, OperationMode
 import structlog
 
@@ -66,6 +66,15 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
             return {"messages": [AIMessage(content="Max reasoning steps reached. Please clarify your request.")]}
         llm_input = [SystemMessage(content=state["system_prompt"])] + list(state["messages"])
         response = await llm_with_tools.ainvoke(llm_input)
+        usage = response.additional_kwargs.pop("_llm_usage", None)
+        if usage:
+            response.additional_kwargs["llm_provider"] = usage["provider"]
+            await log_llm_usage(
+                tenant_id=state["tenant_id"], user_id=state["user_id"], session_id=state["session_id"],
+                request_type="agent_chat", provider=usage["provider"], model=usage["model"],
+                used_fallback=usage["used_fallback"], latency_ms=usage["latency_ms"],
+                success=usage["success"], usage_metadata=usage.get("usage_metadata"),
+            )
         # Defense-in-depth: never trust the LLM's own tenant_id argument, even
         # though it's told the correct value above — force every tool call's
         # tenant_id to the real, server-derived value so a hallucination or a
@@ -136,8 +145,14 @@ async def run_agent(user_message, tenant_id, user_id, session_id,
         "iteration_count": 0, "context": safe_context, "system_prompt": "",
     })
     last_ai = next((m for m in reversed(final["messages"]) if isinstance(m, AIMessage)), None)
+    last_llm_call = next(
+        (m for m in reversed(final["messages"])
+         if isinstance(m, AIMessage) and m.additional_kwargs.get("llm_provider")),
+        None,
+    )
     return {
         "response": last_ai.content if last_ai else "No response.",
+        "provider": last_llm_call.additional_kwargs["llm_provider"] if last_llm_call else None,
         "pending_approvals": final.get("pending_approvals", []),
         "messages": final["messages"],
         "session_id": session_id,

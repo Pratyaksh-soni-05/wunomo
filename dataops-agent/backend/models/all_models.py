@@ -275,3 +275,22 @@ class KpiValue(Base):
     value = Column(Float, nullable=False)
     unit = Column(String(50))
     recorded_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LlmUsageEvent(Base):
+    __tablename__ = "llm_usage_events"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, nullable=False, index=True)
+    user_id = Column(String, nullable=True)
+    session_id = Column(String, nullable=True)
+    request_type = Column(String(50), nullable=False)
+    provider = Column(String(50), nullable=False)
+    model = Column(String(100), nullable=False)
+    used_fallback = Column(Boolean, default=False)
+    input_tokens = Column(Integer)
+    output_tokens = Column(Integer)
+    total_tokens = Column(Integer)
+    latency_ms = Column(Integer)
+    success = Column(Boolean, nullable=False, default=True)
+    error_message = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
