@@ -9,6 +9,8 @@ from . import (
     transformations,
     # Agent
     chat,
+    # Frontend Phase 4 (onboarding)
+    onboarding,
 )
 
 __all__ = [
@@ -17,4 +19,5 @@ __all__ = [
     "governance", "approvals", "analytics",
     "transformations",
     "chat",
+    "onboarding",
 ]

@@ -294,3 +294,17 @@ class LlmUsageEvent(Base):
     success = Column(Boolean, nullable=False, default=True)
     error_message = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class OnboardingProfile(Base):
+    __tablename__ = "onboarding_profiles"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, unique=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    role = Column(String(100))
+    industry = Column(String(100), nullable=True)
+    company_size = Column(String(50), nullable=True)
+    use_cases = Column(JSON, default=list)
+    data_stack = Column(JSON, default=list)
+    completed_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)

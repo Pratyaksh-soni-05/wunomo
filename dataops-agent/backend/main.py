@@ -14,7 +14,7 @@ from api.v1 import (
     auth, chat, sources, pipelines, runs,
     incidents, quality, governance, uploads,
     analytics, approvals, transformations,
-    cicd,
+    cicd, onboarding,
 )
 
 
@@ -114,6 +114,10 @@ app.include_router(cicd.router,            prefix="/api/v1/cicd",            tag
 
 # Agent
 app.include_router(chat.router,            prefix="/api/v1/chat",            tags=["Chat"])
+
+
+# Frontend Phase 4 — Onboarding
+app.include_router(onboarding.router,      prefix="/api/v1/onboarding",      tags=["Onboarding"])
 
 
 
