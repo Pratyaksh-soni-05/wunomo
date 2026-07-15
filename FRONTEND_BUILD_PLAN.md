@@ -1,6 +1,13 @@
 # Wunomo AI — Frontend Build Plan
 
-**Status: Phase 0 complete and approved.** This is the authoritative, signed-off plan
+**Status: Phase 0 complete and approved. Phase 2 (frontend scaffold + design system)
+complete** — Next.js 15 App Router scaffolded under `dataops-agent/frontend/`, locked
+tokens ported to `src/styles/tokens.css` (light + dark, 3 dark-mode contrast bugs found
+and fixed via actual screenshot verification, not just code review — see that file's
+comments), real font files self-hosted under `public/fonts/` (no CDN calls), and the
+10-component core library built (`src/components/ui/`). Visually verified in both
+themes via Playwright screenshots against a live dev server and a clean production
+build. This is the authoritative, signed-off plan
 for building the Wunomo AI frontend against the real `dataops-agent` backend.
 Referenced from `CLAUDE.md` — read that file first for the backend's current state,
 then this file for what's being built on top of it and in what order.
