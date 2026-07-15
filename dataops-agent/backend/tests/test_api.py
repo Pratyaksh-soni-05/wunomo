@@ -1,3 +1,4 @@
+import uuid
 import pytest
 from httpx import AsyncClient
 
@@ -56,8 +57,14 @@ async def test_approvals_requires_auth(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_register_and_login(client: AsyncClient):
+    # Unique per run — a hardcoded email here previously accumulated
+    # duplicate tenants across repeated test runs (this codebase's test
+    # suite isn't hermetic, see CLAUDE.md), which started actually breaking
+    # this test once login() correctly began disambiguating same-email
+    # matches across tenants instead of silently picking one (Phase 3/5 fix).
+    email = f"mvptest-{uuid.uuid4().hex[:8]}@example.com"
     r = await client.post("/api/v1/auth/register", json={
-        "email": "mvptest@example.com",
+        "email": email,
         "password": "test1234",
         "full_name": "MVP Tester",
         "tenant_name": "AXIOM Corp",
@@ -66,7 +73,7 @@ async def test_register_and_login(client: AsyncClient):
     assert "access_token" in r.json()
 
     r2 = await client.post("/api/v1/auth/login",
-        data={"username": "mvptest@example.com", "password": "test1234"})
+        data={"username": email, "password": "test1234"})
     assert r2.status_code == 200
     assert "access_token" in r2.json()
     assert r2.json()["token_type"] == "bearer"

@@ -65,7 +65,9 @@ class User(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
     tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
     email = Column(String(255), nullable=False)
-    hashed_password = Column(String(255), nullable=False)
+    hashed_password = Column(String(255), nullable=True)
+    google_id = Column(String(255), nullable=True, index=True)
+    email_verified = Column(Boolean, default=False)
     full_name = Column(String(255))
     role = Column(String(50), default="member")
     is_active = Column(Boolean, default=True)
@@ -307,4 +309,17 @@ class OnboardingProfile(Base):
     use_cases = Column(JSON, default=list)
     data_stack = Column(JSON, default=list)
     completed_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class EmailLoginCode(Base):
+    __tablename__ = "email_login_codes"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    email = Column(String(255), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False)
+    intended_tenant_id = Column(String, ForeignKey("tenants.id"), nullable=True)
+    expires_at = Column(DateTime, nullable=False)
+    attempts_used = Column(Integer, default=0)
+    consumed_at = Column(DateTime, nullable=True)
+    request_ip = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

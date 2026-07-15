@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     MAX_PIPELINE_RETRIES: int = 3
     MAX_ROWS_PER_PREVIEW: int = 1000
     SLACK_WEBHOOK_URL: Optional[str] = None
+    GOOGLE_OAUTH_CLIENT_ID: str = ""
+    GOOGLE_OAUTH_CLIENT_SECRET: str = ""
+    GOOGLE_OAUTH_REDIRECT_URI: str = "http://localhost:3000/api/auth/callback/google"
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = ""
 
     @property
     def cors_origins(self) -> List[str]:
