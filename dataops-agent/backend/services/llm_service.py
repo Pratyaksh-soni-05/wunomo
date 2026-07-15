@@ -104,3 +104,15 @@ def get_llm_for_agent(temperature=0.0):
         return _TimeoutFallbackChatModel(primary, fallback, PRIMARY_LLM_TIMEOUT_SECONDS)
     except Exception:
         return get_fallback_llm(temperature)
+
+
+class LLMService:
+    """String-in/string-out completion wrapper for callers outside the agent
+    graph (e.g. IncidentManager) that want a single prompt answered rather
+    than a chat-message list. Reuses invoke_llm()'s already-tested
+    primary->fallback->retry path rather than introducing a third LLM
+    invocation mechanism alongside get_llm_for_agent() and invoke_llm()."""
+
+    async def complete(self, prompt: str, temperature: float = 0.0) -> str:
+        from langchain_core.messages import HumanMessage
+        return await invoke_llm([HumanMessage(content=prompt)], temperature=temperature)

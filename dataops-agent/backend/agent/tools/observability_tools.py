@@ -18,19 +18,19 @@ async def detect_anomalies(tenant_id: str, pipeline_id: str) -> dict:
 async def list_open_incidents(tenant_id: str) -> dict:
     """List all open data incidents with severity, status, and affected assets."""
     from modules.observability.incident_manager import IncidentManager
-    return cap_tool_result(await IncidentManager(tenant_id).list_open())
+    return cap_tool_result(await IncidentManager(tenant_id).list_incidents(status="open"))
 
 @tool
 async def triage_incident(tenant_id: str, incident_id: str) -> dict:
     """AI-assisted root cause analysis for an incident."""
     from modules.observability.incident_manager import IncidentManager
-    return await IncidentManager(tenant_id).triage(incident_id)
+    return await IncidentManager(tenant_id).triage_incident(incident_id)
 
 @tool
 async def resolve_incident(tenant_id: str, incident_id: str, resolution_notes: str) -> dict:
     """Mark an incident as resolved with notes."""
     from modules.observability.incident_manager import IncidentManager
-    return await IncidentManager(tenant_id).resolve(incident_id, resolution_notes)
+    return await IncidentManager(tenant_id).resolve_incident(incident_id, resolution_notes)
 
 @tool
 async def get_system_health(tenant_id: str) -> dict:

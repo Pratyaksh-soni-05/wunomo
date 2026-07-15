@@ -263,8 +263,8 @@ class IncidentManager:
                 # Persist root cause, remediation, and flip status → investigating
                 incident.root_cause = triage_data.get("root_cause", "")
                 incident.remediation_actions = triage_data.get("remediation_actions", [])
-                if incident.status == IncidentStatus.open:
-                    incident.status = IncidentStatus.investigating
+                if incident.status == IncidentStatus.OPEN:
+                    incident.status = IncidentStatus.INVESTIGATING
 
                 db.add(incident)
                 await db.commit()
@@ -334,14 +334,14 @@ class IncidentManager:
                 if incident is None:
                     return {"error": f"Incident {incident_id} not found"}
 
-                if incident.status == IncidentStatus.resolved:
+                if incident.status == IncidentStatus.RESOLVED:
                     return {
                         "error": f"Incident {incident_id} is already resolved",
                         "resolved_at": incident.resolved_at.isoformat() if incident.resolved_at else None,
                     }
 
                 now = utcnow()
-                incident.status = IncidentStatus.resolved
+                incident.status = IncidentStatus.RESOLVED
                 incident.resolved_at = now
                 incident.resolution_notes = notes
 
