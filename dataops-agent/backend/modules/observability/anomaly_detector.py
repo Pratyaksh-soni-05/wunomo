@@ -81,7 +81,7 @@ class AnomalyDetector:
                     .where(
                         PipelineRun.pipeline_id == pipeline_id,
                         PipelineRun.tenant_id == self.tenant_id,
-                        PipelineRun.status.in_([RunStatus.success, RunStatus.failed]),
+                        PipelineRun.status.in_([RunStatus.SUCCESS, RunStatus.FAILED]),
                     )
                     .order_by(desc(PipelineRun.created_at))
                     .limit(11)
@@ -249,7 +249,7 @@ class AnomalyDetector:
                 pips_result = await db.execute(
                     select(Pipeline).where(
                         Pipeline.tenant_id == self.tenant_id,
-                        Pipeline.status == PipelineStatus.active,
+                        Pipeline.status == PipelineStatus.ACTIVE,
                     )
                 )
                 pipelines = pips_result.scalars().all()

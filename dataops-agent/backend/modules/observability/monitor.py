@@ -66,7 +66,7 @@ class Monitor:
                 pipelines_result = await db.execute(
                     select(Pipeline).where(
                         Pipeline.tenant_id == self.tenant_id,
-                        Pipeline.status == PipelineStatus.active,
+                        Pipeline.status == PipelineStatus.ACTIVE,
                     )
                 )
                 pipelines = pipelines_result.scalars().all()
@@ -173,14 +173,14 @@ class Monitor:
                         PipelineRun.tenant_id == self.tenant_id,
                         PipelineRun.created_at >= window_start,
                         PipelineRun.status.in_(
-                            [RunStatus.success, RunStatus.failed]
+                            [RunStatus.SUCCESS, RunStatus.FAILED]
                         ),
                     )
                 )
                 runs = runs_result.scalars().all()
 
                 total_runs = len(runs)
-                success_runs = sum(1 for r in runs if r.status == RunStatus.success)
+                success_runs = sum(1 for r in runs if r.status == RunStatus.SUCCESS)
                 failed_runs = total_runs - success_runs
                 pipeline_success_rate = (
                     round(success_runs / total_runs * 100, 2) if total_runs else 0.0
@@ -230,7 +230,7 @@ class Monitor:
                 active_count_result = await db.execute(
                     select(func.count(Pipeline.id)).where(
                         Pipeline.tenant_id == self.tenant_id,
-                        Pipeline.status == PipelineStatus.active,
+                        Pipeline.status == PipelineStatus.ACTIVE,
                     )
                 )
                 active_pipelines = active_count_result.scalar() or 0
@@ -241,7 +241,7 @@ class Monitor:
                     day = (r.created_at or utcnow()).date().isoformat()
                     if day not in trends:
                         trends[day] = {"date": day, "success": 0, "failed": 0}
-                    if r.status == RunStatus.success:
+                    if r.status == RunStatus.SUCCESS:
                         trends[day]["success"] += 1
                     else:
                         trends[day]["failed"] += 1
@@ -333,10 +333,10 @@ class Monitor:
                 terminal_runs = [
                     r
                     for r in all_runs
-                    if r.status in (RunStatus.success, RunStatus.failed)
+                    if r.status in (RunStatus.SUCCESS, RunStatus.FAILED)
                 ]
                 success_count = sum(
-                    1 for r in terminal_runs if r.status == RunStatus.success
+                    1 for r in terminal_runs if r.status == RunStatus.SUCCESS
                 )
                 success_rate = (
                     round(success_count / len(terminal_runs) * 100, 2)

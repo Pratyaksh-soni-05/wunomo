@@ -7,7 +7,7 @@ from models.all_models import (
     DataSource, Pipeline, PipelineRun, QualityRule,
     KpiValue, RunStatus,
 )
-from modules.quality.rule_engine import RuleEngine
+from modules.quality.rule_engine import QualityRuleEngine
 
 log = structlog.get_logger()
 
@@ -91,7 +91,7 @@ class BusinessRules:
                          f"Allowed: {sorted(BUSINESS_RULE_TYPES)}"
             }
 
-        engine = RuleEngine(self.tenant_id)
+        engine = QualityRuleEngine(self.tenant_id)
         return await engine.create_rule(
             pipeline_id=pipeline_id,
             name=name,
@@ -104,14 +104,14 @@ class BusinessRules:
 
     async def list_rules(self, pipeline_id: str | None = None) -> list[dict]:
         """Lists all business rules for the tenant."""
-        engine = RuleEngine(self.tenant_id)
+        engine = QualityRuleEngine(self.tenant_id)
         all_rules = await engine.list_rules(pipeline_id=pipeline_id)
         if isinstance(all_rules, dict) and "error" in all_rules:
             return all_rules
         return [r for r in all_rules if r.get("rule_config", {}).get("_business_rule")]
 
     async def delete_rule(self, rule_id: str) -> dict:
-        engine = RuleEngine(self.tenant_id)
+        engine = QualityRuleEngine(self.tenant_id)
         return await engine.delete_rule(rule_id)
 
     # ------------------------------------------------------------------
@@ -460,7 +460,7 @@ class BusinessRules:
                         PipelineRun.tenant_id == self.tenant_id,
                         PipelineRun.pipeline_id == pipeline_id,
                         PipelineRun.created_at >= since,
-                        PipelineRun.status.in_([RunStatus.success, RunStatus.failed]),
+                        PipelineRun.status.in_([RunStatus.SUCCESS, RunStatus.FAILED]),
                     )
                 )
                 runs = result.scalars().all()
@@ -471,7 +471,7 @@ class BusinessRules:
             return {"status": "error", "detail": f"No completed runs found for pipeline {pipeline_id} in last {window_days} days"}
 
         total = len(runs)
-        success = sum(1 for r in runs if r.status == RunStatus.success)
+        success = sum(1 for r in runs if r.status == RunStatus.SUCCESS)
         rate = success / total * 100
 
         if rate >= min_rate:

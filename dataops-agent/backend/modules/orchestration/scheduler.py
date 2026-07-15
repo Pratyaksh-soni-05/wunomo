@@ -61,7 +61,7 @@ class Scheduler:
             if pipeline is None:
                 return {"error": f"Pipeline {pipeline_id} not found"}
 
-            if pipeline.status != PipelineStatus.active:
+            if pipeline.status != PipelineStatus.ACTIVE:
                 return {
                     "pipeline_id": pipeline_id,
                     "registered": False,
@@ -171,7 +171,7 @@ class Scheduler:
             active_with_cron = {
                 str(p.id): p
                 for p in all_pipelines
-                if p.status == PipelineStatus.active and p.schedule_cron
+                if p.status == PipelineStatus.ACTIVE and p.schedule_cron
             }
 
             # Register/update active scheduled pipelines

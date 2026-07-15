@@ -87,17 +87,17 @@ class ReportGenerator:
                 sources = src_result.scalars().all()
 
             # --- Common metrics ---
-            total_runs = len([r for r in runs if r.status in (RunStatus.success, RunStatus.failed)])
-            success_runs = len([r for r in runs if r.status == RunStatus.success])
+            total_runs = len([r for r in runs if r.status in (RunStatus.SUCCESS, RunStatus.FAILED)])
+            success_runs = len([r for r in runs if r.status == RunStatus.SUCCESS])
             success_rate = round(success_runs / total_runs * 100, 2) if total_runs else 0.0
 
             scored = [r.quality_score for r in runs if r.quality_score is not None]
             avg_quality = round(sum(scored) / len(scored), 2) if scored else None
 
-            open_incidents = [i for i in incidents if i.status in (IncidentStatus.open, IncidentStatus.investigating)]
+            open_incidents = [i for i in incidents if i.status in (IncidentStatus.OPEN, IncidentStatus.INVESTIGATING)]
             resolved_this_week = [
                 i for i in incidents
-                if i.status == IncidentStatus.resolved
+                if i.status == IncidentStatus.RESOLVED
                 and i.resolved_at and i.resolved_at >= window_start
             ]
 
@@ -113,7 +113,7 @@ class ReportGenerator:
                 "window_days": 7,
                 "summary": {
                     "total_pipelines": len(pipelines),
-                    "active_pipelines": sum(1 for p in pipelines if p.status == PipelineStatus.active),
+                    "active_pipelines": sum(1 for p in pipelines if p.status == PipelineStatus.ACTIVE),
                     "total_runs_7d": total_runs,
                     "success_rate_pct": success_rate,
                     "avg_quality_score": avg_quality,
@@ -145,7 +145,7 @@ class ReportGenerator:
                         "started_at": r.started_at.isoformat() if r.started_at else None,
                     }
                     for r in runs
-                    if r.status == RunStatus.failed
+                    if r.status == RunStatus.FAILED
                 ][:10]
                 base["stale_sources"] = stale_sources
                 base["open_incidents"] = [
@@ -172,7 +172,7 @@ class ReportGenerator:
                     "data_reliability_pct": reliability_pct,
                     "incidents_resolved_this_week": len(resolved_this_week),
                     "active_data_sources": len(sources),
-                    "pipelines_running": sum(1 for p in pipelines if p.status == PipelineStatus.active),
+                    "pipelines_running": sum(1 for p in pipelines if p.status == PipelineStatus.ACTIVE),
                 }
 
             elif mode == "analyst":
@@ -305,7 +305,7 @@ class ReportGenerator:
             timeline = [
                 {"event": "Incident detected", "timestamp": incident.detected_at.isoformat() if incident.detected_at else None},
             ]
-            if incident.status == IncidentStatus.investigating or incident.status == IncidentStatus.resolved:
+            if incident.status == IncidentStatus.INVESTIGATING or incident.status == IncidentStatus.RESOLVED:
                 timeline.append({"event": "Triage / investigation started", "timestamp": incident.created_at.isoformat() if incident.created_at else None})
             if incident.resolved_at:
                 timeline.append({"event": "Incident resolved", "timestamp": incident.resolved_at.isoformat()})
