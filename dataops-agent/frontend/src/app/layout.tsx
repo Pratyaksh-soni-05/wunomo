@@ -6,7 +6,7 @@ import { ToastProvider } from "@/components/ui";
 
 export const metadata: Metadata = {
   title: "Wunomo AI",
-  description: "AXIOM — an autonomous AI DataOps agent",
+  description: "Wunomo AI — an AI workforce platform, starting with AXIOM, an autonomous DataOps AI employee",
 };
 
 export default function RootLayout({

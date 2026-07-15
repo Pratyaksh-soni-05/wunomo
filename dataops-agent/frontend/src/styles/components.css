@@ -256,6 +256,63 @@ tr.selected td { background: var(--ocean-50) !important; }
 .animate-fade { animation: fade-in 0.2s ease; }
 .animate-up { animation: slide-up 0.2s ease; }
 
+/* ==========================================
+   AUTH SCREENS (Phase 6)
+   ========================================== */
+.auth-shell { display: flex; min-height: 100vh; }
+.auth-brand {
+  flex: 0 0 40%; background: var(--midnight-700); color: var(--on-dark);
+  display: flex; flex-direction: column; justify-content: center;
+  padding: 48px; gap: 12px;
+}
+.auth-brand h1 { font-family: var(--font-display); font-size: 32px; line-height: 1.25; font-weight: 600; }
+.auth-brand p { color: var(--midnight-100); font-size: 14px; max-width: 360px; }
+.auth-form-side {
+  flex: 1; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 32px;
+}
+.auth-card { width: 100%; max-width: 420px; }
+.auth-card h2 { font-family: var(--font-display); font-size: 22px; margin-bottom: 4px; }
+.auth-card .auth-subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
+.auth-divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--text-muted); font-size: 12px; }
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.auth-link-btn {
+  background: none; border: none; color: var(--ocean-600); font-size: 12.5px; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; padding: 0;
+}
+.auth-link-btn:hover { color: var(--ocean-700); }
+.auth-footer { margin-top: 20px; text-align: center; font-size: 13px; color: var(--text-secondary); }
+.auth-nudge {
+  background: var(--info-bg); border: 1px solid var(--info-border); border-radius: var(--radius-md);
+  padding: 10px 14px; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 16px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.workspace-option {
+  width: 100%; text-align: left; padding: 12px 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+/* ==========================================
+   ONBOARDING (Phase 6)
+   ========================================== */
+.onboarding-shell { min-height: 100vh; background: var(--bg); display: flex; flex-direction: column; align-items: center; padding: 48px 24px; }
+.onboarding-progress-wrap { width: 100%; max-width: 560px; margin-bottom: 40px; }
+.onboarding-step-label { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.onboarding-card { width: 100%; max-width: 560px; }
+.onboarding-card h2 { font-family: var(--font-display); font-size: 26px; margin-bottom: 24px; }
+.chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  padding: 8px 14px; border-radius: var(--radius-full); border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text-secondary); font-size: 13px; cursor: pointer;
+  transition: all var(--t-fast);
+}
+.chip:hover { background: var(--surface-hover); }
+.chip.chip-selected { background: var(--midnight-700); color: var(--on-dark); border-color: var(--midnight-800); }
+.onboarding-actions { display: flex; justify-content: space-between; margin-top: 32px; }
+
+@media (max-width: 860px) {
+  .auth-brand { display: none; }
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }

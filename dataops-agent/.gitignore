@@ -230,7 +230,15 @@ out/
 .vercel
 *.tsbuildinfo
 next-env.d.ts
+.env*.local
 
 # Frontend build caches
 .turbo/
 .swc/
+
+# Python's "lib/" pattern above (packaging convention, meant for build
+# artifacts) unintentionally matches any directory literally named "lib" at
+# any depth, including legitimate frontend application source directories
+# like this one — re-include it explicitly.
+!frontend/src/lib/
+!frontend/src/lib/**
