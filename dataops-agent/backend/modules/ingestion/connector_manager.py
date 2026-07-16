@@ -88,6 +88,15 @@ class ConnectorManager:
             await db.commit()
             await db.refresh(source)
             log.info("source_registered", tenant=self.tenant_id, source_id=source.id, type=source_type)
+
+            try:
+                from modules.governance.lineage_tracker import LineageTracker
+                await LineageTracker(self.tenant_id).add_node(
+                    "source", source.name, {"source_id": source.id, "source_type": source_type}
+                )
+            except Exception as exc:
+                log.warning("source_lineage_registration_failed", source_id=source.id, error=str(exc))
+
             return {"id": source.id, "name": source.name, "source_type": source_type, "status": "registered"}
 
     # ── INGEST FILE ───────────────────────────────────────────────────────────

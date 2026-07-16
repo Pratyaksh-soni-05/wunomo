@@ -7,7 +7,8 @@ import structlog
 from database import AsyncSessionLocal
 from models.all_models import (
     Pipeline, PipelineRun, PipelineStatus, RunStatus,
-    QualityRule, Incident, IncidentSeverity, IncidentStatus
+    QualityRule, Incident, IncidentSeverity, IncidentStatus,
+    DataSource,
 )
 
 log = structlog.get_logger()
@@ -47,6 +48,22 @@ class DAGManager:
             await db.commit()
             await db.refresh(pipeline)
             log.info("pipeline_created", pipeline_id=pipeline.id, name=name)
+
+            try:
+                from modules.governance.lineage_tracker import LineageTracker
+                tracker = LineageTracker(self.tenant_id)
+                source_name = None
+                if source_id:
+                    src_result = await db.execute(select(DataSource).where(DataSource.id == source_id))
+                    source = src_result.scalars().first()
+                    source_name = source.name if source else None
+                if source_name:
+                    await tracker.auto_register_pipeline_lineage(pipeline.id, pipeline.name, source_name)
+                else:
+                    await tracker.add_node("pipeline", pipeline.name, {"pipeline_id": pipeline.id, "auto": True})
+            except Exception as exc:
+                log.warning("pipeline_lineage_registration_failed", pipeline_id=pipeline.id, error=str(exc))
+
             return {
                 "id": pipeline.id, "name": pipeline.name,
                 "status": pipeline.status, "source_id": pipeline.source_id,

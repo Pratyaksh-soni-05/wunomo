@@ -59,6 +59,7 @@ async def get_lineage(
 ):
     """Get upstream/downstream lineage graph for a named asset."""
     tracker = LineageTracker(user["tenant_id"])
+    await tracker.sync_tenant_lineage()
     result = await tracker.get_lineage(asset_name, direction=direction, max_depth=max_depth)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
@@ -76,6 +77,7 @@ async def get_lineage(
 async def get_full_graph(user=Depends(get_current_user)):
     """Return the full lineage graph for the tenant (for visualization)."""
     tracker = LineageTracker(user["tenant_id"])
+    await tracker.sync_tenant_lineage()
     result = await tracker.get_full_graph()
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])

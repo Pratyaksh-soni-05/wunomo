@@ -416,3 +416,46 @@ class LineageTracker:
         except Exception as exc:
             log.error("lineage.auto_register.error", error=str(exc))
             return {"error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # 6. Idempotent full-tenant sync (self-heals pre-existing data)
+    # ------------------------------------------------------------------
+
+    async def sync_tenant_lineage(self) -> dict:
+        """
+        Ensures every DataSource and Pipeline this tenant currently has is
+        represented in the lineage graph — including rows created before
+        auto-population existed. Safe to call on every read: add_node/
+        add_edge/auto_register_pipeline_lineage are all idempotent (checked
+        by tenant+name+type before inserting), so a tenant already in sync
+        pays only the lookup cost.
+        """
+        from models.all_models import DataSource, Pipeline
+        try:
+            async with AsyncSessionLocal() as db:
+                src_result = await db.execute(
+                    select(DataSource).where(DataSource.tenant_id == self.tenant_id)
+                )
+                sources = {s.id: s for s in src_result.scalars().all()}
+                pipe_result = await db.execute(
+                    select(Pipeline).where(Pipeline.tenant_id == self.tenant_id)
+                )
+                pipelines = pipe_result.scalars().all()
+
+            for s in sources.values():
+                await self.add_node(
+                    "source", s.name,
+                    {"source_id": s.id, "source_type": str(getattr(s.source_type, "value", s.source_type))},
+                )
+
+            for p in pipelines:
+                source = sources.get(p.source_id) if p.source_id else None
+                if source:
+                    await self.auto_register_pipeline_lineage(p.id, p.name, source.name)
+                else:
+                    await self.add_node("pipeline", p.name, {"pipeline_id": p.id, "auto": True})
+
+            return {"synced_sources": len(sources), "synced_pipelines": len(pipelines)}
+        except Exception as exc:
+            log.error("lineage.sync_tenant.error", error=str(exc))
+            return {"error": str(exc)}
