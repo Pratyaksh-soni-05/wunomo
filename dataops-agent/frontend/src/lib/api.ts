@@ -542,6 +542,15 @@ export function getContracts(token: string): Promise<{ contracts: DataContract[]
   return authedRequest("/api/v1/governance/contracts", token);
 }
 
+export function createContract(
+  token: string,
+  params: { name: string; producer_source_id: string; consumer_description?: string }
+): Promise<DataContract> {
+  return request("/api/v1/governance/contracts", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
 export function validateContract(token: string, contractId: string): Promise<unknown> {
   return request(`/api/v1/governance/contracts/${contractId}/validate`, {
     method: "POST", headers: { Authorization: `Bearer ${token}` },
