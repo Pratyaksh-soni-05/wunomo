@@ -20,6 +20,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+function authedRequest<T>(path: string, token: string): Promise<T> {
+  return request(path, { headers: { Authorization: `Bearer ${token}` } });
+}
+
 // ---------- Shared response shapes ----------
 
 export interface WorkspaceOption {
@@ -158,6 +162,106 @@ export async function submitOnboarding(
     headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(params),
   });
+}
+
+// ---------- Dashboard (Phase 9) ----------
+
+export interface AnalyticsOverview {
+  tenant_id: string;
+  evaluated_at: string;
+  window_days: number;
+  pipelines: { total: number; active: number; paused: number; draft: number; archived: number };
+  runs: { total: number; success: number; failed: number; success_rate_pct: number };
+  quality: { avg_score: number | null };
+  incidents: { open: number };
+  sources: { total_active: number; stale: number };
+}
+
+export interface QualityTrendPoint {
+  date: string;
+  run_count: number;
+  pass_count: number;
+  fail_count: number;
+  avg_quality_score: number | null;
+}
+
+export interface RecentRun {
+  run_id: string;
+  pipeline_id: string;
+  pipeline_name: string;
+  status: string;
+  rows_processed: number | null;
+  duration_seconds: number | null;
+  created_at: string | null;
+}
+
+export interface Approval {
+  approval_id: string;
+  user_id: string;
+  action_name: string;
+  action_args: Record<string, unknown>;
+  risk_level: string;
+  reason: string;
+  status: string;
+  created_at: string;
+}
+
+export interface Incident {
+  id: string;
+  title: string;
+  description: string;
+  severity: string;
+  status: string;
+  pipeline_id: string | null;
+  detected_at: string;
+}
+
+export function getAnalyticsOverview(token: string): Promise<AnalyticsOverview> {
+  return authedRequest("/api/v1/analytics", token);
+}
+
+export function getQualityTrends(token: string, windowDays = 7): Promise<{ trends: QualityTrendPoint[] }> {
+  return authedRequest(`/api/v1/analytics/quality?window_days=${windowDays}`, token);
+}
+
+export function getRecentRuns(token: string, limit = 5): Promise<{ runs: RecentRun[] }> {
+  return authedRequest(`/api/v1/analytics/recent-runs?limit=${limit}`, token);
+}
+
+export function getApprovals(token: string): Promise<{ approvals: Approval[]; count: number }> {
+  return authedRequest("/api/v1/approvals", token);
+}
+
+export function approveRequest(token: string, approvalId: string): Promise<unknown> {
+  return request(`/api/v1/approvals/${approvalId}/approve`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({}),
+  });
+}
+
+export function rejectRequest(token: string, approvalId: string): Promise<unknown> {
+  return request(`/api/v1/approvals/${approvalId}/reject`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({}),
+  });
+}
+
+export function getOpenIncidents(token: string): Promise<{ incidents: Incident[]; count: number }> {
+  return authedRequest("/api/v1/incidents/", token);
+}
+
+export interface ChatSessionSummary {
+  session_id: string;
+  title: string;
+  started_at: string;
+  last_activity: string;
+  message_count: number;
+}
+
+export function getChatSessions(token: string): Promise<{ sessions: ChatSessionSummary[] }> {
+  return authedRequest("/api/v1/chat/sessions", token);
 }
 
 // ---------- Local session storage ----------

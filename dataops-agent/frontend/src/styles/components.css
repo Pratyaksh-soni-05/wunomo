@@ -457,6 +457,20 @@ tr.selected td { background: var(--ocean-50) !important; }
 .page-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .page-title { font-size: 20px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.3px; font-family: var(--font-display); }
 
+/* ==========================================
+   DASHBOARD (Phase 9)
+   Ported from the master design prototype's stats-grid/metric-card CSS —
+   never actually copied into this stylesheet in Phase 2 despite being
+   referenced from day one; only discovered missing once real KPI cards
+   were built and rendered as unstyled stacked rows instead of a grid.
+   ========================================== */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+.metric-card { padding: 20px; }
+.metric-value { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; line-height: 1; font-family: var(--font-display); }
+.metric-change { font-size: 11px; font-weight: 500; margin-top: 8px; color: var(--text-muted); }
+.metric-change.up { color: var(--success); }
+.metric-change.down { color: var(--danger); }
+
 @media (max-width: 900px) {
   .sidebar { transform: translateX(-100%); }
   .sidebar.mobile-open { transform: translateX(0); }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar, Topbar, CommandPalette, AxiomFab } from "@/components/shell";
 import { getToken, decodeUserFromToken, type DecodedUser } from "@/lib/api";
+import { QueryProvider } from "@/lib/queryClient";
 
 export default function AppShellLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -37,23 +38,25 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
   if (!checked) return null;
 
   return (
-    <div className="app-layout">
-      <Sidebar
-        collapsed={collapsed}
-        onToggle={() => setCollapsed((v) => !v)}
-        mobileOpen={mobileOpen}
-        user={user}
-      />
-      <div className={["main-content", collapsed ? "expanded" : ""].filter(Boolean).join(" ")}>
-        <Topbar
-          onToggleSidebar={() => setMobileOpen((v) => !v)}
-          onOpenCommandPalette={() => setCmdOpen(true)}
+    <QueryProvider>
+      <div className="app-layout">
+        <Sidebar
+          collapsed={collapsed}
+          onToggle={() => setCollapsed((v) => !v)}
+          mobileOpen={mobileOpen}
           user={user}
         />
-        <main className="page-content">{children}</main>
+        <div className={["main-content", collapsed ? "expanded" : ""].filter(Boolean).join(" ")}>
+          <Topbar
+            onToggleSidebar={() => setMobileOpen((v) => !v)}
+            onOpenCommandPalette={() => setCmdOpen(true)}
+            user={user}
+          />
+          <main className="page-content">{children}</main>
+        </div>
+        <AxiomFab />
+        <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
       </div>
-      <AxiomFab />
-      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
-    </div>
+    </QueryProvider>
   );
 }
