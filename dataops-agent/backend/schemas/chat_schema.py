@@ -28,10 +28,20 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     session_id: str
     response: str
+    provider: Optional[str] = None
     pending_approvals: List[Any] = []
+    tool_calls: List[Any] = []
     timestamp: str
 
 class MessageResponse(BaseModel):
     role: str
     content: str
+    tool_calls: List[Any] = []
     timestamp: str
+
+class SessionSummary(BaseModel):
+    session_id: str
+    title: str
+    started_at: str
+    last_activity: str
+    message_count: int
