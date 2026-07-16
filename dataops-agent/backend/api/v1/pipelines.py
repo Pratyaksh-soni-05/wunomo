@@ -74,9 +74,9 @@ async def update_pipeline(pipeline_id: str, req: PipelineUpdate,
 
 @router.delete("/{pipeline_id}")
 async def delete_pipeline(pipeline_id: str, user=Depends(get_current_user)):
-    from sqlalchemy import select
+    from sqlalchemy import select, delete, update
     from database import AsyncSessionLocal
-    from models.all_models import Pipeline
+    from models.all_models import Pipeline, PipelineRun, QualityRule, Incident
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Pipeline).where(
             Pipeline.id == pipeline_id,
@@ -85,6 +85,22 @@ async def delete_pipeline(pipeline_id: str, user=Depends(get_current_user)):
         p = r.scalars().first()
         if not p:
             raise HTTPException(status_code=404, detail="Pipeline not found")
+
+        # Pipeline.id has no ON DELETE CASCADE on any of these FKs (unlike the
+        # CI/CD tables, which do), so a bare db.delete(p) 500s the moment the
+        # pipeline has ever been run — the normal case, not an edge case.
+        # Incidents are historical audit records, not owned by the pipeline,
+        # so they're preserved with their pipeline/run references cleared
+        # rather than deleted; runs and quality rules are pipeline-scoped
+        # operational data and are deleted along with it. Incident.run_id
+        # must be cleared before PipelineRun rows are deleted, since it also
+        # FKs into pipeline_runs.id.
+        await db.execute(
+            update(Incident).where(Incident.pipeline_id == pipeline_id)
+            .values(pipeline_id=None, run_id=None)
+        )
+        await db.execute(delete(PipelineRun).where(PipelineRun.pipeline_id == pipeline_id))
+        await db.execute(delete(QualityRule).where(QualityRule.pipeline_id == pipeline_id))
         await db.delete(p)
         await db.commit()
     return {"message": "Pipeline deleted", "id": pipeline_id}
