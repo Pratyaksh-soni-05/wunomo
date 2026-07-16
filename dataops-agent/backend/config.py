@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
     PRIMARY_LLM_PROVIDER: str = "gemini"
-    PRIMARY_LLM_MODEL: str = "gemini-2.0-flash"
+    PRIMARY_LLM_MODEL: str = "gemini-3-flash-preview"
     FALLBACK_LLM_MODEL: str = "llama-3.3-70b-versatile"
     JWT_SECRET: str = "dev-jwt-secret"
     JWT_ALGORITHM: str = "HS256"

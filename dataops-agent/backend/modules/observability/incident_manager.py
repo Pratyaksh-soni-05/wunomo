@@ -279,7 +279,7 @@ class IncidentManager:
                 "confidence": triage_data.get("confidence"),
                 "summary": triage_data.get("summary"),
                 "status_updated_to": "investigating",
-                "triage_model": "gemini-2.0-flash",
+                "triage_model": "gemini-3-flash-preview",
             }
 
             log.info(

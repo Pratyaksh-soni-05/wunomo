@@ -34,14 +34,14 @@ async def test_timeout_fallback_model_stashes_usage_on_primary_success():
     fallback = _FakeLLM(response=AIMessage(content="unused"))
     model = _TimeoutFallbackChatModel(
         primary, fallback, timeout_seconds=5.0,
-        primary_model="gemini-2.0-flash", fallback_model="llama-3.3-70b-versatile",
+        primary_model="gemini-3-flash-preview", fallback_model="llama-3.3-70b-versatile",
     )
 
     result = await model.ainvoke([])
     usage = result.additional_kwargs["_llm_usage"]
 
     assert usage["provider"] == "gemini"
-    assert usage["model"] == "gemini-2.0-flash"
+    assert usage["model"] == "gemini-3-flash-preview"
     assert usage["used_fallback"] is False
     assert usage["success"] is True
     assert usage["usage_metadata"]["total_tokens"] == 15
@@ -56,7 +56,7 @@ async def test_timeout_fallback_model_stashes_usage_on_fallback():
     fallback = _FakeLLM(response=AIMessage(content="from fallback"))
     model = _TimeoutFallbackChatModel(
         primary, fallback, timeout_seconds=5.0,
-        primary_model="gemini-2.0-flash", fallback_model="llama-3.3-70b-versatile",
+        primary_model="gemini-3-flash-preview", fallback_model="llama-3.3-70b-versatile",
     )
 
     result = await model.ainvoke([])

@@ -291,6 +291,12 @@ class LlmUsageEvent(Base):
     used_fallback = Column(Boolean, default=False)
     input_tokens = Column(Integer)
     output_tokens = Column(Integer)
+    # Reasoning/"thinking" tokens (e.g. Gemini 3's thinking mode) are already
+    # folded into total_tokens by the provider — this is a separate view onto
+    # the same total, tracked distinctly since it'll matter for credit
+    # pricing later (thinking tokens likely priced differently from plain
+    # output tokens).
+    reasoning_tokens = Column(Integer)
     total_tokens = Column(Integer)
     latency_ms = Column(Integer)
     success = Column(Boolean, nullable=False, default=True)

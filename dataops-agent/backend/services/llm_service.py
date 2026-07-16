@@ -41,6 +41,7 @@ async def log_llm_usage(
                 used_fallback=used_fallback,
                 input_tokens=usage_metadata.get("input_tokens"),
                 output_tokens=usage_metadata.get("output_tokens"),
+                reasoning_tokens=(usage_metadata.get("output_token_details") or {}).get("reasoning"),
                 total_tokens=usage_metadata.get("total_tokens"),
                 latency_ms=latency_ms, success=success, error_message=error_message,
             ))
@@ -57,7 +58,23 @@ async def log_llm_usage(
 # library version). Left alone, a single failed primary call can take 2+
 # minutes before RunnableWithFallbacks ever gets a chance to try Groq. We
 # enforce our own hard ceiling instead of trusting those nested retries.
-PRIMARY_LLM_TIMEOUT_SECONDS = 15
+#
+# Raised from 15s to 30s when the primary model moved to gemini-3-flash-preview
+# (see CLAUDE.md Gotchas): even trivial single-word prompts measured 13-26s
+# live, well past the old 15s ceiling, which meant primary lost the race to
+# the fallback almost every time. GEMINI_THINKING_BUDGET below caps reasoning
+# tokens to reduce that latency — re-measure before lowering this back down.
+PRIMARY_LLM_TIMEOUT_SECONDS = 30
+
+# Gemini 3 models default to an internal "thinking" pass before answering —
+# observed burning 94-99 reasoning tokens on "what is 2+2?" and adding
+# meaningful wall-clock latency. 0 disables it. Not (yet) proven to fix the
+# latency by itself (one measured sample was slower with it than without),
+# but it does eliminate the reasoning-token cost, so keep it capped
+# regardless. Raise this only if answer quality visibly suffers on real
+# tool-calling turns — see CLAUDE.md Gotchas for the measured latency data
+# this value shipped with.
+GEMINI_THINKING_BUDGET = 0
 
 
 def _build_llm(model: str, temperature: float):
@@ -72,7 +89,7 @@ def _build_llm(model: str, temperature: float):
         model=model,
         google_api_key=settings.GEMINI_API_KEY,
         temperature=temperature,
-        convert_system_message_to_human=True,
+        thinking_budget=GEMINI_THINKING_BUDGET,
     )
 
 
