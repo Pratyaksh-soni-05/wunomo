@@ -1,13 +1,9 @@
 # Wunomo AI — Frontend Build Plan
 
-**Status: Phase 0 complete and approved. Phase 2 (frontend scaffold + design system)
-complete** — Next.js 15 App Router scaffolded under `dataops-agent/frontend/`, locked
-tokens ported to `src/styles/tokens.css` (light + dark, 3 dark-mode contrast bugs found
-and fixed via actual screenshot verification, not just code review — see that file's
-comments), real font files self-hosted under `public/fonts/` (no CDN calls), and the
-10-component core library built (`src/components/ui/`). Visually verified in both
-themes via Playwright screenshots against a live dev server and a clean production
-build. This is the authoritative, signed-off plan
+**Status: Phases 0, 2-7 complete and live-verified; Phase 8's backend is done and
+mock-verified, live-LLM confirmation pending.** See the phase table below for the
+authoritative, per-phase status and verification detail for each — this banner is a
+quick pointer, not a substitute for it. This is the authoritative, signed-off plan
 for building the Wunomo AI frontend against the real `dataops-agent` backend.
 Referenced from `CLAUDE.md` — read that file first for the backend's current state,
 then this file for what's being built on top of it and in what order.
@@ -256,7 +252,7 @@ same commit as the change.
 | 5 | **Non-password auth: Google OAuth + email-code** — **done, fully live-verified** | None | Real Google OAuth flow, callback endpoint, `email_verified`-gated account linking, built against real `GOOGLE_OAUTH_CLIENT_ID`/`SECRET` env vars; **plus** the email-code method (Resend integration, `EmailLoginCode` table + rate limiting, auto-link on verify) — bundled into one phase since both share the `User` schema migration (nullable `hashed_password`, `google_id`, `email_verified`), the JWT `auth_method` handling, and the auto-link machinery designed together in Phase 3 | Both methods fully live-verified end-to-end. Email-code: a real, fully-automated Resend delivery round-trip (code sent, retrieved via Resend's own API, verified, JWT issued). Google: the user clicked through the real consent screen; the resulting code was exchanged and verified for real against Google's production endpoints, correctly auto-linking onto an account originally created via email-code (not password) rather than creating a redundant tenant — confirms auto-link works from either originating method | Phase 3 |
 | 6 | **Auth + Onboarding UI** — **done, fully live-verified** | Signup/login wired to real endpoints; onboarding wired to Phase 4 (real persistence from day one); Google button **and email-code flow** wired to Phase 5 | — | Real signup, login, onboarding persistence, all live-verified | Phase 2, 4; OAuth functional once Phase 5 + real credentials land (email-code live-verifiable independently of Google credentials) |
 | 7 | **App shell** — **done, fully live-verified** | Sidebar/topbar/routing/command palette/toasts/notifications/AXIOM FAB, light/dark theme switching (client-side, upgraded to server-persisted in Phase 16) | None | Visual + interaction comparison to prototype | Phase 2 |
-| 8 | **Chat sessions + tool trace** | None | `GET /chat/sessions` (tenant-scoped session list); real tool-call trace included in chat response | Multi-session real chat; session list correctly tenant-scoped; tool trace reflects tools actually executed | None |
+| 8 | **Chat sessions + tool trace** — **backend done, mock-verified; live-LLM confirmation pending** | None | `GET /chat/sessions` (private-per-user AND tenant-scoped session list); real tool-call trace included in chat response | Multi-session real chat; session list correctly scoped; tool trace reflects tools actually executed — **verified via 5 regression tests against the real HTTP/DB layer with a fake-LLM stand-in; a real end-to-end round trip with an actual LLM is still pending, blocked by both providers' quota being exhausted the same session — re-attempt before calling this fully done** | None |
 | 9 | **Dashboard** | Wired to real KPIs (pipelines/quality/incidents/approvals/sources) + AXIOM Activity via Phase 8 | — | Live dashboard against real tenant data | Phase 7; Phase 8 for AXIOM Activity |
 | 10 | **AXIOM chat (3-panel)** | Wired to real chat/history; graceful loading/fallback UX; real provider-switch messaging via Phase 1's `provider` field | — | Real multi-turn conversation; loading states and provider display accurate | Phase 7, 1, 8 — **plus a backend prerequisite, not yet scheduled as a phase here**: Gemini 3 tool-calling needs a LangChain v0.3→v1.x ecosystem upgrade before this phase's verification can exercise real Gemini tool-calling (see `CLAUDE.md` Known-broken; bundle that session with the 22-site `agent/tools/*.py` punch list, both touch the same layer) |
 | 11 | **KPI instrumentation + lineage auto-population** | None | Write a `KpiValue` point on every quality-check run; auto-create `LineageNode`/`LineageEdge` on pipeline/source creation | Real quality check → KPI row appears in `/analytics/kpis`; real pipeline+source → `/governance/graph` non-empty | None |
