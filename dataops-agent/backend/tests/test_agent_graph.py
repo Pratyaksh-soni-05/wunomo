@@ -205,3 +205,68 @@ async def test_get_cicd_status_tool_uses_real_tenant_id(monkeypatch):
     tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert len(tool_messages) == 1
     assert "CICD Status Summary" in tool_messages[0].content
+
+
+class InfiniteToolCallLLM:
+    """Stand-in for an LLM that never produces a final answer — always
+    returns another tool call. Used to deterministically drive the graph
+    into MAX_AGENT_ITERATIONS' graceful stop, the way a real runaway
+    tool-calling conversation would."""
+
+    def __init__(self):
+        self.call_count = 0
+
+    def bind_tools(self, tools):
+        return self
+
+    async def ainvoke(self, messages):
+        self.call_count += 1
+        return AIMessage(content="", tool_calls=[
+            {"name": "fake_echo_tool", "args": {"x": "again"}, "id": f"call_{self.call_count}"},
+        ])
+
+
+@pytest.mark.asyncio
+async def test_runaway_tool_calling_hits_graceful_cap_not_a_crash(monkeypatch):
+    """Regression test for the iteration_count/recursion_limit miscalibration
+    bug: iteration_count only increments once per agent_node visit, but each
+    tool-calling round costs 3 LangGraph supersteps (agent -> approval_gate ->
+    tools). With the old hardcoded `> 20` check and LangGraph's default
+    recursion_limit (25), a real runaway tool-calling conversation hit
+    LangGraph's own limit first and crashed with an unhandled
+    GraphRecursionError — the "graceful" cap never actually fired. Confirmed
+    live: a real conversation hung for 2+ minutes and crashed with zero
+    response persisted to chat_messages.
+
+    An LLM that always returns another tool call (never a final answer) must
+    now be cut off by our own MAX_AGENT_ITERATIONS cap, cleanly, with no
+    exception — not race LangGraph's harder limit.
+    """
+    fake_llm = InfiniteToolCallLLM()
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_echo_tool])
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    result = await dataops_agent.run_agent(
+        user_message="please keep going forever",
+        tenant_id="t1", user_id="u1", session_id="s1",
+    )
+
+    assert result["response"] == "Max reasoning steps reached. Please clarify your request."
+    # MAX_AGENT_ITERATIONS+1 real calls proceed (entry iteration_count 0..N
+    # all pass the `> N` check); the next one triggers the graceful stop
+    # without calling the LLM again.
+    assert fake_llm.call_count == dataops_agent.MAX_AGENT_ITERATIONS + 1
+
+    # The whole point: this must stay comfortably under LangGraph's actual
+    # recursion_limit, not just barely — assert the real numbers, so a future
+    # change to either constant without re-deriving the other fails loudly.
+    # 1 inject_system + 3 supersteps (agent/approval_gate/tools) per real
+    # tool-calling round + 2 for the final grace-stop round (agent/approval_gate,
+    # no tools needed since it has no tool_calls).
+    needed_supersteps = 1 + 3 * (dataops_agent.MAX_AGENT_ITERATIONS + 1) + 2
+    assert needed_supersteps < dataops_agent.AGENT_RECURSION_LIMIT, (
+        "MAX_AGENT_ITERATIONS and AGENT_RECURSION_LIMIT are out of sync — "
+        "the graceful cap could lose the race to LangGraph's own limit again"
+    )

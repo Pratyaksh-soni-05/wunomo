@@ -15,6 +15,22 @@ import structlog
 
 log = structlog.get_logger()
 
+# iteration_count and LangGraph's own `recursion_limit` count different
+# things: iteration_count increments once per agent_node visit, but each
+# tool-calling round is 3 LangGraph supersteps (agent -> approval_gate ->
+# tools), plus 1 for inject_system and 2 for the final no-tool-call turn
+# that reaches END. So MAX_AGENT_ITERATIONS agent_node visits cost roughly
+# `3 * MAX_AGENT_ITERATIONS + 6` supersteps — a graceful cap that isn't
+# calibrated against that multiplier looks like a safety net but isn't one:
+# LangGraph's default recursion_limit (25) was reached first in a real
+# runaway-tool-calling conversation, before our own `iteration_count > 20`
+# check ever got a chance to fire, crashing the request with an unhandled
+# GraphRecursionError instead of the graceful message. AGENT_RECURSION_LIMIT
+# is set with real margin above the worst case for MAX_AGENT_ITERATIONS, not
+# just barely above it — if you change either constant, re-derive the other.
+MAX_AGENT_ITERATIONS = 10
+AGENT_RECURSION_LIMIT = 50
+
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], operator.add]
@@ -62,7 +78,7 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
         return {"system_prompt": sys_prompt + identity + ctx}
 
     async def agent_node(state):
-        if state.get("iteration_count", 0) > 20:
+        if state.get("iteration_count", 0) > MAX_AGENT_ITERATIONS:
             return {"messages": [AIMessage(content="Max reasoning steps reached. Please clarify your request.")]}
         llm_input = [SystemMessage(content=state["system_prompt"])] + list(state["messages"])
         response = await llm_with_tools.ainvoke(llm_input)
@@ -143,7 +159,7 @@ async def run_agent(user_message, tenant_id, user_id, session_id,
         "session_id": session_id, "personality_mode": personality_mode,
         "operation_mode": operation_mode, "pending_approvals": [],
         "iteration_count": 0, "context": safe_context, "system_prompt": "",
-    })
+    }, config={"recursion_limit": AGENT_RECURSION_LIMIT})
     last_ai = next((m for m in reversed(final["messages"]) if isinstance(m, AIMessage)), None)
     last_llm_call = next(
         (m for m in reversed(final["messages"])
