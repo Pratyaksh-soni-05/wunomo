@@ -10,13 +10,30 @@ export class ApiError extends Error {
   }
 }
 
+// A 401 on a request that carried a bearer token means the token is
+// expired/invalid, not "wrong password" (those calls — login/register/
+// email-code/Google — never send an Authorization header, so they're
+// naturally excluded from this path). Central place to react to that,
+// since every authed call in this file funnels through `request()`.
+function handleSessionExpired() {
+  clearSession();
+  if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+    window.location.href = "/login?expired=1";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
   });
   const body = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(res.status, body?.detail ?? body);
+  if (!res.ok) {
+    if (res.status === 401 && new Headers(init?.headers).get("Authorization")) {
+      handleSessionExpired();
+    }
+    throw new ApiError(res.status, body?.detail ?? body);
+  }
   return body as T;
 }
 

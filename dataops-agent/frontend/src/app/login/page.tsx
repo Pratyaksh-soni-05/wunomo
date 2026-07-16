@@ -38,6 +38,15 @@ export default function LoginPage() {
     return () => clearInterval(t);
   }, [cooldown]);
 
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("expired") === "1") {
+      toast.push("Session expired — please log in again.", "warning");
+      router.replace("/login");
+    }
+    // Runs once on mount to consume the ?expired=1 redirect marker.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
