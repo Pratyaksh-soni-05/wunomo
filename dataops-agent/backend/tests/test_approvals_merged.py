@@ -114,6 +114,25 @@ async def test_merged_excludes_orphaned_cicd_policy_mirror(client):
 
 
 @pytest.mark.asyncio
+async def test_merged_risk_level_uses_the_real_0_to_100_scale(client):
+    """risk_score is 0-100 everywhere in this codebase (cicd_tasks.py's
+    AUTO_APPROVE_THRESHOLD=60, its own "Risk score: N/100" phrasing) — a
+    bucketing bug that assumed 0-1 would call every nonzero score "high"."""
+    token, tenant_id, user_id = await _register(client, "mergedriskscale")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    await _make_pending_commit(tenant_id, commit_sha="lowrisk", risk_score=15)
+    await _make_pending_commit(tenant_id, commit_sha="medrisk", risk_score=55)
+    await _make_pending_commit(tenant_id, commit_sha="hirisk", risk_score=85)
+
+    r = await client.get("/api/v1/approvals/merged", headers=headers)
+    by_sha = {a["raw"]["commit_sha"]: a["risk_level"] for a in r.json()["approvals"]}
+    assert by_sha["lowrisk"] == "low"
+    assert by_sha["medrisk"] == "medium"
+    assert by_sha["hirisk"] == "high"
+
+
+@pytest.mark.asyncio
 async def test_merged_is_tenant_scoped(client):
     token_a, tenant_a, user_a = await _register(client, "mergedtena")
     token_b, tenant_b, user_b = await _register(client, "mergedtenb")

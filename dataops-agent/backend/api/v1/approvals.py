@@ -96,7 +96,15 @@ async def list_merged_approvals(
             "source": "cicd_deployment",
             "title": f"Deploy {c.commit_sha[:8]} to production",
             "description": c.commit_message or f"{c.branch} @ {c.commit_sha[:8]} by {c.author or 'unknown'}",
-            "risk_level": "high" if (c.risk_score or 0) >= 0.7 else "medium" if (c.risk_score or 0) >= 0.4 else "low",
+            # risk_score is on a 0-100 scale everywhere in this codebase
+            # (see cicd_tasks.py's AUTO_APPROVE_THRESHOLD=60 and its own
+            # "Risk score: N/100" phrasing) — NOT 0-1. Thresholds here mirror
+            # that scale; using 0.7/0.4 against a real 0-100 value would
+            # bucket every nonzero score as "high" regardless of its actual
+            # severity (caught live: a seeded risk_score=72 happened to
+            # still read "high" by coincidence, which is what would have
+            # hidden this bug if not cross-checked against the real scale).
+            "risk_level": "high" if (c.risk_score or 0) >= 70 else "medium" if (c.risk_score or 0) >= 40 else "low",
             "created_at": c.trigger_time.isoformat() if c.trigger_time else None,
             "raw": {
                 "commit_id": str(c.id), "pipeline_id": c.pipeline_id, "commit_sha": c.commit_sha,
