@@ -281,6 +281,277 @@ export function getChatSessions(token: string): Promise<{ sessions: ChatSessionS
   return authedRequest("/api/v1/chat/sessions", token);
 }
 
+// ---------- Sources (Phase 12) ----------
+
+export interface DataSourceItem {
+  id: string;
+  name: string;
+  source_type: string;
+  is_active: boolean;
+  last_profiled_at: string | null;
+  tags: string[];
+  owner: string | null;
+  created_at: string;
+}
+
+export function getSources(token: string): Promise<{ sources: DataSourceItem[]; count: number }> {
+  return authedRequest("/api/v1/sources/", token);
+}
+
+export function createSource(
+  token: string,
+  params: { name: string; source_type: string; connection_config: Record<string, unknown> }
+): Promise<{ id: string; name: string; source_type: string; status: string }> {
+  return request("/api/v1/sources/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
+export function deleteSource(token: string, id: string): Promise<unknown> {
+  return request(`/api/v1/sources/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function syncSource(token: string, id: string, mode = "incremental"): Promise<unknown> {
+  return request(`/api/v1/sources/${id}/sync?mode=${mode}`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function profileSource(token: string, id: string): Promise<unknown> {
+  return request(`/api/v1/sources/${id}/profile`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+// ---------- Pipelines (Phase 12) ----------
+
+export interface PipelineItem {
+  id: string;
+  name: string;
+  status: string;
+  source_id: string | null;
+  schedule_cron: string | null;
+  description?: string | null;
+  created_at?: string;
+}
+
+export interface PipelineRunItem {
+  id: string;
+  status: string;
+  rows_processed: number | null;
+  duration_seconds: number | null;
+  created_at: string | null;
+  error_message?: string | null;
+}
+
+export function getPipelines(token: string): Promise<{ pipelines: PipelineItem[]; count: number }> {
+  return authedRequest("/api/v1/pipelines/", token);
+}
+
+export function createPipeline(
+  token: string,
+  params: { name: string; source_id?: string; description?: string; schedule_cron?: string }
+): Promise<PipelineItem> {
+  return request("/api/v1/pipelines/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
+export function deletePipeline(token: string, id: string): Promise<unknown> {
+  return request(`/api/v1/pipelines/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function triggerPipelineRun(token: string, id: string): Promise<unknown> {
+  return request(`/api/v1/pipelines/${id}/trigger`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function pausePipeline(token: string, id: string): Promise<unknown> {
+  return request(`/api/v1/pipelines/${id}/pause`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function activatePipeline(token: string, id: string): Promise<unknown> {
+  return request(`/api/v1/pipelines/${id}/activate`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function getPipelineRuns(
+  token: string, id: string, limit = 20
+): Promise<{ pipeline_id: string; pipeline_name: string; runs: PipelineRunItem[] }> {
+  return authedRequest(`/api/v1/pipelines/${id}/runs?limit=${limit}`, token);
+}
+
+// ---------- Quality (Phase 12) ----------
+
+export interface QualityRuleItem {
+  id: string;
+  pipeline_id: string;
+  name: string;
+  rule_type: string;
+  column_name: string | null;
+  severity: string;
+  is_blocking: boolean;
+  is_active?: boolean;
+  pass_count?: number;
+  fail_count?: number;
+}
+
+export function getQualityRules(token: string, pipelineId?: string): Promise<{ rules: QualityRuleItem[]; count: number }> {
+  return authedRequest(`/api/v1/quality/${pipelineId ? `?pipeline_id=${pipelineId}` : ""}`, token);
+}
+
+export function createQualityRule(
+  token: string,
+  params: { pipeline_id: string; name: string; rule_type: string; column_name?: string; severity?: string; is_blocking?: boolean }
+): Promise<unknown> {
+  return request("/api/v1/quality/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
+export function runQualityChecks(token: string, pipelineId: string): Promise<unknown> {
+  return request(`/api/v1/quality/${pipelineId}/run`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function deleteQualityRule(token: string, ruleId: string): Promise<unknown> {
+  return request(`/api/v1/quality/${ruleId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+}
+
+// ---------- Incidents (Phase 12) ----------
+
+export function resolveIncident(token: string, id: string, resolution_notes: string): Promise<unknown> {
+  return request(`/api/v1/incidents/${id}/resolve`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ resolution_notes }),
+  });
+}
+
+export function createIncident(
+  token: string,
+  params: { title: string; description?: string; severity?: string; pipeline_id?: string }
+): Promise<unknown> {
+  return request("/api/v1/incidents/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
+// ---------- CI/CD (Phase 12) ----------
+
+export interface CommitItem {
+  id: string;
+  pipeline_id: string | null;
+  commit_sha: string;
+  branch: string;
+  author: string | null;
+  ci_status: string;
+  gate_decision: string | null;
+  risk_score: number;
+  trigger_time: string;
+  completed_at: string | null;
+  error_message: string | null;
+}
+
+export interface DeploymentItem {
+  id: string;
+  pipeline_id: string;
+  commit_sha: string;
+  status: string;
+  monitoring_active: boolean;
+  post_deploy_run_count: number;
+  post_deploy_failure_count: number;
+  deployed_at: string | null;
+  created_at: string;
+}
+
+export function getCommits(token: string, limit = 20): Promise<CommitItem[]> {
+  return authedRequest(`/api/v1/cicd/commits?limit=${limit}`, token);
+}
+
+export function getDeployments(token: string, limit = 20): Promise<DeploymentItem[]> {
+  return authedRequest(`/api/v1/cicd/deployments?limit=${limit}`, token);
+}
+
+export function getCicdStatusSummary(token: string): Promise<Record<string, unknown>> {
+  return authedRequest("/api/v1/cicd/status/summary", token);
+}
+
+export function approveCommit(token: string, commitId: string): Promise<unknown> {
+  return request(`/api/v1/cicd/commits/${commitId}/approve`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function rejectCommit(token: string, commitId: string): Promise<unknown> {
+  return request(`/api/v1/cicd/commits/${commitId}/reject`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
+// ---------- Approvals — merged (Phase 12) ----------
+
+export interface MergedApproval {
+  id: string;
+  source: "policy_engine" | "cicd_deployment";
+  title: string;
+  description: string;
+  risk_level: string;
+  created_at: string;
+  raw: Record<string, unknown>;
+}
+
+export function getMergedApprovals(token: string): Promise<{ approvals: MergedApproval[]; count: number }> {
+  return authedRequest("/api/v1/approvals/merged", token);
+}
+
+// ---------- Governance (Phase 12) ----------
+
+export interface LineageNode {
+  id: string;
+  name: string;
+  node_type: string;
+  metadata: Record<string, unknown>;
+  created_at: string | null;
+}
+
+export interface LineageEdge {
+  edge_id: string;
+  upstream_id: string;
+  downstream_id: string;
+  relationship_type: string;
+}
+
+export interface DataContract {
+  contract_id: string;
+  name: string;
+  producer_source_id: string | null;
+  consumer_description: string;
+  is_active: boolean;
+  validation_status: string;
+  last_validated_at: string | null;
+  created_at: string | null;
+}
+
+export interface AuditEntry {
+  actor: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  payload: Record<string, unknown>;
+  timestamp?: string;
+  created_at?: string;
+}
+
+export function getLineageGraph(token: string): Promise<{ nodes: LineageNode[]; edges: LineageEdge[]; node_count: number; edge_count: number }> {
+  return authedRequest("/api/v1/governance/graph", token);
+}
+
+export function getContracts(token: string): Promise<{ contracts: DataContract[]; count: number }> {
+  return authedRequest("/api/v1/governance/contracts", token);
+}
+
+export function validateContract(token: string, contractId: string): Promise<unknown> {
+  return request(`/api/v1/governance/contracts/${contractId}/validate`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function getAuditTrail(token: string, limit = 50): Promise<{ entries: AuditEntry[]; count: number }> {
+  return authedRequest(`/api/v1/governance/audit?limit=${limit}`, token);
+}
+
 // ---------- Local session storage ----------
 
 const TOKEN_KEY = "axiom_token";
