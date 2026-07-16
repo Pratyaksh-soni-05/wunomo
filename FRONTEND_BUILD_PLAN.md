@@ -258,7 +258,7 @@ same commit as the change.
 | 7 | **App shell** — **done, fully live-verified** | Sidebar/topbar/routing/command palette/toasts/notifications/AXIOM FAB, light/dark theme switching (client-side, upgraded to server-persisted in Phase 16) | None | Visual + interaction comparison to prototype | Phase 2 |
 | 8 | **Chat sessions + tool trace** | None | `GET /chat/sessions` (tenant-scoped session list); real tool-call trace included in chat response | Multi-session real chat; session list correctly tenant-scoped; tool trace reflects tools actually executed | None |
 | 9 | **Dashboard** | Wired to real KPIs (pipelines/quality/incidents/approvals/sources) + AXIOM Activity via Phase 8 | — | Live dashboard against real tenant data | Phase 7; Phase 8 for AXIOM Activity |
-| 10 | **AXIOM chat (3-panel)** | Wired to real chat/history; graceful loading/fallback UX; real provider-switch messaging via Phase 1's `provider` field | — | Real multi-turn conversation; loading states and provider display accurate | Phase 7, 1, 8 |
+| 10 | **AXIOM chat (3-panel)** | Wired to real chat/history; graceful loading/fallback UX; real provider-switch messaging via Phase 1's `provider` field | — | Real multi-turn conversation; loading states and provider display accurate | Phase 7, 1, 8 — **plus a backend prerequisite, not yet scheduled as a phase here**: Gemini 3 tool-calling needs a LangChain v0.3→v1.x ecosystem upgrade before this phase's verification can exercise real Gemini tool-calling (see `CLAUDE.md` Known-broken; bundle that session with the 22-site `agent/tools/*.py` punch list, both touch the same layer) |
 | 11 | **KPI instrumentation + lineage auto-population** | None | Write a `KpiValue` point on every quality-check run; auto-create `LineageNode`/`LineageEdge` on pipeline/source creation | Real quality check → KPI row appears in `/analytics/kpis`; real pipeline+source → `/governance/graph` non-empty | None |
 | 12 | **Core DataOps screens** | Sources, Pipelines, Quality (real trend), Incidents, CI/CD, Approvals (merged), Governance (real lineage/contracts/audit) | Small: Approvals-merge aggregation endpoint | Full live walkthrough against real tenant data, mirroring the Phase 4 backend verification already done this project | Phase 7; Phase 11 for Quality/Governance fidelity |
 | 13 | **Transform history + catalog aggregation** | None | Transform-run persistence model; thin aggregation endpoint over `schema_snapshot` for catalog | Real SQL/pandas transform → listed/replayable; catalog reflects real profiled sources | None |
@@ -277,11 +277,12 @@ same commit as the change.
   fully live-verified through both Phase 5 (backend) and Phase 6 (UI click-through),
   including a real fix for a clock-skew bug found during the Phase 6 UI test — see
   `CLAUDE.md` Gotchas.
-- **Gemini billing** — still unresolved on Google Cloud's side (the API key shows
-  `limit: 0` on the free tier even after rotation — an account/billing-tier issue,
-  not a code issue). Groq fallback works correctly and is the effective primary
-  provider until this is sorted. Affects Phase 1's `provider` field distribution and
-  Phase 10's live testing of "healthy-Gemini" paths, not anything structural.
+- ~~**Gemini billing**~~ — resolved. Root cause was never billing: `gemini-2.0-flash`
+  had been deprecated by Google (free tier removed), so every key showed `limit: 0`
+  regardless of account state. Fixed by switching to `gemini-3-flash-preview` — see
+  `CLAUDE.md` Gotchas. Real remaining gap for Phase 10: Gemini 3 tool-calling needs a
+  LangChain v1 ecosystem upgrade (see `CLAUDE.md` Known-broken) — plain chat works on
+  Gemini today, tool-calling correctly falls back to Groq in the meantime.
 
 ---
 
