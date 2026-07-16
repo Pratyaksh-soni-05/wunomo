@@ -105,6 +105,44 @@ async def test_invoke_llm_writes_a_real_usage_event(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_invoke_llm_captures_reasoning_tokens_separately(client, monkeypatch):
+    """Gemini 3's "thinking" tokens (usage_metadata.output_token_details.reasoning,
+    confirmed live: 94-99 tokens spent on "what is 2+2?") are already folded
+    into total_tokens by the provider, but must also land in their own
+    reasoning_tokens column — kept distinct since thinking tokens will likely
+    be priced differently from plain output tokens for credits later."""
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": f"reasoningtest-{uuid.uuid4().hex[:8]}@example.com",
+        "password": "test1234",
+        "full_name": "Reasoning Test",
+        "tenant_name": "Reasoning Test Corp",
+    })
+    tenant_id = reg.json()["tenant_id"]
+
+    fake_primary = _FakeLLM(response=AIMessage(
+        content="four",
+        usage_metadata={
+            "input_tokens": 27, "output_tokens": 2, "total_tokens": 128,
+            "output_token_details": {"reasoning": 99},
+        },
+    ))
+    monkeypatch.setattr(llm_service_module, "get_primary_llm", lambda temperature=0.0: fake_primary)
+
+    await llm_service_module.invoke_llm(
+        [HumanMessage(content="what is 2+2?")], tenant_id=tenant_id, request_type="agent_chat",
+    )
+
+    async with AsyncSessionLocal() as db:
+        from sqlalchemy import select
+        r = await db.execute(select(LlmUsageEvent).where(LlmUsageEvent.tenant_id == tenant_id))
+        event = r.scalars().one()
+
+    assert event.output_tokens == 2
+    assert event.reasoning_tokens == 99
+    assert event.total_tokens == 128
+
+
+@pytest.mark.asyncio
 async def test_invoke_llm_skips_logging_without_tenant_id(monkeypatch):
     """No-regression check: callers that don't pass tenant_id (existing tests,
     or any future caller that forgets to) must not crash — logging is just
