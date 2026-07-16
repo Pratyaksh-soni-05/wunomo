@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import select, func, desc
+from sqlalchemy.orm import selectinload
 
 from .auth import get_current_user
 from database import AsyncSessionLocal
@@ -135,6 +136,43 @@ async def get_analytics_overview(
     except Exception as exc:
         log.error("analytics.overview.error", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc))
+
+# ------------------------------------------------------------------
+# 1b. Recent runs across all pipelines (Dashboard's "Recent Pipeline Runs")
+# ------------------------------------------------------------------
+
+@router.get("/recent-runs")
+async def get_recent_runs(
+    limit: int = Query(5, ge=1, le=50),
+    user=Depends(get_current_user),
+):
+    tenant_id = user["tenant_id"]
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(PipelineRun)
+                .where(PipelineRun.tenant_id == tenant_id)
+                .options(selectinload(PipelineRun.pipeline))
+                .order_by(desc(PipelineRun.created_at))
+                .limit(limit)
+            )
+            runs = result.scalars().all()
+            return {"runs": [
+                {
+                    "run_id": r.id,
+                    "pipeline_id": r.pipeline_id,
+                    "pipeline_name": r.pipeline.name if r.pipeline else "Unknown",
+                    "status": r.status.value if hasattr(r.status, "value") else str(r.status),
+                    "rows_processed": r.rows_processed,
+                    "duration_seconds": r.duration_seconds,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in runs
+            ]}
+    except Exception as exc:
+        log.error("analytics.recent_runs.error", error=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc))
+
 
 # ------------------------------------------------------------------
 # 2. Per-pipeline stats
