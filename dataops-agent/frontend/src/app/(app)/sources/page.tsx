@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Button, Card, CardBody, CardHeader, Badge, Modal, Input, Select,
+  Button, Card, Badge, Modal, Input, Select,
   Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
 } from "@/components/ui";
 import {

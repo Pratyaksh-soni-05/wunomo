@@ -91,7 +91,7 @@ export default function IncidentsPage() {
           <div className="empty-state">
             <h2 className="font-display text-xl">No incidents</h2>
             <p className="text-muted text-sm" style={{ maxWidth: 360 }}>
-              Nothing's on fire. Incidents raised by AXIOM or logged manually will show up here.
+              Nothing&apos;s on fire. Incidents raised by AXIOM or logged manually will show up here.
             </p>
             <Button size="sm" onClick={() => setModalOpen(true)}>+ Log Incident</Button>
           </div>
