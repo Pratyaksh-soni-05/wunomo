@@ -105,9 +105,14 @@ class BusinessRules:
     async def list_rules(self, pipeline_id: str | None = None) -> list[dict]:
         """Lists all business rules for the tenant."""
         engine = QualityRuleEngine(self.tenant_id)
-        all_rules = await engine.list_rules(pipeline_id=pipeline_id)
-        if isinstance(all_rules, dict) and "error" in all_rules:
-            return all_rules
+        result = await engine.list_rules(pipeline_id=pipeline_id)
+        if isinstance(result, dict) and "error" in result:
+            return result
+        # QualityRuleEngine.list_rules() returns {"rules": [...], "count": N},
+        # not a bare list — iterating the dict directly iterated its *keys*
+        # (the strings "rules"/"count"), so `r.get(...)` below raised
+        # AttributeError: 'str' object has no attribute 'get' on every call.
+        all_rules = result.get("rules", []) if isinstance(result, dict) else result
         return [r for r in all_rules if r.get("rule_config", {}).get("_business_rule")]
 
     async def delete_rule(self, rule_id: str) -> dict:
