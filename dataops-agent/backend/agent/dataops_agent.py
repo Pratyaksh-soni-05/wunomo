@@ -150,12 +150,19 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
         # though it's told the correct value above — force every tool call's
         # tenant_id to the real, server-derived value so a hallucination or a
         # prompt-injected tool result can never redirect a call at another tenant.
-        # Also coerce any dict/list-typed arg that arrived stringified — see
-        # _coerce_stringified_object_args' module-level comment.
+        # user_id/session_id get the same treatment for the tools that need them
+        # (currently just request_approval) — same reasoning, see the Gotcha on
+        # this in CLAUDE.md. Also coerce any dict/list-typed arg that arrived
+        # stringified — see _coerce_stringified_object_args' module-level comment.
         for call in (response.tool_calls or []):
-            if "tenant_id" in call.get("args", {}):
-                call["args"]["tenant_id"] = state["tenant_id"]
-            _coerce_stringified_object_args(call["name"], call.get("args", {}))
+            args = call.get("args", {})
+            if "tenant_id" in args:
+                args["tenant_id"] = state["tenant_id"]
+            if "user_id" in args:
+                args["user_id"] = state["user_id"]
+            if "session_id" in args:
+                args["session_id"] = state["session_id"]
+            _coerce_stringified_object_args(call["name"], args)
         return {"messages": [response], "iteration_count": state.get("iteration_count", 0) + 1}
 
     def approval_gate_node(state):

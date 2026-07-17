@@ -11,6 +11,7 @@ from database import AsyncSessionLocal
 from models.all_models import DataContract, DataSource
 from modules.governance.lineage_tracker import LineageTracker
 from modules.governance.audit_trail import AuditTrail
+from modules.governance import contract_service
 
 log = structlog.get_logger()
 router = APIRouter()
@@ -178,50 +179,18 @@ async def create_contract(
     user=Depends(get_current_user),
 ):
     """Create a new data contract."""
-    try:
-        async with AsyncSessionLocal() as db:
-            # Verify producer source belongs to tenant
-            src_result = await db.execute(
-                select(DataSource).where(
-                    DataSource.id == body.producer_source_id,
-                    DataSource.tenant_id == user["tenant_id"],
-                )
-            )
-            if src_result.scalar_one_or_none() is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Source {body.producer_source_id} not found",
-                )
-
-            contract = DataContract(
-                tenant_id=user["tenant_id"],
-                name=body.name,
-                producer_source_id=body.producer_source_id,
-                consumer_description=body.consumer_description,
-                schema_expectations=body.schema_expectations,
-                quality_conditions=body.quality_conditions,
-                sla_hours=body.sla_hours,
-                is_active=True,
-                validation_status="pending",
-                created_at=utcnow(),
-            )
-            db.add(contract)
-            await db.commit()
-            await db.refresh(contract)
-
-        await AuditTrail(user["tenant_id"]).log_action(
-            actor=user["email"],
-            action="contract.created",
-            resource_type="contract",
-            resource_id=str(contract.id),
-            payload={"name": body.name, "producer_source_id": body.producer_source_id},
-        )
-        return _serialize_contract(contract)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        log.error("governance.create_contract.error", error=str(exc))
-        raise HTTPException(status_code=500, detail=str(exc))
+    result = await contract_service.create_contract(
+        tenant_id=user["tenant_id"], actor=user["email"],
+        name=body.name, producer_source_id=body.producer_source_id,
+        consumer_description=body.consumer_description,
+        schema_expectations=body.schema_expectations,
+        quality_conditions=body.quality_conditions,
+        sla_hours=body.sla_hours,
+    )
+    if "error" in result:
+        status = 404 if "not found" in result["error"] else 500
+        raise HTTPException(status_code=status, detail=result["error"])
+    return result
 
 
 @router.post("/contracts/{contract_id}/validate")
@@ -233,105 +202,13 @@ async def validate_contract(
     Validate a data contract against the current source schema.
     Checks schema_expectations and quality_conditions against live DataSource snapshot.
     """
-    try:
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                select(DataContract).where(
-                    DataContract.id == contract_id,
-                    DataContract.tenant_id == user["tenant_id"],
-                )
-            )
-            contract = result.scalar_one_or_none()
-            if contract is None:
-                raise HTTPException(status_code=404, detail=f"Contract {contract_id} not found")
-
-            # Fetch the producer source's live schema snapshot
-            src_result = await db.execute(
-                select(DataSource).where(
-                    DataSource.id == contract.producer_source_id,
-                    DataSource.tenant_id == user["tenant_id"],
-                )
-            )
-            source = src_result.scalar_one_or_none()
-
-        violations = []
-        passed = []
-
-        if source and source.schema_snapshot:
-            live_schema = source.schema_snapshot
-            expected = contract.schema_expectations or {}
-
-            # Check expected columns exist
-            expected_columns = expected.get("columns", [])
-            live_columns = [
-                col.get("name") for col in live_schema.get("columns", [])
-            ]
-            for col in expected_columns:
-                col_name = col.get("name") if isinstance(col, dict) else col
-                if col_name not in live_columns:
-                    violations.append({
-                        "check": "schema.column_missing",
-                        "column": col_name,
-                        "message": f"Expected column '{col_name}' not found in live schema",
-                    })
-                else:
-                    passed.append({"check": "schema.column_present", "column": col_name})
-
-            # Check expected row count minimum
-            min_rows = expected.get("min_row_count")
-            live_row_count = live_schema.get("row_count")
-            if min_rows and live_row_count is not None:
-                if live_row_count < min_rows:
-                    violations.append({
-                        "check": "quality.min_row_count",
-                        "expected": min_rows,
-                        "actual": live_row_count,
-                        "message": f"Row count {live_row_count} is below minimum {min_rows}",
-                    })
-                else:
-                    passed.append({"check": "quality.min_row_count"})
-        else:
-            violations.append({
-                "check": "schema.no_snapshot",
-                "message": "Source has not been profiled yet — no schema snapshot available",
-            })
-
-        validation_status = "valid" if not violations else "violated"
-
-        # Persist validation result
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                select(DataContract).where(
-                    DataContract.id == contract_id,
-                    DataContract.tenant_id == user["tenant_id"],
-                )
-            )
-            contract = result.scalar_one_or_none()
-            contract.validation_status = validation_status
-            contract.last_validated_at = utcnow()
-            db.add(contract)
-            await db.commit()
-
-        await AuditTrail(user["tenant_id"]).log_action(
-            actor=user["email"],
-            action="contract.validated",
-            resource_type="contract",
-            resource_id=contract_id,
-            payload={"status": validation_status, "violations": len(violations)},
-        )
-
-        return {
-            "contract_id": contract_id,
-            "validation_status": validation_status,
-            "violations": violations,
-            "passed": passed,
-            "validated_at": utcnow().isoformat(),
-        }
-    except HTTPException:
-        raise
-    except Exception as exc:
-        log.error("governance.validate_contract.error", error=str(exc))
-        raise HTTPException(status_code=500, detail=str(exc))
+    result = await contract_service.validate_contract(
+        tenant_id=user["tenant_id"], actor=user["email"], contract_id=contract_id,
+    )
+    if "error" in result:
+        status = 404 if "not found" in result["error"] else 500
+        raise HTTPException(status_code=status, detail=result["error"])
+    return result
 
 
 # ------------------------------------------------------------------
@@ -365,17 +242,4 @@ async def get_audit_trail(
 # Helpers
 # ------------------------------------------------------------------
 
-def _serialize_contract(c: DataContract) -> dict:
-    return {
-        "contract_id": str(c.id),
-        "name": c.name,
-        "producer_source_id": str(c.producer_source_id) if c.producer_source_id else None,
-        "consumer_description": c.consumer_description,
-        "schema_expectations": c.schema_expectations or {},
-        "quality_conditions": c.quality_conditions or {},
-        "sla_hours": c.sla_hours,
-        "is_active": c.is_active,
-        "validation_status": c.validation_status,
-        "last_validated_at": c.last_validated_at.isoformat() if c.last_validated_at else None,
-        "created_at": c.created_at.isoformat() if c.created_at else None,
-    }
+_serialize_contract = contract_service.serialize_contract

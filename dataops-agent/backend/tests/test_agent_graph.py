@@ -18,6 +18,13 @@ async def fake_identity_tool(tenant_id: str, x: str = "") -> str:
     return tenant_id
 
 
+@tool
+async def fake_full_identity_tool(tenant_id: str, user_id: str, session_id: str) -> str:
+    """Return the tenant_id/user_id/session_id it was actually invoked with,
+    joined by '|' (test-only)."""
+    return f"{tenant_id}|{user_id}|{session_id}"
+
+
 def _identity_tool_call_responses(claimed_tenant_id):
     return [
         AIMessage(content="", tool_calls=[
@@ -165,6 +172,39 @@ async def test_client_supplied_context_tenant_id_override_is_ignored(monkeypatch
 
     tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert tool_messages[0].content == "real-tenant-abc"
+
+
+@pytest.mark.asyncio
+async def test_agent_forces_real_user_id_and_session_id_too(monkeypatch):
+    """governance_tools.py's request_approval needs user_id/session_id to call
+    PolicyEngine.create_request() — the same tenant_id-hallucination risk
+    applies to these (the LLM has no reliable way to know the real values),
+    so agent_node's force-override loop must cover them too, not just
+    tenant_id. Regression test for CLAUDE.md's Gotcha on extending that loop
+    whenever a new tool takes these as args.
+    """
+    fake_llm = FakeToolCallLLM([
+        AIMessage(content="", tool_calls=[
+            {
+                "name": "fake_full_identity_tool",
+                "args": {"tenant_id": "wrong-tenant", "user_id": "wrong-user", "session_id": "wrong-session"},
+                "id": "call_1",
+            },
+        ]),
+        AIMessage(content="Done."),
+    ])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_full_identity_tool])
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    result = await dataops_agent.run_agent(
+        user_message="do the thing",
+        tenant_id="real-tenant", user_id="real-user", session_id="real-session",
+    )
+
+    tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert tool_messages[0].content == "real-tenant|real-user|real-session"
 
 
 @tool
