@@ -1,6 +1,6 @@
 # agent/tools/cicd_tools.py
 
-from langchain.tools import tool
+from langchain_core.tools import tool
 
 @tool
 async def get_cicd_status(tenant_id: str, query: str = "") -> str:
