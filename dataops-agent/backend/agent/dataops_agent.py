@@ -15,6 +15,38 @@ import structlog
 
 log = structlog.get_logger()
 
+# langchain-google-genai 3.2.0 (see CLAUDE.md Gotchas) consistently returns
+# dict/list-typed tool arguments as JSON-encoded strings rather than native
+# Python objects, even though: (a) the tool's own schema correctly declares
+# them as "object"/"array" (confirmed via register_data_source.args), and
+# (b) the raw Gemini API itself returns a real nested object for the same
+# call (confirmed via a direct httpx call bypassing langchain entirely) —
+# the stringification happens somewhere in langchain_google_genai's own
+# function-call parsing pipeline, not in our schemas or Gemini's model
+# behavior. Reproduced deterministically across multiple prompts, including
+# ones with an explicit, unambiguous target value. Groq never showed this.
+
+
+def _coerce_stringified_object_args(tool_name: str, args: dict) -> None:
+    """Mutates `args` in place: any argument the tool's own schema declares
+    as object/array that arrived as a JSON string gets parsed back into a
+    real dict/list before the underlying Python tool function ever sees it.
+    Looks the schema up from the module-level ALL_TOOLS on every call
+    (cheap — a few dozen tools) rather than precomputing at import time, so
+    tests can monkeypatch dataops_agent.ALL_TOOLS the same way they already
+    do for every other agent-graph test. See the comment above for why this
+    coercion is needed at all."""
+    tool_obj = next((t for t in ALL_TOOLS if t.name == tool_name), None)
+    if tool_obj is None:
+        return
+    arg_types = {name: schema.get("type", "") for name, schema in tool_obj.args.items()}
+    for arg_name, value in list(args.items()):
+        if arg_types.get(arg_name) in ("object", "array") and isinstance(value, str):
+            try:
+                args[arg_name] = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                pass  # leave as-is; the tool's own validation will surface the real error
+
 # iteration_count and LangGraph's own `recursion_limit` count different
 # things: iteration_count increments once per agent_node visit, but each
 # tool-calling round is 3 LangGraph supersteps (agent -> approval_gate ->
@@ -30,6 +62,29 @@ log = structlog.get_logger()
 # just barely above it — if you change either constant, re-derive the other.
 MAX_AGENT_ITERATIONS = 10
 AGENT_RECURSION_LIMIT = 50
+
+
+def _content_as_text(content) -> str:
+    """langchain-core 1.x (post-upgrade) can return AIMessage.content as a
+    list of structured content blocks (e.g. Gemini 3.5's
+    `[{"type": "text", "text": "...", "extras": {"signature": "..."}}]`,
+    the new home for what used to be a bare `thought_signature` field)
+    instead of the plain string every prior version always returned.
+    chat_messages.content is a VARCHAR column and callers throughout this
+    file/api/v1/chat.py treat `.content` as a string — normalize once here
+    rather than at every call site. The rich block structure (and the
+    signature inside it) stays intact on the actual message objects LangGraph
+    threads through a single graph invocation in memory; this only matters
+    for the flattened string handed back to the API layer and persisted to
+    the DB, which never needed the signature itself, only the text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            block.get("text", "") for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return str(content)
 
 
 class AgentState(TypedDict):
@@ -95,9 +150,12 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
         # though it's told the correct value above — force every tool call's
         # tenant_id to the real, server-derived value so a hallucination or a
         # prompt-injected tool result can never redirect a call at another tenant.
+        # Also coerce any dict/list-typed arg that arrived stringified — see
+        # _coerce_stringified_object_args' module-level comment.
         for call in (response.tool_calls or []):
             if "tenant_id" in call.get("args", {}):
                 call["args"]["tenant_id"] = state["tenant_id"]
+            _coerce_stringified_object_args(call["name"], call.get("args", {}))
         return {"messages": [response], "iteration_count": state.get("iteration_count", 0) + 1}
 
     def approval_gate_node(state):
@@ -167,7 +225,7 @@ async def run_agent(user_message, tenant_id, user_id, session_id,
         None,
     )
     return {
-        "response": last_ai.content if last_ai else "No response.",
+        "response": _content_as_text(last_ai.content) if last_ai else "No response.",
         "provider": last_llm_call.additional_kwargs["llm_provider"] if last_llm_call else None,
         "pending_approvals": final.get("pending_approvals", []),
         "messages": final["messages"],

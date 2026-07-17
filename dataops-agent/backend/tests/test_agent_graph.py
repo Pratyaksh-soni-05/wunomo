@@ -167,6 +167,89 @@ async def test_client_supplied_context_tenant_id_override_is_ignored(monkeypatch
     assert tool_messages[0].content == "real-tenant-abc"
 
 
+@tool
+async def fake_object_arg_tool(tenant_id: str, payload: dict) -> str:
+    """Return the type name actually received for `payload` (test-only).
+    Named `payload`, not `config` — `config` collides with LangChain's own
+    reserved RunnableConfig parameter name and gets silently dropped before
+    the tool function ever sees it, independent of anything this test is
+    checking (found live while writing this test; see CLAUDE.md — the real
+    orchestration_tools.py create_pipeline() has this exact collision)."""
+    return type(payload).__name__ + ":" + str(payload)
+
+
+@pytest.mark.asyncio
+async def test_stringified_dict_arg_is_coerced_back_to_a_real_dict(monkeypatch):
+    """Regression test for the langchain-google-genai 3.2.0 finding (see
+    CLAUDE.md Gotchas): Gemini 3.5's tool calls, once parsed by
+    langchain-google-genai, arrive with dict/list-typed arguments as
+    JSON-encoded strings rather than native Python objects — reproduced
+    live and traced to the library's own function-call parsing, not our
+    tool schemas or Gemini's actual model output. agent_node must coerce
+    these back to real dicts/lists (using the tool's own declared schema)
+    before the tool function ever runs, the same way it already
+    force-overrides tenant_id on every outgoing call.
+    """
+    fake_llm = FakeToolCallLLM([
+        AIMessage(content="", tool_calls=[
+            {
+                "name": "fake_object_arg_tool",
+                "args": {"tenant_id": "t1", "payload": '{"path": "test.csv", "nested": {"a": 1}}'},
+                "id": "call_1",
+            },
+        ]),
+        AIMessage(content="Done."),
+    ])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_object_arg_tool])
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    result = await dataops_agent.run_agent(
+        user_message="register this", tenant_id="t1", user_id="u1", session_id="s1",
+    )
+
+    tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert len(tool_messages) == 1
+    # If coercion didn't run, this would read "str:{\"path\": ...}" instead.
+    assert tool_messages[0].content == "dict:{'path': 'test.csv', 'nested': {'a': 1}}"
+
+
+@pytest.mark.asyncio
+async def test_malformed_json_string_arg_is_left_for_the_tool_to_reject(monkeypatch):
+    """If the "stringified dict" isn't even valid JSON, coercion must not
+    raise — leave the value as-is and let LangChain's own schema validation
+    surface a graceful error (it rejects a plain string where the tool
+    declares a dict), rather than crashing agent_node itself on a malformed
+    upstream response."""
+    fake_llm = FakeToolCallLLM([
+        AIMessage(content="", tool_calls=[
+            {
+                "name": "fake_object_arg_tool",
+                "args": {"tenant_id": "t1", "payload": "not valid json {{{"},
+                "id": "call_1",
+            },
+        ]),
+        AIMessage(content="Done."),
+    ])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_object_arg_tool])
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    result = await dataops_agent.run_agent(
+        user_message="register this", tenant_id="t1", user_id="u1", session_id="s1",
+    )
+
+    tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert len(tool_messages) == 1
+    # Coercion leaves the un-parseable string alone; LangChain's own
+    # schema validation (payload: dict) then rejects it gracefully —
+    # no crash, no silent pass-through of a string where a dict was required.
+    assert "Error" in tool_messages[0].content
+    assert "payload" in tool_messages[0].content
+
+
 @pytest.mark.asyncio
 async def test_get_cicd_status_tool_uses_real_tenant_id(monkeypatch):
     """Regression test for the get_cicd_status tenant-isolation gap: this tool
