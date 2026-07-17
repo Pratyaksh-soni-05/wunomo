@@ -5,14 +5,19 @@ from agent.tools._utils import cap_tool_result
 @tool
 async def check_freshness(tenant_id: str, source_id: Optional[str] = None) -> dict:
     """Check dataset freshness against SLA. Returns stale datasets with hours_overdue."""
-    from modules.observability.monitor import ObservabilityMonitor
-    return cap_tool_result(await ObservabilityMonitor(tenant_id).check_freshness(source_id))
+    from modules.observability.monitor import Monitor
+    stale = await Monitor(tenant_id).check_freshness()
+    if isinstance(stale, dict) and "error" in stale:
+        return stale
+    if source_id:
+        stale = [s for s in stale if s.get("source_id") == source_id]
+    return cap_tool_result({"stale_sources": stale, "count": len(stale)})
 
 @tool
 async def detect_anomalies(tenant_id: str, pipeline_id: str) -> dict:
     """Detect anomalies: row count spikes, null rate changes, value distribution shifts."""
     from modules.observability.anomaly_detector import AnomalyDetector
-    return cap_tool_result(await AnomalyDetector(tenant_id).detect(pipeline_id))
+    return cap_tool_result(await AnomalyDetector(tenant_id).detect_anomalies(pipeline_id))
 
 @tool
 async def list_open_incidents(tenant_id: str) -> dict:
@@ -35,8 +40,8 @@ async def resolve_incident(tenant_id: str, incident_id: str, resolution_notes: s
 @tool
 async def get_system_health(tenant_id: str) -> dict:
     """Overall data stack health: pipeline success rates, quality trends, SLA compliance."""
-    from modules.observability.monitor import ObservabilityMonitor
-    return cap_tool_result(await ObservabilityMonitor(tenant_id).system_health())
+    from modules.observability.monitor import Monitor
+    return cap_tool_result(await Monitor(tenant_id).get_system_health())
 
 observability_tools = [check_freshness, detect_anomalies, list_open_incidents,
                         triage_incident, resolve_incident, get_system_health]
