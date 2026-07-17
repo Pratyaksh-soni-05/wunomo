@@ -281,6 +281,60 @@ export function getChatSessions(token: string): Promise<{ sessions: ChatSessionS
   return authedRequest("/api/v1/chat/sessions", token);
 }
 
+export interface ChatToolCall {
+  tool: string;
+  args: Record<string, unknown>;
+  result: unknown;
+  status: "completed" | "blocked_pending_approval";
+}
+
+export interface ChatMessageItem {
+  role: "user" | "assistant";
+  content: string;
+  tool_calls: ChatToolCall[];
+  timestamp: string;
+}
+
+export interface ChatContext {
+  source_id: string;
+  source_name: string;
+}
+
+export interface PendingApproval {
+  name: string;
+  args: Record<string, unknown>;
+  risk_level: string;
+  reason: string;
+}
+
+export interface ChatSendResponse {
+  session_id: string;
+  response: string;
+  provider: string | null;
+  pending_approvals: PendingApproval[];
+  tool_calls: ChatToolCall[];
+  timestamp: string;
+}
+
+export function sendChatMessage(
+  token: string,
+  params: {
+    message: string;
+    session_id?: string;
+    personality_mode?: string;
+    operation_mode?: string;
+    context?: ChatContext;
+  }
+): Promise<ChatSendResponse> {
+  return request("/api/v1/chat/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
+export function getChatHistory(token: string, sessionId: string): Promise<{ session_id: string; messages: ChatMessageItem[] }> {
+  return authedRequest(`/api/v1/chat/sessions/${sessionId}/history`, token);
+}
+
 // ---------- Sources (Phase 12) ----------
 
 export interface DataSourceItem {
