@@ -373,5 +373,33 @@ class TeamInvite(Base):
     status = Column(String(20), nullable=False, default="pending")  # pending|accepted|revoked|expired
     expires_at = Column(DateTime, nullable=False)
     accepted_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    # index=True: GET /team/invites orders by this column, and the real
+    # deployed table has carried this index since Phase 15 anyway (a
+    # stray duplicate line, invisible in a too-short Read near EOF, had
+    # silently been declaring it this whole time - see CLAUDE.md Gotchas).
+    # Declaring it explicitly now instead of dropping it: the index is a
+    # real, sensible fit for the real query pattern.
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class ApiKey(Base):
+    """Platform API keys (Phase 16) - CRUD only this phase (generate/hash/
+    store, list masked, revoke). Nothing in the API accepts one of these
+    as a credential yet - that's a deliberately separate, larger feature
+    (a new auth dependency, every endpoint's resolution path, key-scoped
+    rate limits), tracked in CLAUDE.md's Not-yet-built. Don't let a
+    Settings UI imply these can authenticate anything until that lands."""
+    __tablename__ = "api_keys"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    # SHA-256, not bcrypt - the raw key itself is a high-entropy random
+    # secret (unlike a user-chosen password), so hash-slowness protection
+    # against brute force isn't the relevant threat model here; same
+    # reasoning as TeamInvite.token_hash/EmailLoginCode.code_hash.
+    key_hash = Column(String(64), nullable=False, unique=True)
+    key_prefix = Column(String(20), nullable=False)  # e.g. "axm_live_a1b2c3d4" - safe to display, not the full secret
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
