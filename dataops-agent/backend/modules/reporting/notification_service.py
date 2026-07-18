@@ -37,8 +37,11 @@ class NotificationService:
     Delivers alerts and reports via Email and Slack.
 
     Channels:
-      - "slack"  → POST to AXIOM_SLACK_WEBHOOK_URL (settings)
-      - "email"  → SMTP using AXIOM_SMTP_* settings
+      - "slack"  → this tenant's own notification_prefs.slack_webhook_url,
+                   falling back to settings.SLACK_WEBHOOK_URL
+      - "email"  → this tenant's own notification_prefs.alert_email,
+                   falling back to settings.ALERT_EMAIL, sent via SMTP
+                   using settings.SMTP_*
       - "both"   → sends to both channels
 
     All methods return {"sent": True, "channels": [...]} or {"error": "..."}
@@ -100,7 +103,9 @@ class NotificationService:
                 channels_sent.append("slack")
 
         if channel in ("email", "both"):
-            to_address = getattr(settings, "AXIOM_ALERT_EMAIL", None)
+            from services.settings_service import get_notification_prefs
+            prefs = await get_notification_prefs(self.tenant_id)
+            to_address = prefs["alert_email"] or settings.ALERT_EMAIL or None
             if to_address:
                 body = self._format_email_body(
                     title=full_title,
@@ -142,8 +147,18 @@ class NotificationService:
         """
         Posts a message to Slack via incoming webhook.
 
-        Reads webhook URL from: settings.AXIOM_SLACK_WEBHOOK_URL
-        Reads default channel from: settings.AXIOM_SLACK_CHANNEL (optional)
+        Reads the webhook URL from this tenant's own
+        Tenant.settings.notification_prefs.slack_webhook_url first (Phase
+        16 - see services/settings_service.py); falls back to the global
+        settings.SLACK_WEBHOOK_URL only if the tenant hasn't configured
+        their own. Before this, self.tenant_id was stored but never read
+        (every tenant would have shared one global webhook) AND the
+        "global" lookup itself referenced a nonexistent
+        AXIOM_SLACK_WEBHOOK_URL setting (the real field is
+        SLACK_WEBHOOK_URL, no prefix) - so this method could never
+        actually send a Slack message to anyone, tenant-specific or
+        global, until both bugs were fixed together here.
+        Reads default channel from: settings.SLACK_DEFAULT_CHANNEL (optional)
 
         Constructs a Slack Block Kit payload with:
           - Header block
@@ -153,10 +168,12 @@ class NotificationService:
 
         Returns: { "sent": True } or { "error": "..." }
         """
-        webhook_url = getattr(settings, "AXIOM_SLACK_WEBHOOK_URL", None)
+        from services.settings_service import get_notification_prefs
+        prefs = await get_notification_prefs(self.tenant_id)
+        webhook_url = prefs["slack_webhook_url"] or settings.SLACK_WEBHOOK_URL
         if not webhook_url:
             log.warning("notification.send_slack.no_webhook_configured")
-            return {"error": "AXIOM_SLACK_WEBHOOK_URL is not configured"}
+            return {"error": "No Slack webhook configured (tenant or global)"}
 
         try:
             blocks = [
@@ -200,8 +217,8 @@ class NotificationService:
 
             if channel:
                 payload["channel"] = channel
-            elif hasattr(settings, "AXIOM_SLACK_CHANNEL"):
-                payload["channel"] = settings.AXIOM_SLACK_CHANNEL
+            elif settings.SLACK_DEFAULT_CHANNEL:
+                payload["channel"] = settings.SLACK_DEFAULT_CHANNEL
 
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
@@ -240,13 +257,16 @@ class NotificationService:
         """
         Sends an email via SMTP.
 
-        Reads config from settings:
-          AXIOM_SMTP_HOST       (default: localhost)
-          AXIOM_SMTP_PORT       (default: 587)
-          AXIOM_SMTP_USER       (optional — skip auth if missing)
-          AXIOM_SMTP_PASSWORD   (optional)
-          AXIOM_SMTP_FROM       (default: axiom@dataops.ai)
-          AXIOM_SMTP_USE_TLS    (default: True)
+        Reads config from settings (the real declared Settings fields -
+        this previously read nonexistent AXIOM_SMTP_*-prefixed names,
+        which silently always fell through to the getattr() defaults
+        regardless of what was actually configured; see CLAUDE.md):
+          SMTP_HOST       (default: smtp.gmail.com)
+          SMTP_PORT       (default: 587)
+          SMTP_USER       (optional — skip auth if missing)
+          SMTP_PASSWORD   (optional)
+          SMTP_FROM       (default: axiom@dataops.ai)
+          SMTP_USE_TLS    (default: True)
 
         Args:
             to:      recipient email address
@@ -257,12 +277,12 @@ class NotificationService:
 
         Returns: { "sent": True } or { "error": "..." }
         """
-        host = getattr(settings, "AXIOM_SMTP_HOST", "localhost")
-        port = int(getattr(settings, "AXIOM_SMTP_PORT", 587))
-        user = getattr(settings, "AXIOM_SMTP_USER", None)
-        password = getattr(settings, "AXIOM_SMTP_PASSWORD", None)
-        from_addr = getattr(settings, "AXIOM_SMTP_FROM", "axiom@dataops.ai")
-        use_tls = getattr(settings, "AXIOM_SMTP_USE_TLS", True)
+        host = settings.SMTP_HOST
+        port = settings.SMTP_PORT
+        user = settings.SMTP_USER or None
+        password = settings.SMTP_PASSWORD or None
+        from_addr = settings.SMTP_FROM
+        use_tls = settings.SMTP_USE_TLS
 
         log.info("notification.send_email", to=to, subject=subject, host=host, port=port)
 

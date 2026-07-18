@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "axiom@dataops.ai"
+    SMTP_USE_TLS: bool = True
+    ALERT_EMAIL: str = ""
     SLACK_BOT_TOKEN: str = ""
     SLACK_DEFAULT_CHANNEL: str = "#dataops-alerts"
     ENABLE_AUTONOMOUS_MODE: bool = False

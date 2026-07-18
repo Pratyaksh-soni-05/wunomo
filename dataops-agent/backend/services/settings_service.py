@@ -31,6 +31,9 @@ from database import AsyncSessionLocal
 from models.all_models import Tenant
 from services.llm_service import SUPPORTED_MODEL_OVERRIDES
 
+NOTIFY_ON_KEYS = ("incident_created", "pipeline_failed", "deployment_failed", "approval_required")
+DEFAULT_NOTIFY_ON = {k: True for k in NOTIFY_ON_KEYS}
+
 
 async def get_tenant_settings(tenant_id: str) -> dict:
     async with AsyncSessionLocal() as db:
@@ -41,13 +44,32 @@ async def get_tenant_settings(tenant_id: str) -> dict:
         return {"name": tenant.name, **(tenant.settings or {})}
 
 
+def _validate_notification_prefs(prefs) -> str | None:
+    if not isinstance(prefs, dict):
+        return "notification_prefs must be an object"
+    for key in prefs:
+        if key not in ("slack_webhook_url", "alert_email", "notify_on"):
+            return f"Unknown notification_prefs key '{key}'"
+    notify_on = prefs.get("notify_on")
+    if notify_on is not None:
+        if not isinstance(notify_on, dict):
+            return "notify_on must be an object"
+        for key, value in notify_on.items():
+            if key not in NOTIFY_ON_KEYS:
+                return f"Unknown notify_on key '{key}'. Valid: {list(NOTIFY_ON_KEYS)}"
+            if not isinstance(value, bool):
+                return f"notify_on['{key}'] must be a boolean"
+    return None
+
+
 async def update_tenant_settings(tenant_id: str, updates: dict) -> dict:
-    """Shallow-merges `updates` into the tenant's existing settings dict
-    (top-level keys only - notification_prefs' own nested shape is merged
-    by its own dedicated update path once that lands, not here), except
-    `name` which writes to the real Tenant.name column. Validates
-    ai_model_override against the allowlist and name against non-empty.
-    Returns {"error": ...} | the full updated unified settings dict."""
+    """Shallow-merges top-level `updates` into the tenant's existing
+    settings dict, except: `name` writes to the real Tenant.name column,
+    and `notification_prefs` is deep-merged one level (a partial update
+    like {"slack_webhook_url": "..."} doesn't wipe out an already-set
+    notify_on). Validates ai_model_override against the allowlist, name
+    against non-empty, and notification_prefs' shape. Returns
+    {"error": ...} | the full updated unified settings dict."""
     if "ai_model_override" in updates:
         model = updates["ai_model_override"]
         if model is not None and model not in SUPPORTED_MODEL_OVERRIDES:
@@ -55,6 +77,11 @@ async def update_tenant_settings(tenant_id: str, updates: dict) -> dict:
 
     if "name" in updates and not (updates["name"] or "").strip():
         return {"error": "Workspace name cannot be empty"}
+
+    if "notification_prefs" in updates:
+        err = _validate_notification_prefs(updates["notification_prefs"])
+        if err:
+            return {"error": err}
 
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
@@ -67,10 +94,30 @@ async def update_tenant_settings(tenant_id: str, updates: dict) -> dict:
             tenant.name = updates.pop("name").strip()
 
         merged = dict(tenant.settings or {})
+        if "notification_prefs" in updates:
+            incoming = updates.pop("notification_prefs")
+            existing_prefs = dict(merged.get("notification_prefs") or {})
+            if "notify_on" in incoming:
+                existing_prefs["notify_on"] = {**existing_prefs.get("notify_on", {}), **incoming.pop("notify_on")}
+            existing_prefs.update(incoming)
+            merged["notification_prefs"] = existing_prefs
+
         merged.update(updates)
         tenant.settings = merged
         await db.commit()
         return {"name": tenant.name, **merged}
+
+
+async def get_notification_prefs(tenant_id: str) -> dict:
+    """Returns the tenant's notification prefs with defaults filled in for
+    any unset field - callers never need to handle missing keys."""
+    tenant_settings = await get_tenant_settings(tenant_id)
+    prefs = tenant_settings.get("notification_prefs") or {}
+    return {
+        "slack_webhook_url": prefs.get("slack_webhook_url"),
+        "alert_email": prefs.get("alert_email"),
+        "notify_on": {**DEFAULT_NOTIFY_ON, **prefs.get("notify_on", {})},
+    }
 
 
 async def get_ai_model_override(tenant_id: str) -> str | None:
