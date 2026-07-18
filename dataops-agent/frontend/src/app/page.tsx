@@ -1,171 +1,123 @@
 "use client";
 
-import { useState } from "react";
-import {
-  Badge,
-  Button,
-  Card,
-  CardBody,
-  CardFooter,
-  CardHeader,
-  Input,
-  Modal,
-  Progress,
-  Select,
-  Skeleton,
-  StatusDot,
-  Table,
-  Tabs,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
-  useToast,
-} from "@/components/ui";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { EmployeeCard } from "@/components/shared/EmployeeCard";
+import { EMPLOYEES } from "@/lib/employees";
+import { getToken } from "@/lib/api";
 
-const TAB_ITEMS = [
-  { id: "buttons", label: "Buttons" },
-  { id: "cards", label: "Cards & Badges" },
-  { id: "forms", label: "Forms" },
-  { id: "data", label: "Tables & Progress" },
+const FEATURES = [
+  {
+    title: "Pipelines, without the orchestration work",
+    desc: "Connect your data sources and AXIOM runs the pipeline end-to-end — sync, transform, and quality checks — without you hand-wiring the steps yourself.",
+  },
+  {
+    title: "Quality checks and incidents, handled automatically",
+    desc: "AXIOM runs quality checks on a schedule, opens an incident the moment something breaks, and tracks it through to resolution.",
+  },
+  {
+    title: "Ask it anything, in plain language",
+    desc: "“List my data sources.” “Why did this pipeline fail?” AXIOM answers by actually calling the real tools against your real data — not a scripted response.",
+  },
+  {
+    title: "Built for a team, not just one user",
+    desc: "Roles, approval gates on higher-risk actions, and usage tracking are built in from day one, so AXIOM fits into how your team already works.",
+  },
 ];
 
-export default function ComponentShowcase() {
-  const [activeTab, setActiveTab] = useState("buttons");
-  const [modalOpen, setModalOpen] = useState(false);
-  const { push } = useToast();
+// Renders the logged-out state on both server and first client render (no
+// synchronous pre-hydration DOM writes, unlike the theme script) - the auth
+// check only runs in an effect after mount, so there is nothing for React's
+// hydration diff to catch a mismatch on. This is the safe pattern; the
+// theme pre-paint script's approach is what caused the hydration Gotcha
+// documented in CLAUDE.md, and this deliberately avoids repeating it.
+function useIsAuthed(): boolean {
+  const [authed, setAuthed] = useState(false);
+  useEffect(() => {
+    setAuthed(!!getToken());
+  }, []);
+  return authed;
+}
+
+export default function LandingPage() {
+  const authed = useIsAuthed();
 
   return (
-    <main className="p-6" style={{ maxWidth: 960, margin: "0 auto" }}>
-      <h1 className="font-display text-3xl font-semibold mb-2">Wunomo AI — Component Library</h1>
-      <p className="text-secondary mb-4">Phase 2 scaffold: locked tokens, self-hosted fonts, core components.</p>
-
-      <div className="flex gap-2 mb-4">
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={() => document.documentElement.setAttribute("data-theme", "light")}
-        >
-          Light
-        </button>
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={() => document.documentElement.setAttribute("data-theme", "dark")}
-        >
-          Dark
-        </button>
-      </div>
-
-      <Tabs items={TAB_ITEMS} activeId={activeTab} onChange={setActiveTab} />
-
-      <div className="mt-4">
-        {activeTab === "buttons" && (
-          <Card>
-            <CardBody className="flex flex-wrap gap-2 items-center">
-              <Button variant="primary">Primary</Button>
-              <Button variant="secondary">Secondary</Button>
-              <Button variant="ghost">Ghost</Button>
-              <Button variant="danger">Danger</Button>
-              <Button variant="success">Success</Button>
-              <Button variant="primary" size="sm">Small</Button>
-              <Button variant="primary" size="lg">Large</Button>
-              <Button variant="primary" disabled>Disabled</Button>
-              <Button variant="secondary" onClick={() => setModalOpen(true)}>Open Modal</Button>
-              <Button variant="primary" onClick={() => push("Pipeline run completed successfully.", "success")}>
-                Show Toast
-              </Button>
-            </CardBody>
-          </Card>
+    <div className="landing-page">
+      <nav className="landing-nav">
+        <span className="landing-brand">Wunomo AI</span>
+        {authed ? (
+          <Link href="/dashboard" className="btn btn-primary btn-sm">Go to Dashboard</Link>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Link href="/login" className="btn btn-secondary btn-sm">Log in</Link>
+            <Link href="/signup" className="btn btn-primary btn-sm">Get Started</Link>
+          </div>
         )}
+      </nav>
 
-        {activeTab === "cards" && (
-          <div className="flex flex-col gap-4">
-            <Card hover>
-              <CardHeader>
-                <span className="font-semibold">Card title</span>
-                <Badge variant="success">Active</Badge>
-              </CardHeader>
-              <CardBody>
-                <p className="text-secondary text-base mb-2">Card body content with hover elevation.</p>
-                <div className="flex gap-2 flex-wrap">
-                  <Badge variant="success">Success</Badge>
-                  <Badge variant="danger">Danger</Badge>
-                  <Badge variant="warning">Warning</Badge>
-                  <Badge variant="info">Info</Badge>
-                  <Badge variant="gray">Gray</Badge>
-                  <Badge variant="midnight">Midnight</Badge>
-                </div>
-              </CardBody>
-              <CardFooter className="flex gap-2 items-center">
-                <StatusDot variant="success" pulse />
-                <span className="text-xs text-muted">Live</span>
-              </CardFooter>
-            </Card>
-            <div className="flex gap-2">
-              <Skeleton height={20} width={200} />
-              <Skeleton height={20} width={100} />
+      <section className="landing-hero">
+        <h1 className="font-display">Hire AI employees that work autonomously for your company.</h1>
+        <p>Wunomo is building a full workforce of them. The first one, AXIOM, is ready today.</p>
+        <div className="flex items-center justify-center gap-3">
+          <Link href="/signup" className="btn btn-primary">Get Started</Link>
+          <Link href="/login" className="btn btn-secondary">Log in</Link>
+        </div>
+      </section>
+
+      <section className="landing-section">
+        <div className="landing-section-header">
+          <div className="landing-eyebrow">The Wunomo Workforce</div>
+          <h2 className="font-display">One employee is active today. Five more are on the way.</h2>
+        </div>
+        <div className="grid grid-3" style={{ gap: 16 }}>
+          {EMPLOYEES.map((e) => (
+            <EmployeeCard
+              key={e.id}
+              employee={e}
+              cta={
+                e.active ? (
+                  authed ? (
+                    <Link href="/chat" className="btn btn-primary btn-sm">Open AXIOM →</Link>
+                  ) : (
+                    <Link href="/signup" className="btn btn-primary btn-sm">Get Started with AXIOM</Link>
+                  )
+                ) : undefined
+              }
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="landing-section">
+        <div className="landing-section-header">
+          <div className="landing-eyebrow">What AXIOM Actually Does</div>
+          <h2 className="font-display">Not a demo. A real employee, working now.</h2>
+        </div>
+        <div className="landing-feature-grid">
+          {FEATURES.map((f) => (
+            <div key={f.title} className="landing-feature">
+              <h3 className="font-display">{f.title}</h3>
+              <p>{f.desc}</p>
             </div>
-          </div>
-        )}
+          ))}
+        </div>
+      </section>
 
-        {activeTab === "forms" && (
-          <Card>
-            <CardBody className="flex flex-col gap-4" style={{ maxWidth: 360 }}>
-              <Input label="Pipeline name" placeholder="e.g. orders-daily-sync" hint="Used as the display name." />
-              <Input label="Schedule" placeholder="0 6 * * *" error="Invalid cron expression" />
-              <Select label="Source type" defaultValue="postgres">
-                <option value="postgres">PostgreSQL</option>
-                <option value="mysql">MySQL</option>
-                <option value="csv">CSV</option>
-              </Select>
-            </CardBody>
-          </Card>
-        )}
+      <section className="landing-final-cta">
+        <h2 className="font-display">Put your first AI employee to work.</h2>
+        <p>Create a workspace and connect a data source in minutes.</p>
+        <Link href="/signup" className="btn btn-primary">Get Started</Link>
+      </section>
 
-        {activeTab === "data" && (
-          <div className="flex flex-col gap-4">
-            <Card>
-              <CardBody>
-                <Table>
-                  <Thead>
-                    <Tr>
-                      <Th>Pipeline</Th>
-                      <Th>Status</Th>
-                      <Th>Success rate</Th>
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    <Tr>
-                      <Td>orders-daily-sync</Td>
-                      <Td><Badge variant="success">Active</Badge></Td>
-                      <Td><Progress value={92} variant="success" /></Td>
-                    </Tr>
-                    <Tr selected>
-                      <Td>inventory-hourly</Td>
-                      <Td><Badge variant="warning">Degraded</Badge></Td>
-                      <Td><Progress value={54} variant="warning" /></Td>
-                    </Tr>
-                  </Tbody>
-                </Table>
-              </CardBody>
-            </Card>
-          </div>
-        )}
-      </div>
-
-      <Modal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title="Confirm action"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={() => setModalOpen(false)}>Confirm</Button>
-          </>
-        }
-      >
-        <p className="text-secondary text-base">This is a modal body rendered via a portal.</p>
-      </Modal>
-    </main>
+      <footer className="landing-footer">
+        <span className="landing-brand">Wunomo AI</span>
+        <div className="landing-footer-links">
+          <Link href="/login">Log in</Link>
+          <Link href="/signup">Get Started</Link>
+        </div>
+        <span className="landing-footer-copyright">© 2026 Wunomo AI.</span>
+      </footer>
+    </div>
   );
 }

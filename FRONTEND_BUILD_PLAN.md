@@ -1,11 +1,17 @@
 # Wunomo AI — Frontend Build Plan
 
-**Status: Phases 0, 2-10, and 12-17 complete and fully live-verified** (plus Phase
+**Status: Phases 0, 2-10, and 12-18 complete and fully live-verified** (plus Phase
 11's lineage half, pulled forward into Phase 12 — see that row). **Phase 18 (AI
-Employees + Landing page) is in progress** — AI Employees is done and live-verified
-(3 deliberate deviations from the literal master design — no waitlist button, no
-marketplace button, no per-tile pricing until real Stripe pricing exists — see
-"Phase 18 note" below); the public landing page hasn't been built yet. **Phase 17
+Employees + Landing page) is done** — AI Employees (3 deliberate deviations from
+the literal master design: no waitlist button, no marketplace button, no
+per-tile pricing until real Stripe pricing exists) and the landing page (replaces
+the Phase 2 component-showcase scaffold that had silently occupied root `/`;
+platform-first copy signed off in full before code; social proof omitted
+entirely; roster copy shares a single source of truth with `/ai-employees` via a
+new `lib/employees.ts` extraction so the two pages can't drift) — see "Phase 18
+note" below for the full amendment list. Real deployment is separately gated on
+the domain purchase, tracked in Outstanding items — this phase's "done" means
+built and verified locally only, per explicit instruction. **Phase 17
 (Team, Billing, Settings UI) is done** — all three screens built, per the "Phase
 17 decisions (locked)" spec below (proposed and approved in a docs-only session,
 2026-07-18, before any code was written; no new backend/migration work needed,
@@ -367,7 +373,7 @@ silently skipped or claimed as fully verified.
 
 ---
 
-## Phase 18 note: AI Employees amendments from the literal design
+## Phase 18 note: AI Employees + landing page amendments
 
 `renderAIEmployees()` in the master design (`wunomo-ai MASTER DESIGN.html:1317-1373`)
 includes a "Join Waitlist" button per locked tile, a "Browse Marketplace" header
@@ -386,6 +392,26 @@ deviations, decided in-session rather than shipped as literally designed:
   pricing display is deferred until real pricing is set alongside the Stripe
   integration work** (see `BillingService`'s stubbed payment methods,
   `CLAUDE.md`).
+
+**Landing page** — no mockup existed anywhere in the repo for this (confirmed by
+reading `design-proposal.html` in full — it's the Phase 0 palette/typography
+sign-off doc, not a landing page). Built from copy proposed and signed off in
+full before any code was written; positioning was platform-first ("hire AI
+employees," not AXIOM-first), per the user's explicit bullets. Social-proof
+section omitted entirely, per instruction, rather than filled with placeholder
+logos/testimonials/counts — features flow straight into the final CTA. No
+screenshots this version — description-only feature blocks; real screenshots
+are deferred to deploy time against a production-shaped tenant (a QA tenant's
+exceeded-usage bars are not hero material). The AXIOM roster tile's CTA is
+auth-aware (`"Get Started with AXIOM"` → `/signup` logged out, `"Open AXIOM →"`
+→ `/chat` logged in), read client-side via a `useEffect`-only hook deliberately
+designed to add no *new* hydration-mismatch warnings beyond the one this page
+already inherits from the root layout's theme pre-paint script (see
+`CLAUDE.md`'s Gotchas — found during the AI Employees build, confirmed, not
+re-discovered, on the landing page too). Replaces the Phase 2 component-showcase
+scaffold that had silently occupied root `/` since Phase 2. Real production
+deployment is separately gated on the domain purchase (see Outstanding items) —
+this phase's own definition of done was built-and-verified-locally only.
 
 ---
 
@@ -418,7 +444,7 @@ same commit as the change.
 | 15 | **Plan/quota + Team** (Track 2, largest phase) — **done, fully live-verified** | None | `require_role()` + `enforce_quota()` shared dependencies (retrofitted onto CI/CD approve/reject plus the rest of the approved high-priority list); `TeamInvite` schema + invite create/list/revoke/accept + team member list/role-change/soft-removal; 3-tier `PLANS` config + quota enforcement on the 4 clearest cost/volume drivers; `BillingService` interface with Stripe stubbed behind honest `501`s. Also fixed the long-standing CI/CD double-booked-approval bug along the way (see CLAUDE.md Known-broken, now resolved) | All 3 gates closed and live-verified against the real running server (not just pytest) — see CLAUDE.md's Phase 15 Status Table rows for full detail: (1) a real invite email delivered via Resend (`last_event: "delivered"`), accepted, joined the *existing* tenant with the locked role, real subsequent login succeeded; (2) a real downgraded-to-viewer JWT got a real 403 on CI/CD approve, the same commit's owner token still succeeded; (3) quota status/enforcement verified against *real pre-existing* `llm_usage_events` history on an actual tenant from earlier in this project (not synthetic seeds) — correctly reported `exceeded` and hard-blocked `/chat/` with a real 402, and a separately-seeded tenant correctly showed the soft-warn band at 85% without being blocked | Phase 1 (real usage numbers), Phase 3 (auth architecture) |
 | 16 | **Settings persistence** — **done, fully live-verified** | None | Workspace config, notification prefs, per-tenant AI model override (with the `_cache` re-keying fix), theme server-persistence, API-keys model + endpoints (CRUD only, not wired to request auth yet) | All 3 gates closed and live-verified against the real running server: two real tenants with different model overrides got two real, different LLM providers (`groq`/`llama-3.3-70b-versatile` vs `gemini`/`gemini-3.5-flash`) with zero cross-contamination; workspace rename/timezone/description and theme both round-tripped through a fresh `GET` after a `PATCH` (not a same-request echo); notification prefs verified by spying on the real `urlopen` call (trusting HTTP status alone was a false signal — Slack redirects bad webhook paths to a 200 page); API key create/list/revoke all confirmed live, raw secret shown exactly once and never in the list response. See `CLAUDE.md`'s Phase 16 Status Table rows for full detail. | Phase 1, 15 |
 | 17 | **Team, Billing, Settings UI** — **done, fully live-verified** | Wired to Phase 15/16 — see "Phase 17 decisions (locked)" above for the full approved spec (screen-by-screen breakdown, `lib/api.ts` additions, theme reconciliation, role-gating, invite-verification scope) | — | **Settings: closed.** All 5 tabs round-tripped live (owner + a re-logged-in downgraded viewer), including the `notify_on` explicit-false persistence and the raw API-key secret's absence from browser storage. **Team: closed.** Full invite lifecycle live-verified including real Resend delivery, a real accept round trip through a clean unauthenticated browser context (via a new `/invite/accept` page this session added — not in the original spec), 2-owner guard coverage in both directions, and a JWT-replay-after-removal finding (access persists until expiry) now tracked in `CLAUDE.md`'s Known-broken table with severity and the real token TTL. **Billing: closed.** Real plan card + upgrade/downgrade picker + 4 usage bars, all live-verified against genuinely seeded usage (not an all-zero tenant); found and confirmed a second real backend gap (unconditional downgrades, no payment gate) also tracked in Known-broken, with the UI honestly warning rather than pretending to block it. See `CLAUDE.md`'s Settings/Team/Billing screen Status Table rows for full detail. | Phase 15, 16 |
-| 18 | **AI Employees + Landing page** — **AI Employees done, live-verified; Landing page not yet built** | Locked tiles (as designed, with amendments — see note below), public landing page | None | Visual QA | Phase 2 (can move earlier for marketing urgency) |
+| 18 | **AI Employees + Landing page** — **done, fully live-verified** | Locked tiles (as designed, with amendments — see note below), public landing page (replaces the Phase 2 scaffold at root `/`) | None | Visual QA — both screens: explicit rendered-text audits, both themes, desktop+mobile widths on the landing page, clean logged-out context, every link resolves, hydration-warning check (found app-wide during this phase, tracked in `CLAUDE.md` Gotchas, not fixed here) | Phase 2 (can move earlier for marketing urgency) |
 | 19 | **Polish** | Responsive/accessibility/visual QA/performance | — | Full cross-screen pass | All prior |
 
 ---
@@ -471,6 +497,14 @@ consciously accept each of them, not let them ride through undecided.
   off the shared sandbox address. Not blocking any further backend work — Phase
   15's own verification gate was satisfiable by sending to the owner's own address —
   but it will block real end-user-facing use of either feature until done.
+- **New, user-actionable, grouped with the domain-purchase cluster: Privacy
+  Policy and Terms of Service pages.** The landing page (Phase 18) links to real
+  `/login`/`/signup`, but neither auth flow requires accepting a Privacy Policy
+  or Terms of Service, and no such pages exist anywhere in this app. Required
+  before any real production signup traffic — not before this session's local
+  build-and-verify work, and not something to write speculative legal copy for
+  without the user's involvement. Explicitly in scope for Phase 19's
+  launch-readiness partition (see the "Phase 19 note" above).
 
 ---
 
