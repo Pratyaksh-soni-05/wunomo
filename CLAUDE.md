@@ -281,10 +281,33 @@ gates (real invite→accept round trip; a restricted role actually blocked on CI
 approve/reject; quota soft-warn/hard-block triggering against real usage data) are
 closed.
 
-**Next action:** Phase 16 (Settings persistence) — see `FRONTEND_BUILD_PLAN.md`'s
-Phase 16 row for scope once a session picks it up. Note its own flagged prerequisite:
-the `get_agent()` cache re-keying fix (already in Gotchas) must land alongside any
-per-tenant AI model override this phase introduces.
+**Phase 16 (Settings persistence) is complete and fully live-verified.** Five
+sub-steps, each its own commit: (1) the `get_agent()` cache re-keying fix + per-tenant
+AI model override — closes Phase 0's approved pushback #2, live-verified with two
+real, different LLM providers on two real tenants and zero cross-contamination
+(the exact test that Gotcha demanded before this could ship); (2) workspace config
+(name/timezone/description) via `GET/PATCH /api/v1/settings/`, reusing the
+previously-unused `Tenant.settings` JSON column; (3) notification prefs, which
+surfaced and fixed a real, separate, deeper bug — `NotificationService` had
+referenced entirely nonexistent `AXIOM_*`-prefixed `Settings` fields since it was
+written, meaning it could never have sent a single real Slack message or email to
+anyone, tenant-specific or global, until this session; (4) theme server-persistence
+(`User.theme`, per-user not per-tenant, deliberately not a JWT claim) via
+`GET/PATCH /auth/me`; (5) platform API keys — full CRUD (create/list/revoke) with
+the raw secret shown exactly once, deliberately scoped short of request
+authentication (tracked as its own phase-sized item in Not-yet-built). Building (5)
+also caught a second occurrence of Phase 15's `Read`-near-EOF tooling bug, this time
+revealing the *original* Phase 15 fix had been incomplete — `TeamInvite.created_at`
+had silently carried a real, undocumented index in production since Phase 15
+shipped. See each sub-step's own Status Table row for full verification detail —
+every one was live-verified against the real running server. Full backend suite:
+213 passed.
+
+**Next action:** Phase 17 (Team, Billing, Settings UI) — see `FRONTEND_BUILD_PLAN.md`'s
+Phase 17 row for scope once a session picks it up. Note the explicit warning already
+flagged in this session's work: the Settings UI's API-keys tab must not imply keys
+can authenticate requests yet (see the new Not-yet-built entry) — describe what
+they're actually for today, or label the capability as coming.
 
 ---
 

@@ -1,15 +1,22 @@
 # Wunomo AI — Frontend Build Plan
 
-**Status: Phases 0, 2-10, and 12-15 complete and fully live-verified** (plus Phase
-11's lineage half, pulled forward into Phase 12 — see that row). Phase 15 (Plan/
-quota + Team) closed out this session — `require_role()` and `enforce_quota()`
-shared dependencies, real team invites (Resend-delivered, live-verified), team
-member management, a 3-tier plan/quota system calibrated against this project's own
-real usage data, and a `BillingService` interface with Stripe honestly stubbed
-behind it; also closed the long-standing CI/CD double-booked-approval bug along the
-way. All three of the phase's original verification gates (real invite→accept;
-role-restricted CI/CD approve/reject; quota soft-warn/hard-block against real usage
-data) are closed — see `CLAUDE.md`'s Phase 15 Status Table rows for full detail.
+**Status: Phases 0, 2-10, and 12-16 complete and fully live-verified** (plus Phase
+11's lineage half, pulled forward into Phase 12 — see that row). Phase 16 (Settings
+persistence) closed out this session — the `get_agent()` cache re-keying fix +
+per-tenant AI model override (Phase 0's approved pushback #2, live-verified with two
+real different LLM providers and zero cross-tenant leakage), workspace config,
+notification prefs (which surfaced and fixed a real bug: `NotificationService` had
+referenced entirely nonexistent Settings fields since it was written), theme
+server-persistence, and platform API keys (CRUD only, deliberately not wired to
+request authentication yet — see `CLAUDE.md`'s Not-yet-built). All three of the
+phase's verification gates (model-preference cross-tenant test; theme/notification/
+workspace round-trip; API key create/list/revoke) are closed — see `CLAUDE.md`'s
+Phase 16 Status Table rows for full detail. Phase 15 (Plan/quota + Team) closed the
+session before — `require_role()` and `enforce_quota()` shared dependencies, real
+team invites (Resend-delivered, live-verified), team member management, a 3-tier
+plan/quota system calibrated against this project's own real usage data, and a
+`BillingService` interface with Stripe honestly stubbed behind it; also closed the
+long-standing CI/CD double-booked-approval bug along the way.
 See the phase table below for the authoritative, per-phase status and verification
 detail for each — this banner is a quick pointer, not a substitute for it. This is
 the authoritative, signed-off plan for building the Wunomo AI frontend against the
@@ -269,7 +276,7 @@ same commit as the change.
 | 13 | **Transform history + catalog aggregation** — **done, fully live-verified** | None | `TransformRun` persistence model (executions only, both REST and chat-tool paths); `GET /api/v1/catalog/` thin aggregation over `schema_snapshot`. Also fixed 2 real bugs found along the way (see `CLAUDE.md`): `TransformGenerator._resolve_schema()` ran schema-blind for every source (wrong shape assumption), and `invoke_llm()` crashed on Gemini 3.5's list-shaped content (same class of bug as the agent-graph fix, different call path) | Real SQL/pandas transform → listed/replayable — confirmed via a real CSV execution (success + a real syntax-error case), both correctly persisted; catalog reflects real profiled sources — confirmed against a real profiled CSV source | None |
 | 14 | **Transforms + Data Catalog** — **done, fully live-verified** | Wired to Phase 13 | `GET /api/v1/transformations/runs` (addendum — Phase 13 had persistence but no read endpoint) | Live verification of NL/SQL/Python tabs + History; live catalog view — all done, see `CLAUDE.md`'s Phase 14 Status Table row | Phase 13 |
 | 15 | **Plan/quota + Team** (Track 2, largest phase) — **done, fully live-verified** | None | `require_role()` + `enforce_quota()` shared dependencies (retrofitted onto CI/CD approve/reject plus the rest of the approved high-priority list); `TeamInvite` schema + invite create/list/revoke/accept + team member list/role-change/soft-removal; 3-tier `PLANS` config + quota enforcement on the 4 clearest cost/volume drivers; `BillingService` interface with Stripe stubbed behind honest `501`s. Also fixed the long-standing CI/CD double-booked-approval bug along the way (see CLAUDE.md Known-broken, now resolved) | All 3 gates closed and live-verified against the real running server (not just pytest) — see CLAUDE.md's Phase 15 Status Table rows for full detail: (1) a real invite email delivered via Resend (`last_event: "delivered"`), accepted, joined the *existing* tenant with the locked role, real subsequent login succeeded; (2) a real downgraded-to-viewer JWT got a real 403 on CI/CD approve, the same commit's owner token still succeeded; (3) quota status/enforcement verified against *real pre-existing* `llm_usage_events` history on an actual tenant from earlier in this project (not synthetic seeds) — correctly reported `exceeded` and hard-blocked `/chat/` with a real 402, and a separately-seeded tenant correctly showed the soft-warn band at 85% without being blocked | Phase 1 (real usage numbers), Phase 3 (auth architecture) |
-| 16 | **Settings persistence** | None | Workspace config, notification prefs, per-tenant AI model override (**with the `_cache` re-keying fix — see Gotchas**), theme server-persistence, API-keys model + endpoints | Change a tenant's model preference → next chat request actually uses it **and** a different tenant is unaffected (explicit cross-tenant test); theme/notification/workspace round-trip; API key create/list/revoke works | Phase 1, 15 |
+| 16 | **Settings persistence** — **done, fully live-verified** | None | Workspace config, notification prefs, per-tenant AI model override (with the `_cache` re-keying fix), theme server-persistence, API-keys model + endpoints (CRUD only, not wired to request auth yet) | All 3 gates closed and live-verified against the real running server: two real tenants with different model overrides got two real, different LLM providers (`groq`/`llama-3.3-70b-versatile` vs `gemini`/`gemini-3.5-flash`) with zero cross-contamination; workspace rename/timezone/description and theme both round-tripped through a fresh `GET` after a `PATCH` (not a same-request echo); notification prefs verified by spying on the real `urlopen` call (trusting HTTP status alone was a false signal — Slack redirects bad webhook paths to a 200 page); API key create/list/revoke all confirmed live, raw secret shown exactly once and never in the list response. See `CLAUDE.md`'s Phase 16 Status Table rows for full detail. | Phase 1, 15 |
 | 17 | **Team, Billing, Settings UI** | Wired to Phase 15/16 | — | Live verification of invites, roles, plan/quota display, all settings tabs | Phase 15, 16 |
 | 18 | **AI Employees + Landing page** | Locked tiles (as designed), public landing page | None | Visual QA | Phase 2 (can move earlier for marketing urgency) |
 | 19 | **Polish** | Responsive/accessibility/visual QA/performance | — | Full cross-screen pass | All prior |
