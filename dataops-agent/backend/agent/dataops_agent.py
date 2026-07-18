@@ -7,7 +7,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, System
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 
-from agent.personality import build_system_prompt, requires_approval
+from agent.personality import build_system_prompt, requires_approval, get_risk_level
 from agent.tools import ALL_TOOLS
 from services.llm_service import get_llm_for_agent, log_llm_usage
 from models.all_models import PersonalityMode, OperationMode
@@ -170,7 +170,11 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
         if not hasattr(last_msg, "tool_calls") or not last_msg.tool_calls:
             return {}
         op_mode = OperationMode(state["operation_mode"])
-        blocked = [c for c in last_msg.tool_calls if requires_approval(c["name"], op_mode)]
+        blocked = [
+            {**c, "risk_level": get_risk_level(c["name"]),
+             "reason": f"Operation mode '{op_mode.value}' requires approval for this action."}
+            for c in last_msg.tool_calls if requires_approval(c["name"], op_mode)
+        ]
         if blocked:
             msg = (f"**Approval Required** for {len(blocked)} action(s):\n"
                    + "\n".join(f"- `{c['name']}`" for c in blocked)

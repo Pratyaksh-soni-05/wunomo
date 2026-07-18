@@ -175,6 +175,51 @@ async def test_client_supplied_context_tenant_id_override_is_ignored(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_blocked_tool_call_carries_its_real_risk_level_not_hardcoded_high(monkeypatch):
+    """Regression test for a bug found live-verifying Phase 10's advisory
+    approval-gate flow: `approval_gate_node` appended the raw LangChain
+    tool_call dict (name/args/id only) to `pending_approvals`, with no
+    `risk_level`/`reason` key at all — so `api/v1/chat.py`'s
+    `pa.get("risk_level", "high")` always fell back to the hardcoded
+    default, regardless of the action's real tier from
+    `personality.get_risk_level()`. A real live chat request blocking a
+    `list_data_sources` call (not in RISK_ACTIONS, so really "low") still
+    showed up as "high" risk end-to-end, in both the DB row and the UI.
+
+    Uses the real (non-monkeypatched) `requires_approval`/`get_risk_level`
+    from `agent.personality` — "rerun_pipeline" is a real `medium`-risk
+    action name, blocked under `assisted` mode (which only gates
+    medium/high), to prove the fix threads the *real* tier through, not
+    just that some non-"high" value happens to appear.
+    """
+    @tool
+    async def rerun_pipeline(pipeline_id: str) -> str:
+        """Test-only fake tool sharing a real RISK_ACTIONS["medium"] name."""
+        return "reran"
+
+    fake_llm = FakeToolCallLLM([
+        AIMessage(content="", tool_calls=[
+            {"name": "rerun_pipeline", "args": {"pipeline_id": "p1"}, "id": "call_1"},
+        ]),
+    ])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [rerun_pipeline])
+    dataops_agent._cache.clear()
+
+    result = await dataops_agent.run_agent(
+        user_message="rerun it",
+        tenant_id="t1", user_id="u1", session_id="s1",
+        operation_mode="assisted",
+    )
+
+    assert len(result["pending_approvals"]) == 1
+    blocked = result["pending_approvals"][0]
+    assert blocked["name"] == "rerun_pipeline"
+    assert blocked["risk_level"] == "medium", blocked
+    assert blocked["reason"], "blocked call must carry a non-empty reason"
+
+
+@pytest.mark.asyncio
 async def test_agent_forces_real_user_id_and_session_id_too(monkeypatch):
     """governance_tools.py's request_approval needs user_id/session_id to call
     PolicyEngine.create_request() — the same tenant_id-hallucination risk
