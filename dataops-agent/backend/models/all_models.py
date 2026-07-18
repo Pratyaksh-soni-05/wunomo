@@ -351,3 +351,22 @@ class TransformRun(Base):
     error_message = Column(Text, nullable=True)
     result_preview = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class TeamInvite(Base):
+    __tablename__ = "team_invites"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    # Real FK, matching User's own pattern (invites are as tenant-owned as
+    # users) rather than the majority bare-String convention elsewhere.
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
+    email = Column(String(255), nullable=False, index=True)
+    role = Column(String(50), nullable=False)  # locked at invite time, see services/rbac.py Role
+    invited_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # SHA-256, not bcrypt - same reasoning as EmailLoginCode.code_hash: TTL +
+    # single-use is the real protection, not hash slowness.
+    token_hash = Column(String(64), nullable=False, unique=True)
+    status = Column(String(20), nullable=False, default="pending")  # pending|accepted|revoked|expired
+    expires_at = Column(DateTime, nullable=False)
+    accepted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
