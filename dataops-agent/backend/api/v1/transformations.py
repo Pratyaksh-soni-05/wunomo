@@ -1,9 +1,12 @@
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
+from sqlalchemy import select, desc
 
 from .auth import get_current_user
+from database import AsyncSessionLocal
+from models.all_models import TransformRun
 from modules.transformation.transform_generator import TransformGenerator
 from modules.transformation.sql_runner import SqlRunner
 from modules.transformation.python_runner import PythonRunner
@@ -179,3 +182,41 @@ async def explain_code(body: ExplainRequest, user=Depends(get_current_user)):
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+@router.get("/runs")
+async def list_transform_runs(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    source_id: Optional[str] = None,
+    user=Depends(get_current_user),
+):
+    """Lists real transform executions for the Transforms History tab —
+    newest-first, tenant-scoped. Phase 13 built TransformRun persistence but
+    no read endpoint; this is that missing read side (Phase 14 addendum)."""
+    async with AsyncSessionLocal() as db:
+        query = select(TransformRun).where(TransformRun.tenant_id == user["tenant_id"])
+        if source_id:
+            query = query.where(TransformRun.source_id == source_id)
+        query = query.order_by(desc(TransformRun.created_at)).offset(offset).limit(limit)
+        result = await db.execute(query)
+        runs = result.scalars().all()
+
+    return {
+        "runs": [
+            {
+                "id": r.id,
+                "source_id": r.source_id,
+                "transform_type": r.transform_type,
+                "origin": r.origin,
+                "code": r.code,
+                "status": r.status,
+                "row_count": r.row_count,
+                "duration_ms": r.duration_ms,
+                "error_message": r.error_message,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in runs
+        ],
+        "count": len(runs),
+    }
