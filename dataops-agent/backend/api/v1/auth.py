@@ -29,6 +29,20 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
+def require_role(*allowed_roles: str):
+    """Dependency factory: Depends(require_role(Role.OWNER, Role.ADMIN))
+    rejects any caller whose JWT `role` claim isn't in the allowed set.
+    Layers on top of get_current_user, so it enforces normal auth too."""
+    async def _check(current_user: dict = Depends(get_current_user)) -> dict:
+        if current_user.get("role") not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Requires role: {' or '.join(allowed_roles)}",
+            )
+        return current_user
+    return _check
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
