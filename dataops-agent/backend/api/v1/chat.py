@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
-from .auth import get_current_user
+from .auth import get_current_user, enforce_quota
 from agent.dataops_agent import run_agent
 from database import AsyncSessionLocal
 from models.all_models import ChatMessage
@@ -46,7 +46,7 @@ def _extract_tool_trace(new_messages, blocked_tool_calls) -> list[dict]:
     return trace
 
 @router.post("/")
-async def chat(req: ChatRequest, user=Depends(get_current_user)):
+async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
     session_id = req.session_id or str(uuid.uuid4())
     tenant_id = user["tenant_id"]
 

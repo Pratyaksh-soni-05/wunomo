@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 
-from .auth import get_current_user, require_role
+from .auth import get_current_user, require_role, enforce_quota
 from services.rbac import Role, ALL_ROLES
 from services.team_service import create_invite, send_invite_email, get_invite_by_token, accept_invite
 from database import AsyncSessionLocal
@@ -30,6 +30,7 @@ class InviteAccept(BaseModel):
 async def create_team_invite(
     body: InviteCreate,
     user=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    _quota=Depends(enforce_quota("team_members")),
 ):
     result = await create_invite(
         tenant_id=user["tenant_id"], email=body.email, role=body.role,

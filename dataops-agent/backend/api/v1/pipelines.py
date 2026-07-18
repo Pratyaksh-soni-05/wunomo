@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from .auth import get_current_user, require_role
+from .auth import get_current_user, require_role, enforce_quota
 from services.rbac import Role
 from modules.orchestration.dag_manager import DAGManager
 
@@ -108,7 +108,7 @@ async def delete_pipeline(pipeline_id: str, user=Depends(require_role(Role.OWNER
 
 
 @router.post("/{pipeline_id}/trigger")
-async def trigger_run(pipeline_id: str, user=Depends(get_current_user)):
+async def trigger_run(pipeline_id: str, user=Depends(enforce_quota("pipeline_runs"))):
     result = await DAGManager(user["tenant_id"]).trigger_run(
         pipeline_id, triggered_by=user["sub"]
     )

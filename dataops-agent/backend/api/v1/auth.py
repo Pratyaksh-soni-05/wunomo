@@ -43,6 +43,26 @@ def require_role(*allowed_roles: str):
     return _check
 
 
+def enforce_quota(resource: str):
+    """Dependency factory: Depends(enforce_quota("ai_credits")) hard-blocks
+    a request once the tenant's current usage has reached its plan's limit
+    for that resource (see services/quota_service.py for the resource
+    list, the credit formula, and the tier-limit rationale). Soft-warning
+    at 80% is not enforced here - it's surfaced via GET /billing/usage for
+    the frontend's usage bars, since a dependency has no clean way to
+    attach a non-blocking warning to an otherwise-successful response."""
+    async def _check(current_user: dict = Depends(get_current_user)) -> dict:
+        from services.quota_service import get_quota_status
+        result = await get_quota_status(current_user["tenant_id"], resource)
+        if result["status"] == "exceeded":
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={"error": "quota_exceeded", **result},
+            )
+        return current_user
+    return _check
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str

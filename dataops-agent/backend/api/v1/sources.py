@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import select
-from .auth import get_current_user, require_role
+from .auth import get_current_user, require_role, enforce_quota
 from services.rbac import Role
 from database import AsyncSessionLocal
 from models.all_models import DataSource
@@ -34,7 +34,7 @@ async def list_sources(user=Depends(get_current_user)):
     return await ConnectorManager(user["tenant_id"]).list_sources()
 
 @router.post("/")
-async def create_source(req: SourceCreate, user=Depends(get_current_user)):
+async def create_source(req: SourceCreate, user=Depends(enforce_quota("data_sources"))):
     return await ConnectorManager(user["tenant_id"]).register_source(
         req.name, req.source_type, req.connection_config)
 
