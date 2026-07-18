@@ -222,8 +222,36 @@ successful filtered `run/pandas` execution and a real syntax-error case, both
 correctly persisted; the source's real profiled schema correctly reflected by the
 Catalog endpoint). Full suite: 119 passed.
 
-**Next action:** Phase 14 (Transforms + Data Catalog screens) — see the proposal
-in `FRONTEND_BUILD_PLAN.md`'s Phase 14 row once scoped.
+**Phase 14 (Transforms + Data Catalog screens) is complete and fully
+live-verified.** A Phase 13 addendum landed first: `GET /api/v1/transformations/runs`
+(tenant-scoped, newest-first, `limit`/`offset`/`source_id` filter) — Phase 13 built
+`TransformRun` persistence but no read endpoint, and the History tab needed one.
+Frontend: `frontend/src/app/(app)/transforms/page.tsx` — 4 tabs (Natural Language,
+SQL Editor, Python Editor, History), all wired to real endpoints (`generate/sql`,
+`generate/pandas`, `run/sql`, `run/sql/dry-run`, `run/pandas`, `preview/pandas`,
+`explain`, and the new `runs` list), a "Send to Editor" handoff from NL results, and
+Replay (pure frontend state — loads a past run's code/source back into the right
+editor and switches tabs, no backend replay endpoint). `frontend/src/app/(app)/catalog/page.tsx` —
+real `GET /catalog/` data, client-side search over table/column/tag names, and a
+Sync Metadata action that sequentially calls the existing `POST /sources/{id}/profile`
+per unique source with "profiling N of M" progress (Catalog otherwise had no refresh
+path). Added a `.code-block` CSS class (`components.css`) — referenced in the master
+design prototype but never actually ported, same "prototype class never made it into
+our stylesheet" bug class documented elsewhere in this file; used `--midnight-900`/
+`--on-dark` per the established permanently-dark-surface pattern. **Live-verified
+end-to-end**: a real `employee_data.csv` source uploaded/registered/profiled; a real
+Gemini call generated pandas code that correctly referenced real column names
+(`department`/`name`/`salary`), confirming Phase 13's schema-grounding fix still
+holds on a second, independent source; Execute ran the real code and returned 4 real
+filtered rows; the run persisted and appeared in History via the real endpoint;
+Replay correctly reloaded the code/source and switched tabs; Catalog showed the real
+profiled table with working search, and Sync Metadata's effect was confirmed via the
+Last Profiled timestamp genuinely advancing. Both themes screenshotted, no contrast
+issues (the dark-mode pure-black page background is intentional — Noir is one of the
+4 locked palette colors). `npm run build` (production, Turbopack) clean, 27 routes.
+
+**Next action:** Phase 15 (Plan/quota + Team, Track 2's largest phase) — see
+`FRONTEND_BUILD_PLAN.md`'s Phase 15 row for scope once a session picks it up.
 
 ---
 
@@ -311,6 +339,7 @@ in `FRONTEND_BUILD_PLAN.md`'s Phase 14 row once scoped.
 | **Data Catalog aggregation endpoint (Phase 13)** | New `GET /api/v1/catalog/` (`api/v1/catalog.py`) — thin, tenant-scoped aggregation over every `DataSource.schema_snapshot`, no new table. Flattens each source's real per-table-keyed snapshot shape (`{"main": {...}}` for files, `{table1: {...}, ...}` for Postgres/MySQL) into one list of entries, normalizing each profiler's column dict (`column_name`/`data_type`/`is_nullable`) into a consistent `{name, type, nullable}` shape. Never-profiled sources appear with `profiled: false` rather than being hidden. Optional `?source_id=` filter | 5 regression tests (unprofiled source, single-table file source, multi-table Postgres-style source, tenant scoping, `source_id` filter). **Live-verified**: profiled a real CSV source via `POST /sources/{id}/profile`, then confirmed `GET /catalog/` correctly flattened and normalized its real returned schema into the expected shape. Full suite: 119 passed. |
 | **`TransformGenerator._resolve_schema()` ran schema-blind for every source** | Found while designing Phase 13's Catalog endpoint (reads the same `schema_snapshot` field): the function read `snapshot.get("columns", [])`, assuming a flat `{"columns": [...]}` shape, but `SchemaProfiler` always nests columns under a table-name key, and each column dict uses `column_name`/`data_type`/`is_nullable`, not `name`/`type`/`nullable`. No crash — just always `None` from `_resolve_schema()` and `"schema_used": False` in every `generate_sql`/`generate_pandas` response, for every source regardless of real profiling data. Every NL→SQL/pandas generation to date ran schema-blind. Fixed to iterate every table using the real field names | 2 regression tests (`test_transform_generator.py`) — one asserting the resolved schema string contains real profiled columns, one asserting those columns reach the actual LLM prompt inside `generate_sql()`. **Live-verified with a real Gemini call**: seeded a source with a distinctive, unguessable column name (`zorbnak_widget_count`), and the real generated SQL correctly referenced it (`schema_used: true`) — proof the schema is genuinely grounding generation now, not just that the function returns non-`None`. |
 | **`invoke_llm()` crashed on Gemini 3.5's list-shaped content** | Found live while sanity-checking the schema-grounding fix above: a real `generate/sql` call crashed with `"expected string or bytes-like object, got 'list'"` downstream in `TransformGenerator._extract_code()`'s `re.search()`. `invoke_llm()` (`services/llm_service.py`) returned `r.content` raw — annotated `-> str` but never actually guaranteed to be one. `dataops_agent.py`'s `run_agent()` already had its own normalization for this exact Gemini 3.5 structured-content-block shape (see the LangChain v1.x upgrade row), but `invoke_llm()` is a separate call path (`TransformGenerator`, `IncidentManager`, etc.) that hits the identical response shape and wasn't covered — every consumer of this path was silently at risk of the same crash on any real Gemini call whose response happened to come back as content blocks. Moved the normalization into a shared `content_as_text()` in `llm_service.py`, applied at both `invoke_llm()` return sites; `dataops_agent.py` now imports it instead of keeping its own duplicate | 1 regression test (list-shaped content case). **Live-verified**: the same real `generate/sql` call that crashed before the fix succeeded immediately after, confirmed via `llm_usage_events` that it ran on real `gemini-3.5-flash` with zero fallback. |
+| **Transforms + Data Catalog screens (Phase 14)** | `GET /api/v1/transformations/runs` (Phase 13 addendum — tenant-scoped, newest-first, `limit`/`offset`/`source_id` filter; Phase 13 built `TransformRun` persistence but no read endpoint). `frontend/src/app/(app)/transforms/page.tsx` — 4 tabs (Natural Language, SQL Editor, Python Editor, History) wired to real `generate/sql`, `generate/pandas`, `run/sql`, `run/sql/dry-run`, `run/pandas`, `preview/pandas`, `explain`, and the new `runs` list; "Send to Editor" handoff from NL results; Replay (pure frontend state, no backend replay endpoint — loads a past run's code/source into the right editor and switches tabs). `frontend/src/app/(app)/catalog/page.tsx` — real `GET /catalog/` data, client-side search over table/column/tag names, Sync Metadata (sequentially calls `POST /sources/{id}/profile` per unique source with "profiling N of M" progress — Catalog otherwise had no refresh path). New `.code-block` CSS class (`components.css`) for the code editors/generated-code display — referenced in the master design prototype but never actually ported, same "prototype class never made it into our stylesheet" bug class documented elsewhere in this file; uses `--midnight-900`/`--on-dark` per the established permanently-dark-surface pattern | 5 new regression tests for the `runs` list endpoint (tenant scoping, ordering, pagination, `source_id` filter, response shape); full backend suite 124 passed. **Live-verified end-to-end via Playwright** against the real running stack: a real `employee_data.csv` source uploaded/registered/profiled; a real Gemini call generated pandas code correctly referencing real column names (`department`/`name`/`salary`) — confirms Phase 13's schema-grounding fix holds on a second, independent source; Execute ran the real code and returned 4 real filtered rows; the run persisted and appeared in History via the real endpoint; Replay correctly reloaded the code/source and switched tabs (verified against a second real tenant/run); Catalog showed the real profiled table with working search (a real "salary" search correctly matched, a bogus search correctly showed the empty state); Sync Metadata's real effect confirmed via the Last Profiled timestamp genuinely advancing and a real success toast. Both themes screenshotted, no contrast issues (the dark-mode pure-black page background is intentional — Noir is one of the 4 locked palette colors, confirmed via `tokens.css`). `npm run build` (production, Turbopack) clean, 27 routes. |
 | Test suite (auth + smoke only) | `backend/tests/test_api.py`, 9 tests | health check, docs availability, 6 "requires auth → 401" checks, register/login round trip, one validation-rejection test |
 
 ### 🔴 Known-broken

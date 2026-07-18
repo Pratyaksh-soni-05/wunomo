@@ -1,22 +1,18 @@
 # Wunomo AI — Frontend Build Plan
 
-**Status: Phases 0, 2-10, 12, and 13 complete and fully live-verified** (plus Phase 11's
-lineage half, pulled forward into Phase 12 — see that row). **Phase 10 (AXIOM chat
-UI)'s previously-deferred live-send checks (multi-turn continuity, tool-call trace
-rendering, mode switching, the advisory approval-gate flow) are now closed** — run
-in a follow-up session once Gemini's daily quota had reset, all via a real
-Playwright-driven browser against a real seeded tenant. That pass also settled the
-approval-persistence question with live proof (a real `ApprovalRequest` row is
-written and appears in `GET /approvals`/`GET /approvals/merged`) and caught + fixed
-a real bug: blocked tool calls always reported `risk_level: "high"` regardless of
-actual tier (see `CLAUDE.md`'s Phase 10 Status Table row and the resolved
-approval-persistence Known-broken row for full detail). See the phase table below
-for the authoritative, per-phase status and verification detail for each — this
-banner is a quick pointer, not a substitute for it. This is the authoritative,
-signed-off plan for building the Wunomo AI frontend against the real
-`dataops-agent` backend. Referenced from `CLAUDE.md` — read that file first for the
-backend's current state, then this file for what's being built on top of it and in
-what order.
+**Status: Phases 0, 2-10, and 12-14 complete and fully live-verified** (plus Phase
+11's lineage half, pulled forward into Phase 12 — see that row). Phase 14
+(Transforms + Data Catalog screens) closed out this same session, live-verified via
+Playwright against a real uploaded/profiled CSV source — a real Gemini call
+generated pandas code correctly referencing real column names, execution/History/
+Replay all confirmed against real `TransformRun` data, and Catalog's search + Sync
+Metadata both confirmed against a real profiled source (see `CLAUDE.md`'s Phase 14
+Status Table row). See the phase table below for the authoritative, per-phase
+status and verification detail for each — this banner is a quick pointer, not a
+substitute for it. This is the authoritative, signed-off plan for building the
+Wunomo AI frontend against the real `dataops-agent` backend. Referenced from
+`CLAUDE.md` — read that file first for the backend's current state, then this file
+for what's being built on top of it and in what order.
 
 Source material: `dataops-agent/frontend/wunomo-ai MASTER DESIGN.html` (the master
 design prototype — all 18 post-login screens, component library, design tokens),
@@ -268,7 +264,7 @@ same commit as the change.
 | 11 | **KPI instrumentation** — lineage half **done, pulled forward into Phase 12** | None | ~~auto-create `LineageNode`/`LineageEdge` on pipeline/source creation~~ **done** (`LineageTracker.sync_tenant_lineage()`, hooked into source/pipeline creation plus a self-healing sync on every `/governance/graph` read so pre-existing tenants backfill too — see CLAUDE.md Status Table). **Remaining scope**: write a `KpiValue` point on every quality-check run — not needed by any Phase 12 screen, still pending | Real quality check → KPI row appears in `/analytics/kpis` | None |
 | 12 | **Core DataOps screens** — **done, fully live-verified** | Sources, Pipelines, Quality (real trend), Incidents, CI/CD, Approvals (merged), Governance (real lineage/contracts/audit) — all 7 built, replacing their Phase 7 stubs | `GET /api/v1/approvals/merged` (done); lineage auto-population pulled forward from Phase 11 (done) | Full live Playwright walkthrough per screen against real tenant data (create/update/delete/action flows, both themes screenshotted). Also did the cross-cutting 401-handling fix as pre-work (see CLAUDE.md) | Phase 7; lineage auto-population (done, see Phase 11) |
 | 13 | **Transform history + catalog aggregation** — **done, fully live-verified** | None | `TransformRun` persistence model (executions only, both REST and chat-tool paths); `GET /api/v1/catalog/` thin aggregation over `schema_snapshot`. Also fixed 2 real bugs found along the way (see `CLAUDE.md`): `TransformGenerator._resolve_schema()` ran schema-blind for every source (wrong shape assumption), and `invoke_llm()` crashed on Gemini 3.5's list-shaped content (same class of bug as the agent-graph fix, different call path) | Real SQL/pandas transform → listed/replayable — confirmed via a real CSV execution (success + a real syntax-error case), both correctly persisted; catalog reflects real profiled sources — confirmed against a real profiled CSV source | None |
-| 14 | **Transforms + Data Catalog** | Wired to Phase 13 | — | Live verification of NL/SQL/Python tabs + History; live catalog view | Phase 13 |
+| 14 | **Transforms + Data Catalog** — **done, fully live-verified** | Wired to Phase 13 | `GET /api/v1/transformations/runs` (addendum — Phase 13 had persistence but no read endpoint) | Live verification of NL/SQL/Python tabs + History; live catalog view — all done, see `CLAUDE.md`'s Phase 14 Status Table row | Phase 13 |
 | 15 | **Plan/quota + Team** (Track 2, largest phase) | None | Plan/quota schema + shared quota-check dependency; invite/roles schema + `require_role()` dependency (retrofit onto CI/CD approve/reject at minimum — see audit above for other candidates); `BillingService` interface with Stripe stubbed behind it | Real invite email (existing SMTP) → accept → joins existing tenant with correct role; a restricted role is actually blocked on CI/CD approve/reject; quota soft-warn/hard-block triggers against Phase 1's real usage data | Phase 1 (real usage numbers), Phase 3 (auth architecture) |
 | 16 | **Settings persistence** | None | Workspace config, notification prefs, per-tenant AI model override (**with the `_cache` re-keying fix — see Gotchas**), theme server-persistence, API-keys model + endpoints | Change a tenant's model preference → next chat request actually uses it **and** a different tenant is unaffected (explicit cross-tenant test); theme/notification/workspace round-trip; API key create/list/revoke works | Phase 1, 15 |
 | 17 | **Team, Billing, Settings UI** | Wired to Phase 15/16 | — | Live verification of invites, roles, plan/quota display, all settings tabs | Phase 15, 16 |
