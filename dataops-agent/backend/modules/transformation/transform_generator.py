@@ -222,17 +222,33 @@ class TransformGenerator:
             if source is None or not source.schema_snapshot:
                 return None, resolved_id
 
+            # SchemaProfiler always nests columns/row_count under a table-name
+            # key (e.g. {"main": {"columns": [...], "row_count": N}} for files,
+            # {table1: {...}, table2: {...}} for Postgres/MySQL) — there is no
+            # top-level "columns" key. Each column dict uses "column_name"/
+            # "data_type"/"is_nullable" (SchemaProfiler's own field names), not
+            # "name"/"type"/"nullable". Iterate every table in the snapshot
+            # rather than assuming a single flat shape.
             snapshot = source.schema_snapshot
-            columns = snapshot.get("columns", [])
-            if not columns:
+            if not snapshot:
                 return None, resolved_id
 
             lines = [f"Table/source: {source.name} ({source.source_type.value})"]
-            lines.append(f"Row count (approx): {snapshot.get('row_count', 'unknown')}")
-            lines.append("Columns:")
-            for col in columns:
-                nullable = " (nullable)" if col.get("nullable") else ""
-                lines.append(f"  - {col.get('name')}: {col.get('type')}{nullable}")
+            any_columns = False
+            for table_name, table_info in snapshot.items():
+                columns = table_info.get("columns", [])
+                if not columns:
+                    continue
+                any_columns = True
+                lines.append(f"Table: {table_name}")
+                lines.append(f"  Row count (approx): {table_info.get('row_count', 'unknown')}")
+                lines.append("  Columns:")
+                for col in columns:
+                    nullable = " (nullable)" if col.get("is_nullable") in ("YES", True) else ""
+                    lines.append(f"    - {col.get('column_name')}: {col.get('data_type')}{nullable}")
+
+            if not any_columns:
+                return None, resolved_id
 
             return "\n".join(lines), resolved_id
 
