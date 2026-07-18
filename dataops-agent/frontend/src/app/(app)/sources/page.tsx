@@ -12,8 +12,8 @@ import {
 } from "@/lib/api";
 
 const SOURCE_TYPES = [
-  { value: "csv", label: "CSV file", placeholder: '{"path": "sales.csv"}' },
-  { value: "excel", label: "Excel file", placeholder: '{"path": "report.xlsx"}' },
+  { value: "csv", label: "CSV file", placeholder: '{"file_path": "sales.csv"}' },
+  { value: "excel", label: "Excel file", placeholder: '{"file_path": "report.xlsx"}' },
   { value: "postgres", label: "Postgres", placeholder: '{"host": "db.example.com", "port": 5432, "database": "app", "user": "reader", "password": "***"}' },
   { value: "mysql", label: "MySQL", placeholder: '{"host": "db.example.com", "port": 3306, "database": "app", "user": "reader", "password": "***"}' },
   { value: "api_rest", label: "REST API", placeholder: '{"url": "https://api.example.com/data"}' },
