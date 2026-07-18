@@ -20,6 +20,28 @@ def _provider_for_model(model: str) -> str:
     return "gemini"
 
 
+def content_as_text(content) -> str:
+    """langchain-core 1.x (post-upgrade) can return AIMessage.content as a
+    list of structured content blocks (e.g. Gemini 3.5's
+    `[{"type": "text", "text": "...", "extras": {"signature": "..."}}]`,
+    the new home for what used to be a bare `thought_signature` field)
+    instead of the plain string every prior version always returned. Every
+    caller of invoke_llm() (and the agent graph's own equivalent handling in
+    dataops_agent.py) treats the return value as a plain string — normalize
+    once here rather than at every call site. Shared here (not just in
+    dataops_agent.py) because invoke_llm() is a separate call path (used by
+    TransformGenerator, IncidentManager, etc.) that hits the identical
+    Gemini 3.5 response shape and was crashing on it independently."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            block.get("text", "") for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return str(content)
+
+
 async def log_llm_usage(
     *, tenant_id: str | None, user_id: str | None = None, session_id: str | None = None,
     request_type: str, provider: str, model: str, used_fallback: bool,
@@ -124,7 +146,7 @@ async def invoke_llm(
             used_fallback=False, latency_ms=latency_ms, success=True,
             usage_metadata=getattr(r, "usage_metadata", None),
         )
-        return r.content
+        return content_as_text(r.content)
     except Exception as e:
         log.warning("primary_llm_failed", error=str(e))
         used_fallback = True
@@ -140,7 +162,7 @@ async def invoke_llm(
                 used_fallback=True, latency_ms=latency_ms, success=True,
                 usage_metadata=getattr(r, "usage_metadata", None),
             )
-            return r.content
+            return content_as_text(r.content)
         except Exception as fallback_exc:
             latency_ms = int((time.monotonic() - fallback_start) * 1000)
             await log_llm_usage(

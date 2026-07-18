@@ -9,7 +9,7 @@ from langgraph.prebuilt import ToolNode
 
 from agent.personality import build_system_prompt, requires_approval, get_risk_level
 from agent.tools import ALL_TOOLS
-from services.llm_service import get_llm_for_agent, log_llm_usage
+from services.llm_service import get_llm_for_agent, log_llm_usage, content_as_text
 from models.all_models import PersonalityMode, OperationMode
 import structlog
 
@@ -62,29 +62,6 @@ def _coerce_stringified_object_args(tool_name: str, args: dict) -> None:
 # just barely above it — if you change either constant, re-derive the other.
 MAX_AGENT_ITERATIONS = 10
 AGENT_RECURSION_LIMIT = 50
-
-
-def _content_as_text(content) -> str:
-    """langchain-core 1.x (post-upgrade) can return AIMessage.content as a
-    list of structured content blocks (e.g. Gemini 3.5's
-    `[{"type": "text", "text": "...", "extras": {"signature": "..."}}]`,
-    the new home for what used to be a bare `thought_signature` field)
-    instead of the plain string every prior version always returned.
-    chat_messages.content is a VARCHAR column and callers throughout this
-    file/api/v1/chat.py treat `.content` as a string — normalize once here
-    rather than at every call site. The rich block structure (and the
-    signature inside it) stays intact on the actual message objects LangGraph
-    threads through a single graph invocation in memory; this only matters
-    for the flattened string handed back to the API layer and persisted to
-    the DB, which never needed the signature itself, only the text."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(
-            block.get("text", "") for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-        )
-    return str(content)
 
 
 class AgentState(TypedDict):
@@ -236,7 +213,7 @@ async def run_agent(user_message, tenant_id, user_id, session_id,
         None,
     )
     return {
-        "response": _content_as_text(last_ai.content) if last_ai else "No response.",
+        "response": content_as_text(last_ai.content) if last_ai else "No response.",
         "provider": last_llm_call.additional_kwargs["llm_provider"] if last_llm_call else None,
         "pending_approvals": final.get("pending_approvals", []),
         "messages": final["messages"],

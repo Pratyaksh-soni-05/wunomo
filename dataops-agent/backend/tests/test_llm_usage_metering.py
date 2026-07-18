@@ -105,6 +105,39 @@ async def test_invoke_llm_writes_a_real_usage_event(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_invoke_llm_flattens_list_shaped_gemini_content(client, monkeypatch):
+    """Regression test for a bug found live while sanity-checking Phase 13's
+    schema-grounding fix: invoke_llm() returned r.content raw (annotated -> str
+    but not actually guaranteed to be one). Gemini 3.5 responses can come back
+    as a list of structured content blocks (see dataops_agent.py's original
+    _content_as_text, now shared here as content_as_text) instead of a plain
+    string — dataops_agent.py's own run_agent() path already normalized this,
+    but invoke_llm() (used by TransformGenerator, IncidentManager, etc.) did
+    not, and crashed downstream (e.g. TransformGenerator._extract_code()'s
+    re.search on a list) on a real Gemini call. Every caller of invoke_llm()
+    must get back a real string, matching its own return-type annotation.
+    """
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": f"listcontent-{uuid.uuid4().hex[:8]}@example.com",
+        "password": "test1234",
+        "full_name": "List Content Test",
+        "tenant_name": "List Content Test Corp",
+    })
+    tenant_id = reg.json()["tenant_id"]
+
+    fake_primary = _FakeLLM(response=AIMessage(
+        content=[{"type": "text", "text": "SELECT 1;", "extras": {"signature": "abc"}}],
+    ))
+    monkeypatch.setattr(llm_service_module, "get_primary_llm", lambda temperature=0.0: fake_primary)
+
+    result = await llm_service_module.invoke_llm(
+        [HumanMessage(content="generate")], tenant_id=tenant_id, request_type="transform_generation",
+    )
+    assert result == "SELECT 1;"
+    assert isinstance(result, str)
+
+
+@pytest.mark.asyncio
 async def test_invoke_llm_captures_reasoning_tokens_separately(client, monkeypatch):
     """Gemini 3's "thinking" tokens (usage_metadata.output_token_details.reasoning,
     confirmed live: 94-99 tokens spent on "what is 2+2?") are already folded
