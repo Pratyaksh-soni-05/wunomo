@@ -615,6 +615,147 @@ export function getAuditTrail(token: string, limit = 50): Promise<{ entries: Aud
   return authedRequest(`/api/v1/governance/audit?limit=${limit}`, token);
 }
 
+// ---------- Transforms (Phase 14) ----------
+
+export interface GenerateResult {
+  type: "sql" | "pandas";
+  code: string;
+  source_id: string | null;
+  schema_used: boolean;
+  generated_at: string;
+  warnings: string[];
+}
+
+export interface RunResult {
+  rows: Record<string, unknown>[];
+  columns: string[];
+  row_count: number;
+  truncated: boolean;
+  duration_ms: number;
+  source_id?: string;
+  executed_sql?: string;
+  warnings?: string[];
+  preview?: boolean;
+}
+
+export interface DryRunResult {
+  plan: Record<string, unknown>[];
+  columns: string[];
+  source_id: string;
+}
+
+export interface ExplainResult {
+  explanation: string;
+  language: string;
+}
+
+export interface TransformRunItem {
+  id: string;
+  source_id: string;
+  transform_type: string;
+  origin: string;
+  code: string;
+  status: string;
+  row_count: number | null;
+  duration_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+function postTransform<T>(token: string, path: string, body: unknown): Promise<T> {
+  return request(`/api/v1/transformations${path}`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(body),
+  });
+}
+
+export function generateSqlTransform(
+  token: string,
+  params: { request: string; source_id?: string; pipeline_id?: string; extra_context?: string }
+): Promise<GenerateResult> {
+  return postTransform(token, "/generate/sql", params);
+}
+
+export function generatePandasTransform(
+  token: string,
+  params: { request: string; source_id?: string; pipeline_id?: string; extra_context?: string }
+): Promise<GenerateResult> {
+  return postTransform(token, "/generate/pandas", params);
+}
+
+export function runSqlTransform(
+  token: string,
+  params: { source_id: string; sql: string; params?: Record<string, unknown>; row_limit?: number }
+): Promise<RunResult> {
+  return postTransform(token, "/run/sql", params);
+}
+
+export function dryRunSqlTransform(
+  token: string,
+  params: { source_id: string; sql: string }
+): Promise<DryRunResult> {
+  return postTransform(token, "/run/sql/dry-run", params);
+}
+
+export function runPandasTransform(
+  token: string,
+  params: { source_id: string; code: string; row_limit?: number }
+): Promise<RunResult> {
+  return postTransform(token, "/run/pandas", params);
+}
+
+export function previewPandasTransform(
+  token: string,
+  params: { source_id: string; code: string }
+): Promise<RunResult> {
+  return postTransform(token, "/preview/pandas", params);
+}
+
+export function explainCode(
+  token: string,
+  params: { code: string; language?: string }
+): Promise<ExplainResult> {
+  return postTransform(token, "/explain", params);
+}
+
+export function getTransformRuns(
+  token: string,
+  opts?: { limit?: number; offset?: number; source_id?: string }
+): Promise<{ runs: TransformRunItem[]; count: number }> {
+  const qs = new URLSearchParams();
+  if (opts?.limit) qs.set("limit", String(opts.limit));
+  if (opts?.offset) qs.set("offset", String(opts.offset));
+  if (opts?.source_id) qs.set("source_id", opts.source_id);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return authedRequest(`/api/v1/transformations/runs${suffix}`, token);
+}
+
+// ---------- Data Catalog (Phase 13/14) ----------
+
+export interface CatalogColumn {
+  name: string | null;
+  type: string | null;
+  nullable: boolean;
+}
+
+export interface CatalogEntry {
+  source_id: string;
+  source_name: string;
+  source_type: string;
+  table_name: string | null;
+  row_count: number | null;
+  column_count: number;
+  columns: CatalogColumn[];
+  profiled: boolean;
+  last_profiled_at: string | null;
+  tags: string[];
+  owner: string | null;
+}
+
+export function getCatalog(token: string, sourceId?: string): Promise<{ entries: CatalogEntry[]; count: number }> {
+  const suffix = sourceId ? `?source_id=${encodeURIComponent(sourceId)}` : "";
+  return authedRequest(`/api/v1/catalog/${suffix}`, token);
+}
+
 // ---------- Local session storage ----------
 
 const TOKEN_KEY = "axiom_token";

@@ -187,6 +187,20 @@ img { display: block; max-width: 100%; }
 }
 
 /* ==========================================
+   CODE BLOCK (Transforms screen — permanently-dark surface in both
+   themes, like the sidebar; use --on-dark for text, not --surface, per
+   the documented dark-mode-text gotcha)
+   ========================================== */
+.code-block {
+  background: var(--midnight-900); color: var(--on-dark);
+  border-radius: var(--radius-md); padding: 16px;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.6;
+  overflow-x: auto; border: none; outline: none;
+}
+.code-block::placeholder { color: var(--midnight-300); }
+.code-comment { color: var(--midnight-300); }
+
+/* ==========================================
    TABS
    ========================================== */
 .tabs { display: flex; border-bottom: 1px solid var(--border); gap: 0; }
