@@ -1,31 +1,40 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-type Theme = "light" | "dark";
-
-function getStoredTheme(): Theme {
-  if (typeof document === "undefined") return "light";
-  return (document.documentElement.dataset.theme as Theme) || "light";
-}
+import { getToken, updateMe } from "@/lib/api";
+import { applyTheme, getStoredTheme, resolveEffectiveTheme } from "@/lib/theme";
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>("light");
+  const [effective, setEffective] = useState<"light" | "dark">("light");
 
   useEffect(() => {
-    setTheme(getStoredTheme());
+    setEffective(resolveEffectiveTheme(getStoredTheme()));
   }, []);
 
   function toggle() {
-    const next: Theme = theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    localStorage.setItem("axiom_theme", next);
-    setTheme(next);
+    // The toggle button always writes an explicit light/dark (never
+    // "system") - a binary click has no "system" gesture. Settings > Theme
+    // is the only place "system" can be chosen.
+    const next: "light" | "dark" = effective === "dark" ? "light" : "dark";
+    applyTheme(next);
+    setEffective(next);
+
+    // Write-through to the server so the preference survives across
+    // devices/sessions - guarded on a token existing, since ThemeToggle also
+    // renders (harmlessly) before auth resolves in some shells.
+    const token = getToken();
+    if (token) {
+      updateMe(token, { theme: next }).catch(() => {
+        // Best-effort - localStorage/DOM already applied above, so a failed
+        // server write only means the preference won't follow this user to
+        // another device this session, not a broken toggle.
+      });
+    }
   }
 
   return (
-    <button className="topbar-icon-btn" onClick={toggle} title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
-      {theme === "dark" ? (
+    <button className="topbar-icon-btn" onClick={toggle} title={effective === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
+      {effective === "dark" ? (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="12" cy="12" r="5" />
           <line x1="12" y1="1" x2="12" y2="3" />

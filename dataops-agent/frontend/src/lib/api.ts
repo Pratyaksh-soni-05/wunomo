@@ -756,6 +756,102 @@ export function getCatalog(token: string, sourceId?: string): Promise<{ entries:
   return authedRequest(`/api/v1/catalog/${suffix}`, token);
 }
 
+// ---------- Settings (Phase 17) ----------
+
+export interface NotifyOn {
+  incident_created: boolean;
+  pipeline_failed: boolean;
+  deployment_failed: boolean;
+  approval_required: boolean;
+}
+
+export interface NotificationPrefs {
+  slack_webhook_url: string | null;
+  alert_email: string | null;
+  notify_on: NotifyOn;
+}
+
+export interface TenantSettings {
+  name: string;
+  timezone?: string;
+  description?: string;
+  ai_model_override?: string | null;
+  notification_prefs?: NotificationPrefs;
+}
+
+export function getSettings(token: string): Promise<{ settings: TenantSettings }> {
+  return authedRequest("/api/v1/settings/", token);
+}
+
+export function updateSettings(
+  token: string,
+  updates: Partial<{
+    name: string;
+    timezone: string;
+    description: string;
+    ai_model_override: string | null;
+    notification_prefs: Partial<NotificationPrefs>;
+  }>
+): Promise<{ settings: TenantSettings }> {
+  return request("/api/v1/settings/", {
+    method: "PATCH", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(updates),
+  });
+}
+
+// ---------- Auth /me — theme (Phase 17) ----------
+
+export interface MeInfo {
+  sub: string;
+  tenant_id: string;
+  email: string;
+  role: string;
+  theme: string | null;
+}
+
+export function getMe(token: string): Promise<MeInfo> {
+  return authedRequest("/api/v1/auth/me", token);
+}
+
+export function updateMe(token: string, updates: { theme: string | null }): Promise<{ theme: string | null }> {
+  return request("/api/v1/auth/me", {
+    method: "PATCH", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(updates),
+  });
+}
+
+// ---------- API keys (Phase 17) ----------
+// NOTE: these are CRUD-only today - nothing in the backend accepts one as a
+// request credential yet (see CLAUDE.md's Not-yet-built entry). Settings UI
+// copy must not imply otherwise.
+
+export interface ApiKeyItem {
+  id: string;
+  name: string;
+  key_prefix: string;
+  created_by_user_id: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+export interface ApiKeyCreated extends ApiKeyItem {
+  raw_key: string;
+  is_revoked: boolean;
+}
+
+export function createApiKey(token: string, name: string): Promise<ApiKeyCreated> {
+  return request("/api/v1/api-keys/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ name }),
+  });
+}
+
+export function listApiKeys(token: string): Promise<{ api_keys: ApiKeyItem[] }> {
+  return authedRequest("/api/v1/api-keys/", token);
+}
+
+export function revokeApiKey(token: string, id: string): Promise<unknown> {
+  return request(`/api/v1/api-keys/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+}
+
 // ---------- Local session storage ----------
 
 const TOKEN_KEY = "axiom_token";

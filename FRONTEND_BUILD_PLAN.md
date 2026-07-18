@@ -2,11 +2,15 @@
 
 **Status: Phases 0, 2-10, and 12-16 complete and fully live-verified** (plus Phase
 11's lineage half, pulled forward into Phase 12 — see that row). **Phase 17 (Team,
-Billing, Settings UI) is planned and locked, ready to build** — see "Phase 17
-decisions (locked)" below for the full approved screen-by-screen spec (proposed and
-approved in a docs-only session, 2026-07-18, before any code was written; no new
+Billing, Settings UI) is in progress** — Settings is done and fully live-verified,
+Team and Billing remain, per the "Phase 17 decisions (locked)" spec below (proposed
+and approved in a docs-only session, 2026-07-18, before any code was written; no new
 backend/migration work needed, everything it wires to already exists and is
-live-verified). Build order: Settings → Team → Billing. Phase 16 (Settings
+live-verified). Build order: Settings → Team → Billing — Settings' live
+verification also settled two build-session amendments: the backend's
+`notify_on` deep-merge genuinely persists an explicit `false` (confirmed via raw
+`curl` before the UI even existed), and the API Keys tab's raw secret is provably
+absent from browser storage and never resurfaces after a reload. Phase 16 (Settings
 persistence) closed out this session — the `get_agent()` cache re-keying fix +
 per-tenant AI model override (Phase 0's approved pushback #2, live-verified with two
 real different LLM providers and zero cross-tenant leakage), workspace config,
@@ -370,7 +374,7 @@ same commit as the change.
 | 14 | **Transforms + Data Catalog** — **done, fully live-verified** | Wired to Phase 13 | `GET /api/v1/transformations/runs` (addendum — Phase 13 had persistence but no read endpoint) | Live verification of NL/SQL/Python tabs + History; live catalog view — all done, see `CLAUDE.md`'s Phase 14 Status Table row | Phase 13 |
 | 15 | **Plan/quota + Team** (Track 2, largest phase) — **done, fully live-verified** | None | `require_role()` + `enforce_quota()` shared dependencies (retrofitted onto CI/CD approve/reject plus the rest of the approved high-priority list); `TeamInvite` schema + invite create/list/revoke/accept + team member list/role-change/soft-removal; 3-tier `PLANS` config + quota enforcement on the 4 clearest cost/volume drivers; `BillingService` interface with Stripe stubbed behind honest `501`s. Also fixed the long-standing CI/CD double-booked-approval bug along the way (see CLAUDE.md Known-broken, now resolved) | All 3 gates closed and live-verified against the real running server (not just pytest) — see CLAUDE.md's Phase 15 Status Table rows for full detail: (1) a real invite email delivered via Resend (`last_event: "delivered"`), accepted, joined the *existing* tenant with the locked role, real subsequent login succeeded; (2) a real downgraded-to-viewer JWT got a real 403 on CI/CD approve, the same commit's owner token still succeeded; (3) quota status/enforcement verified against *real pre-existing* `llm_usage_events` history on an actual tenant from earlier in this project (not synthetic seeds) — correctly reported `exceeded` and hard-blocked `/chat/` with a real 402, and a separately-seeded tenant correctly showed the soft-warn band at 85% without being blocked | Phase 1 (real usage numbers), Phase 3 (auth architecture) |
 | 16 | **Settings persistence** — **done, fully live-verified** | None | Workspace config, notification prefs, per-tenant AI model override (with the `_cache` re-keying fix), theme server-persistence, API-keys model + endpoints (CRUD only, not wired to request auth yet) | All 3 gates closed and live-verified against the real running server: two real tenants with different model overrides got two real, different LLM providers (`groq`/`llama-3.3-70b-versatile` vs `gemini`/`gemini-3.5-flash`) with zero cross-contamination; workspace rename/timezone/description and theme both round-tripped through a fresh `GET` after a `PATCH` (not a same-request echo); notification prefs verified by spying on the real `urlopen` call (trusting HTTP status alone was a false signal — Slack redirects bad webhook paths to a 200 page); API key create/list/revoke all confirmed live, raw secret shown exactly once and never in the list response. See `CLAUDE.md`'s Phase 16 Status Table rows for full detail. | Phase 1, 15 |
-| 17 | **Team, Billing, Settings UI** — **plan approved and locked, not yet built** | Wired to Phase 15/16 — see "Phase 17 decisions (locked)" above for the full approved spec (screen-by-screen breakdown, `lib/api.ts` additions, theme reconciliation, role-gating, invite-verification scope) | — | Live verification of invites (scoped to the account owner's own address, per the Resend sandbox limit), roles, plan/quota display, all settings tabs | Phase 15, 16 |
+| 17 | **Team, Billing, Settings UI** — **Settings done and live-verified; Team, Billing not yet built** | Wired to Phase 15/16 — see "Phase 17 decisions (locked)" above for the full approved spec (screen-by-screen breakdown, `lib/api.ts` additions, theme reconciliation, role-gating, invite-verification scope) | — | **Settings: closed.** All 5 tabs round-tripped live (owner + a re-logged-in downgraded viewer), including the `notify_on` explicit-false persistence and the raw API-key secret's absence from browser storage — see `CLAUDE.md`'s Settings screen Status Table row. **Team, Billing: pending** — invites (scoped to the account owner's own address, per the Resend sandbox limit), roles, plan/quota display | Phase 15, 16 |
 | 18 | **AI Employees + Landing page** | Locked tiles (as designed), public landing page | None | Visual QA | Phase 2 (can move earlier for marketing urgency) |
 | 19 | **Polish** | Responsive/accessibility/visual QA/performance | — | Full cross-screen pass | All prior |
 

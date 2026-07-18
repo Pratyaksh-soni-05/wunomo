@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar, Topbar, CommandPalette, AxiomFab } from "@/components/shell";
-import { getToken, decodeUserFromToken, type DecodedUser } from "@/lib/api";
+import { getToken, decodeUserFromToken, getMe, type DecodedUser } from "@/lib/api";
 import { QueryProvider } from "@/lib/queryClient";
+import { applyTheme, getStoredTheme, type ThemePreference } from "@/lib/theme";
 
 export default function AppShellLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -22,6 +23,19 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
     }
     setUser(decodeUserFromToken(token));
     setChecked(true);
+
+    // Server is the durable source of truth for theme once it's loaded -
+    // localStorage/the pre-paint script are only the synchronous fast path
+    // to avoid a flash of the wrong theme before this fetch can land.
+    getMe(token)
+      .then((me) => {
+        if (me.theme && me.theme !== getStoredTheme()) {
+          applyTheme(me.theme as ThemePreference);
+        }
+      })
+      .catch(() => {
+        // Non-fatal - keep whatever localStorage already applied.
+      });
   }, [router]);
 
   useEffect(() => {
