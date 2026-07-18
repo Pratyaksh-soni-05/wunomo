@@ -852,6 +852,76 @@ export function revokeApiKey(token: string, id: string): Promise<unknown> {
   return request(`/api/v1/api-keys/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
 }
 
+// ---------- Team (Phase 17) ----------
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface TeamInviteItem {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  expires_at: string;
+  created_at: string;
+  accepted_at: string | null;
+}
+
+export function getTeamMembers(token: string): Promise<{ members: TeamMember[] }> {
+  return authedRequest("/api/v1/team/members", token);
+}
+
+export function changeMemberRole(token: string, userId: string, role: string): Promise<unknown> {
+  return request(`/api/v1/team/members/${userId}/role`, {
+    method: "PATCH", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ role }),
+  });
+}
+
+export function removeTeamMember(token: string, userId: string): Promise<unknown> {
+  return request(`/api/v1/team/members/${userId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function getTeamInvites(token: string): Promise<{ invites: TeamInviteItem[] }> {
+  return authedRequest("/api/v1/team/invites", token);
+}
+
+export function createTeamInvite(
+  token: string,
+  params: { email: string; role: string }
+): Promise<TeamInviteItem & { invite_link_token: string }> {
+  return request("/api/v1/team/invites", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
+export function revokeTeamInvite(token: string, id: string): Promise<unknown> {
+  return request(`/api/v1/team/invites/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+}
+
+// Public - no auth (the invitee isn't logged in yet).
+
+// Matches the real get_invite_by_token() shape exactly (services/
+// team_service.py) - no inviter_email field exists there, don't invent one.
+export interface InviteVerifyResult {
+  email: string;
+  role: string;
+  tenant_name: string | null;
+}
+
+export function verifyInvite(token: string): Promise<InviteVerifyResult> {
+  return request(`/api/v1/team/invites/verify?token=${encodeURIComponent(token)}`);
+}
+
+export function acceptInvite(params: { token: string; password: string; full_name: string }): Promise<AuthSuccess> {
+  return request("/api/v1/team/invites/accept", { method: "POST", body: JSON.stringify(params) });
+}
+
 // ---------- Local session storage ----------
 
 const TOKEN_KEY = "axiom_token";
@@ -870,6 +940,7 @@ export function getToken(): string | null {
 }
 
 export interface DecodedUser {
+  sub: string;
   email: string;
   role: string;
   tenant_id: string;
@@ -878,7 +949,7 @@ export interface DecodedUser {
 export function decodeUserFromToken(token: string): DecodedUser | null {
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
-    return { email: payload.email, role: payload.role, tenant_id: payload.tenant_id };
+    return { sub: payload.sub, email: payload.email, role: payload.role, tenant_id: payload.tenant_id };
   } catch {
     return null;
   }
