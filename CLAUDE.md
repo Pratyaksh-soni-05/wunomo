@@ -250,15 +250,41 @@ Last Profiled timestamp genuinely advancing. Both themes screenshotted, no contr
 issues (the dark-mode pure-black page background is intentional — Noir is one of the
 4 locked palette colors). `npm run build` (production, Turbopack) clean, 27 routes.
 
-**Next action:** Phase 15 (Plan/quota + Team, Track 2's largest phase) is **in
-progress** — see `FRONTEND_BUILD_PLAN.md`'s Phase 15 row for full scope. Kicked off
-with a Resend health check (real send confirmed working, `last_event: "delivered"`
-via Resend's own API — but the account is still sandboxed to only the owner's own
-verified address; real invites to arbitrary teammates will 403 until a domain is
-verified at resend.com/domains, a you-side action) and a real-usage check against
-the proposed Starter tier before enforcement shipped (see the new "RBAC foundation"
-Status Table row for the first sub-step's verification detail; more sub-steps land
-as their own commits per Rule 6).
+**Phase 15 (Plan/quota + Team, Track 2's largest phase) is complete and fully
+live-verified.** Kicked off with a Resend health check (real send confirmed
+working, `last_event: "delivered"` via Resend's own API — but the account is still
+sandboxed to only the owner's own verified address; real invites to arbitrary
+teammates will 403 until a domain is verified at resend.com/domains, a you-side
+action) and a real-usage check against the proposed Starter tier before enforcement
+shipped, which caught and fixed a real miscalibration before it went live (see
+Gotchas and the "Plan/quota enforcement" Status Table row). Six sub-steps, each its
+own commit: (1) `require_role()` shared dependency, retrofitted onto CI/CD approve/
+reject — closes that Known-broken row; (2) retrofitted onto the rest of the approved
+high-priority list (pipeline/source/quality-rule delete, run/sql, run/pandas, cicd
+incident resolve); (3) team invites — real `TeamInvite` table, Resend delivery,
+accept-into-existing-tenant with a locked role, live-verified with a real delivered
+email and a real subsequent login; (4) team member management — list/role-change/
+soft-removal, which surfaced and fixed a real gap (`User.is_active` was never
+enforced at login, so "removed" members could still log in — now fixed for the
+password path, live-verified); (5) plan/quota enforcement — 3 hardcoded tiers
+(Starter/Growth/Scale), a documented credit formula, `enforce_quota()` wired onto
+the 4 clearest cost/volume drivers, live-verified against *real pre-existing usage
+data* (not synthetic seeds) for both the hard-block and soft-warn cases; (6)
+`BillingService` interface with Stripe stubbed behind honest `501`s, `change_plan()`
+real today as a documented dev-mode stand-in. Also folded in and closed the
+long-standing "CI/CD high-risk commits double-book their approval" Known-broken row
+(own commit, live-verified with a real non-monkeypatched risk calculation reaching
+65/100 through the actual scoring logic). See each sub-step's own Status Table row
+for full verification detail — every one was live-verified against the real running
+server, not just the pytest suite. All three of the phase's original verification
+gates (real invite→accept round trip; a restricted role actually blocked on CI/CD
+approve/reject; quota soft-warn/hard-block triggering against real usage data) are
+closed.
+
+**Next action:** Phase 16 (Settings persistence) — see `FRONTEND_BUILD_PLAN.md`'s
+Phase 16 row for scope once a session picks it up. Note its own flagged prerequisite:
+the `get_agent()` cache re-keying fix (already in Gotchas) must land alongside any
+per-tenant AI model override this phase introduces.
 
 ---
 

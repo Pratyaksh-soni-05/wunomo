@@ -1,18 +1,21 @@
 # Wunomo AI — Frontend Build Plan
 
-**Status: Phases 0, 2-10, and 12-14 complete and fully live-verified** (plus Phase
-11's lineage half, pulled forward into Phase 12 — see that row). Phase 14
-(Transforms + Data Catalog screens) closed out this same session, live-verified via
-Playwright against a real uploaded/profiled CSV source — a real Gemini call
-generated pandas code correctly referencing real column names, execution/History/
-Replay all confirmed against real `TransformRun` data, and Catalog's search + Sync
-Metadata both confirmed against a real profiled source (see `CLAUDE.md`'s Phase 14
-Status Table row). See the phase table below for the authoritative, per-phase
-status and verification detail for each — this banner is a quick pointer, not a
-substitute for it. This is the authoritative, signed-off plan for building the
-Wunomo AI frontend against the real `dataops-agent` backend. Referenced from
-`CLAUDE.md` — read that file first for the backend's current state, then this file
-for what's being built on top of it and in what order.
+**Status: Phases 0, 2-10, and 12-15 complete and fully live-verified** (plus Phase
+11's lineage half, pulled forward into Phase 12 — see that row). Phase 15 (Plan/
+quota + Team) closed out this session — `require_role()` and `enforce_quota()`
+shared dependencies, real team invites (Resend-delivered, live-verified), team
+member management, a 3-tier plan/quota system calibrated against this project's own
+real usage data, and a `BillingService` interface with Stripe honestly stubbed
+behind it; also closed the long-standing CI/CD double-booked-approval bug along the
+way. All three of the phase's original verification gates (real invite→accept;
+role-restricted CI/CD approve/reject; quota soft-warn/hard-block against real usage
+data) are closed — see `CLAUDE.md`'s Phase 15 Status Table rows for full detail.
+See the phase table below for the authoritative, per-phase status and verification
+detail for each — this banner is a quick pointer, not a substitute for it. This is
+the authoritative, signed-off plan for building the Wunomo AI frontend against the
+real `dataops-agent` backend. Referenced from `CLAUDE.md` — read that file first
+for the backend's current state, then this file for what's being built on top of it
+and in what order.
 
 Source material: `dataops-agent/frontend/wunomo-ai MASTER DESIGN.html` (the master
 design prototype — all 18 post-login screens, component library, design tokens),
@@ -265,7 +268,7 @@ same commit as the change.
 | 12 | **Core DataOps screens** — **done, fully live-verified** | Sources, Pipelines, Quality (real trend), Incidents, CI/CD, Approvals (merged), Governance (real lineage/contracts/audit) — all 7 built, replacing their Phase 7 stubs | `GET /api/v1/approvals/merged` (done); lineage auto-population pulled forward from Phase 11 (done) | Full live Playwright walkthrough per screen against real tenant data (create/update/delete/action flows, both themes screenshotted). Also did the cross-cutting 401-handling fix as pre-work (see CLAUDE.md) | Phase 7; lineage auto-population (done, see Phase 11) |
 | 13 | **Transform history + catalog aggregation** — **done, fully live-verified** | None | `TransformRun` persistence model (executions only, both REST and chat-tool paths); `GET /api/v1/catalog/` thin aggregation over `schema_snapshot`. Also fixed 2 real bugs found along the way (see `CLAUDE.md`): `TransformGenerator._resolve_schema()` ran schema-blind for every source (wrong shape assumption), and `invoke_llm()` crashed on Gemini 3.5's list-shaped content (same class of bug as the agent-graph fix, different call path) | Real SQL/pandas transform → listed/replayable — confirmed via a real CSV execution (success + a real syntax-error case), both correctly persisted; catalog reflects real profiled sources — confirmed against a real profiled CSV source | None |
 | 14 | **Transforms + Data Catalog** — **done, fully live-verified** | Wired to Phase 13 | `GET /api/v1/transformations/runs` (addendum — Phase 13 had persistence but no read endpoint) | Live verification of NL/SQL/Python tabs + History; live catalog view — all done, see `CLAUDE.md`'s Phase 14 Status Table row | Phase 13 |
-| 15 | **Plan/quota + Team** (Track 2, largest phase) | None | Plan/quota schema + shared quota-check dependency; invite/roles schema + `require_role()` dependency (retrofit onto CI/CD approve/reject at minimum — see audit above for other candidates); `BillingService` interface with Stripe stubbed behind it | Real invite email (existing SMTP) → accept → joins existing tenant with correct role; a restricted role is actually blocked on CI/CD approve/reject; quota soft-warn/hard-block triggers against Phase 1's real usage data | Phase 1 (real usage numbers), Phase 3 (auth architecture) |
+| 15 | **Plan/quota + Team** (Track 2, largest phase) — **done, fully live-verified** | None | `require_role()` + `enforce_quota()` shared dependencies (retrofitted onto CI/CD approve/reject plus the rest of the approved high-priority list); `TeamInvite` schema + invite create/list/revoke/accept + team member list/role-change/soft-removal; 3-tier `PLANS` config + quota enforcement on the 4 clearest cost/volume drivers; `BillingService` interface with Stripe stubbed behind honest `501`s. Also fixed the long-standing CI/CD double-booked-approval bug along the way (see CLAUDE.md Known-broken, now resolved) | All 3 gates closed and live-verified against the real running server (not just pytest) — see CLAUDE.md's Phase 15 Status Table rows for full detail: (1) a real invite email delivered via Resend (`last_event: "delivered"`), accepted, joined the *existing* tenant with the locked role, real subsequent login succeeded; (2) a real downgraded-to-viewer JWT got a real 403 on CI/CD approve, the same commit's owner token still succeeded; (3) quota status/enforcement verified against *real pre-existing* `llm_usage_events` history on an actual tenant from earlier in this project (not synthetic seeds) — correctly reported `exceeded` and hard-blocked `/chat/` with a real 402, and a separately-seeded tenant correctly showed the soft-warn band at 85% without being blocked | Phase 1 (real usage numbers), Phase 3 (auth architecture) |
 | 16 | **Settings persistence** | None | Workspace config, notification prefs, per-tenant AI model override (**with the `_cache` re-keying fix — see Gotchas**), theme server-persistence, API-keys model + endpoints | Change a tenant's model preference → next chat request actually uses it **and** a different tenant is unaffected (explicit cross-tenant test); theme/notification/workspace round-trip; API key create/list/revoke works | Phase 1, 15 |
 | 17 | **Team, Billing, Settings UI** | Wired to Phase 15/16 | — | Live verification of invites, roles, plan/quota display, all settings tabs | Phase 15, 16 |
 | 18 | **AI Employees + Landing page** | Locked tiles (as designed), public landing page | None | Visual QA | Phase 2 (can move earlier for marketing urgency) |
@@ -292,6 +295,17 @@ same commit as the change.
   session once Gemini's quota reset) — any future session doing live-LLM
   verification should still check quota state first before spending, per the
   established pattern.
+- **New, user-actionable: Resend domain verification** — the Resend account backing
+  Phase 15's team invites and Phase 5's email-code auth is still in sandbox mode.
+  `onboarding@resend.dev` can only deliver to the account owner's own verified
+  address (confirmed live — a send to any other real address gets a real `403` from
+  Resend's API). Real invites to actual teammates, and real email-code sign-in for
+  anyone other than the account owner, will silently fail to deliver (the app itself
+  reports success either way, by design — see `CLAUDE.md`'s enumeration-safety
+  Gotcha) until a domain is verified at resend.com/domains and `EMAIL_FROM` switches
+  off the shared sandbox address. Not blocking any further backend work — Phase
+  15's own verification gate was satisfiable by sending to the owner's own address —
+  but it will block real end-user-facing use of either feature until done.
 
 ---
 
