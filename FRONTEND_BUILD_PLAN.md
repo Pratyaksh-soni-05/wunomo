@@ -1,7 +1,11 @@
 # Wunomo AI — Frontend Build Plan
 
 **Status: Phases 0, 2-10, and 12-17 complete and fully live-verified** (plus Phase
-11's lineage half, pulled forward into Phase 12 — see that row). **Phase 17
+11's lineage half, pulled forward into Phase 12 — see that row). **Phase 18 (AI
+Employees + Landing page) is in progress** — AI Employees is done and live-verified
+(3 deliberate deviations from the literal master design — no waitlist button, no
+marketplace button, no per-tile pricing until real Stripe pricing exists — see
+"Phase 18 note" below); the public landing page hasn't been built yet. **Phase 17
 (Team, Billing, Settings UI) is done** — all three screens built, per the "Phase
 17 decisions (locked)" spec below (proposed and approved in a docs-only session,
 2026-07-18, before any code was written; no new backend/migration work needed,
@@ -363,6 +367,28 @@ silently skipped or claimed as fully verified.
 
 ---
 
+## Phase 18 note: AI Employees amendments from the literal design
+
+`renderAIEmployees()` in the master design (`wunomo-ai MASTER DESIGN.html:1317-1373`)
+includes a "Join Waitlist" button per locked tile, a "Browse Marketplace" header
+button, and a per-tile price (`$59/mo` etc.). Built with three deliberate
+deviations, decided in-session rather than shipped as literally designed:
+
+- **"Join Waitlist" dropped entirely** (no `mailto:` fallback either) — it wired
+  to nothing real in the design and there's no backend for it this phase (zero
+  backend prerequisite, per the table above). The "Coming Soon" overlay badge
+  stands alone as a non-interactive label.
+- **"Browse Marketplace" dropped** — implies a marketplace that doesn't exist.
+  The "1 Active" header badge stays; that one's honestly true (AXIOM is real).
+- **Per-tile pricing omitted.** Those numbers are Phase 0 mockup placeholders,
+  not committed product pricing — showing a firm price for an unpurchasable
+  product creates a commitment that hasn't actually been made. **AI-employee
+  pricing display is deferred until real pricing is set alongside the Stripe
+  integration work** (see `BillingService`'s stubbed payment methods,
+  `CLAUDE.md`).
+
+---
+
 ## The 19 phases
 
 Frontend scaffold/design-system/shell/screens-wiring-to-already-verified-endpoints
@@ -392,8 +418,26 @@ same commit as the change.
 | 15 | **Plan/quota + Team** (Track 2, largest phase) — **done, fully live-verified** | None | `require_role()` + `enforce_quota()` shared dependencies (retrofitted onto CI/CD approve/reject plus the rest of the approved high-priority list); `TeamInvite` schema + invite create/list/revoke/accept + team member list/role-change/soft-removal; 3-tier `PLANS` config + quota enforcement on the 4 clearest cost/volume drivers; `BillingService` interface with Stripe stubbed behind honest `501`s. Also fixed the long-standing CI/CD double-booked-approval bug along the way (see CLAUDE.md Known-broken, now resolved) | All 3 gates closed and live-verified against the real running server (not just pytest) — see CLAUDE.md's Phase 15 Status Table rows for full detail: (1) a real invite email delivered via Resend (`last_event: "delivered"`), accepted, joined the *existing* tenant with the locked role, real subsequent login succeeded; (2) a real downgraded-to-viewer JWT got a real 403 on CI/CD approve, the same commit's owner token still succeeded; (3) quota status/enforcement verified against *real pre-existing* `llm_usage_events` history on an actual tenant from earlier in this project (not synthetic seeds) — correctly reported `exceeded` and hard-blocked `/chat/` with a real 402, and a separately-seeded tenant correctly showed the soft-warn band at 85% without being blocked | Phase 1 (real usage numbers), Phase 3 (auth architecture) |
 | 16 | **Settings persistence** — **done, fully live-verified** | None | Workspace config, notification prefs, per-tenant AI model override (with the `_cache` re-keying fix), theme server-persistence, API-keys model + endpoints (CRUD only, not wired to request auth yet) | All 3 gates closed and live-verified against the real running server: two real tenants with different model overrides got two real, different LLM providers (`groq`/`llama-3.3-70b-versatile` vs `gemini`/`gemini-3.5-flash`) with zero cross-contamination; workspace rename/timezone/description and theme both round-tripped through a fresh `GET` after a `PATCH` (not a same-request echo); notification prefs verified by spying on the real `urlopen` call (trusting HTTP status alone was a false signal — Slack redirects bad webhook paths to a 200 page); API key create/list/revoke all confirmed live, raw secret shown exactly once and never in the list response. See `CLAUDE.md`'s Phase 16 Status Table rows for full detail. | Phase 1, 15 |
 | 17 | **Team, Billing, Settings UI** — **done, fully live-verified** | Wired to Phase 15/16 — see "Phase 17 decisions (locked)" above for the full approved spec (screen-by-screen breakdown, `lib/api.ts` additions, theme reconciliation, role-gating, invite-verification scope) | — | **Settings: closed.** All 5 tabs round-tripped live (owner + a re-logged-in downgraded viewer), including the `notify_on` explicit-false persistence and the raw API-key secret's absence from browser storage. **Team: closed.** Full invite lifecycle live-verified including real Resend delivery, a real accept round trip through a clean unauthenticated browser context (via a new `/invite/accept` page this session added — not in the original spec), 2-owner guard coverage in both directions, and a JWT-replay-after-removal finding (access persists until expiry) now tracked in `CLAUDE.md`'s Known-broken table with severity and the real token TTL. **Billing: closed.** Real plan card + upgrade/downgrade picker + 4 usage bars, all live-verified against genuinely seeded usage (not an all-zero tenant); found and confirmed a second real backend gap (unconditional downgrades, no payment gate) also tracked in Known-broken, with the UI honestly warning rather than pretending to block it. See `CLAUDE.md`'s Settings/Team/Billing screen Status Table rows for full detail. | Phase 15, 16 |
-| 18 | **AI Employees + Landing page** | Locked tiles (as designed), public landing page | None | Visual QA | Phase 2 (can move earlier for marketing urgency) |
+| 18 | **AI Employees + Landing page** — **AI Employees done, live-verified; Landing page not yet built** | Locked tiles (as designed, with amendments — see note below), public landing page | None | Visual QA | Phase 2 (can move earlier for marketing urgency) |
 | 19 | **Polish** | Responsive/accessibility/visual QA/performance | — | Full cross-screen pass | All prior |
+
+---
+
+## Phase 19 note: Known-broken must be triaged, not just inherited
+
+`CLAUDE.md`'s Known-broken table has grown across every phase — some rows are
+already resolved, some are real gaps nobody has decided whether to fix before
+real users arrive. As part of Phase 19, every still-open Known-broken row must
+be explicitly partitioned into one of two buckets: **fix in Phase 19** (with the
+actual fix), or **accepted-for-launch** (with a written rationale for why it's
+safe to ship as-is — not silence, not an assumption). Launch readiness is a
+decision to make deliberately, not a default that falls out of an unreviewed
+backlog. Two rows already flagged as real candidates for the "fix" bucket from
+this project's own recent work: the removed/demoted-member JWT-persistence gap
+(Phase 17, Team) and `change_plan()`'s unconditional-downgrade/no-payment-gate
+gap (Phase 17, Billing) — both tracked in `CLAUDE.md`'s Known-broken table with
+severity and fix directions already written up; Phase 19 should resolve or
+consciously accept each of them, not let them ride through undecided.
 
 ---
 

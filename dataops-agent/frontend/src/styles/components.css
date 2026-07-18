@@ -135,6 +135,22 @@ img { display: block; max-width: 100%; }
 .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .card-footer { padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface-hover); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
 
+/* Locked/coming-soon card overlay (AI Employees) - needs real opacity to
+   actually obscure the content beneath it, not just a faint tint, or the
+   "locked" metaphor reads as broken (text stays fully legible). Two
+   different opaque colors per theme, not one translucent color reused,
+   since a light-mode scrim looks washed-out on a dark card and vice versa. */
+.locked-overlay {
+  position: absolute; inset: 0; z-index: 1; border-radius: inherit;
+  background: rgba(255, 255, 255, 0.72); backdrop-filter: blur(1px);
+  display: flex; align-items: center; justify-content: center;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .locked-overlay { background: rgba(11, 20, 33, 0.72); }
+}
+:root[data-theme="dark"] .locked-overlay { background: rgba(11, 20, 33, 0.72); }
+:root[data-theme="light"] .locked-overlay { background: rgba(255, 255, 255, 0.72); }
+
 /* ==========================================
    BADGE
    ========================================== */
