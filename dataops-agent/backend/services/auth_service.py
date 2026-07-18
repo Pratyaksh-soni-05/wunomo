@@ -136,7 +136,7 @@ async def find_existing_tenants_for_email(email: str) -> list[dict]:
 
 async def resolve_password_login(email: str, password: str, tenant_id: Optional[str] = None) -> dict:
     async with AsyncSessionLocal() as db:
-        query = select(User).where(User.email == email)
+        query = select(User).where(User.email == email, User.is_active.is_(True))
         if tenant_id:
             query = query.where(User.tenant_id == tenant_id)
         r = await db.execute(query)
