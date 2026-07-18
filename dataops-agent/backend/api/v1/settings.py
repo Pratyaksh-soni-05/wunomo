@@ -10,6 +10,7 @@ router = APIRouter()
 
 
 class SettingsUpdate(BaseModel):
+    name: Optional[str] = None
     timezone: Optional[str] = None
     description: Optional[str] = None
     ai_model_override: Optional[str] = None

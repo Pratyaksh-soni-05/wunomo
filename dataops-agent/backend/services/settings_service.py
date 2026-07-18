@@ -1,16 +1,23 @@
 """Tenant-level settings (Phase 16): workspace config, notification prefs,
-AI model override. All stored in the existing Tenant.settings JSON column
+AI model override. `name` is the one field that lives on a real column
+(Tenant.name, already existed pre-Phase-16, real workspace identity) -
+everything else is stored in the existing Tenant.settings JSON column
 (present since the original scaffold, never used until now) rather than
 new dedicated columns - matches this codebase's established convention
 for flexible/growing config (DataSource.connection_config,
 Pipeline.pipeline_config) over adding a column per field.
 
+get_tenant_settings()/update_tenant_settings() present a single unified
+view merging both - callers (the /settings/ endpoint) don't need to know
+which field lives where.
+
 Shape (all keys optional, absence means "unset/use default"):
 {
-  "timezone": str,
-  "description": str,
-  "ai_model_override": str | None,
-  "notification_prefs": {
+  "name": str,                     # -> Tenant.name (real column)
+  "timezone": str,                 # -> Tenant.settings
+  "description": str,              # -> Tenant.settings
+  "ai_model_override": str | None, # -> Tenant.settings
+  "notification_prefs": {          # -> Tenant.settings
     "slack_webhook_url": str | None,
     "alert_email": str | None,
     "notify_on": {"incident_created": bool, "pipeline_failed": bool,
@@ -27,31 +34,43 @@ from services.llm_service import SUPPORTED_MODEL_OVERRIDES
 
 async def get_tenant_settings(tenant_id: str) -> dict:
     async with AsyncSessionLocal() as db:
-        r = await db.execute(select(Tenant.settings).where(Tenant.id == tenant_id))
-        return r.scalar() or {}
+        r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+        tenant = r.scalars().first()
+        if not tenant:
+            return {}
+        return {"name": tenant.name, **(tenant.settings or {})}
 
 
 async def update_tenant_settings(tenant_id: str, updates: dict) -> dict:
     """Shallow-merges `updates` into the tenant's existing settings dict
     (top-level keys only - notification_prefs' own nested shape is merged
-    by its own dedicated update path once that lands, not here). Validates
-    ai_model_override against the allowlist if present in this update.
-    Returns {"error": ...} | the full updated settings dict."""
+    by its own dedicated update path once that lands, not here), except
+    `name` which writes to the real Tenant.name column. Validates
+    ai_model_override against the allowlist and name against non-empty.
+    Returns {"error": ...} | the full updated unified settings dict."""
     if "ai_model_override" in updates:
         model = updates["ai_model_override"]
         if model is not None and model not in SUPPORTED_MODEL_OVERRIDES:
             return {"error": f"Unsupported model '{model}'. Allowed: {SUPPORTED_MODEL_OVERRIDES}"}
+
+    if "name" in updates and not (updates["name"] or "").strip():
+        return {"error": "Workspace name cannot be empty"}
 
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         tenant = r.scalars().first()
         if not tenant:
             return {"error": "Tenant not found"}
+
+        updates = dict(updates)
+        if "name" in updates:
+            tenant.name = updates.pop("name").strip()
+
         merged = dict(tenant.settings or {})
         merged.update(updates)
         tenant.settings = merged
         await db.commit()
-        return merged
+        return {"name": tenant.name, **merged}
 
 
 async def get_ai_model_override(tenant_id: str) -> str | None:
