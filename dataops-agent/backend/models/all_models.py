@@ -73,6 +73,11 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     personality_mode = Column(SAEnum(PersonalityMode), default=PersonalityMode.ENGINEER)
     operation_mode = Column(SAEnum(OperationMode), default=OperationMode.ASSISTED)
+    # Personal UI preference, not tenant-wide (each user picks their own) -
+    # deliberately not a JWT claim, same staleness reasoning already
+    # applied to personality_mode/operation_mode (Phase 3 decisions):
+    # read fresh from the DB per-request via GET /auth/me instead.
+    theme = Column(String(20), nullable=True)  # "light" | "dark" | "system" | None (unset)
     created_at = Column(DateTime, default=datetime.utcnow)
     __table_args__ = (UniqueConstraint("tenant_id", "email"),)
     tenant = relationship("Tenant", back_populates="users")

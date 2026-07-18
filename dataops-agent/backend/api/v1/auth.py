@@ -254,6 +254,47 @@ async def resolve_workspace(req: ResolveWorkspaceRequest):
     }
 
 
+VALID_THEMES = ("light", "dark", "system")
+
+
 @router.get("/me")
 async def me(user=Depends(get_current_user)):
-    return user
+    """Merges the JWT payload with a fresh DB read of `theme` - deliberately
+    not a JWT claim (same staleness reasoning as personality_mode/
+    operation_mode, Phase 3 decisions), so this must be read fresh here
+    rather than baked into the token at issue time."""
+    from database import AsyncSessionLocal
+    from models.all_models import User
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(User.theme).where(User.id == user["sub"]))
+        theme = r.scalar()
+    return {**user, "theme": theme}
+
+
+class MeUpdate(BaseModel):
+    theme: Optional[str] = None
+
+
+@router.patch("/me")
+async def update_me(body: MeUpdate, user=Depends(get_current_user)):
+    """Self-service - a user updating their own preference needs no role
+    check beyond being authenticated as themselves."""
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields provided")
+    if "theme" in updates and updates["theme"] is not None and updates["theme"] not in VALID_THEMES:
+        raise HTTPException(status_code=400, detail=f"Invalid theme '{updates['theme']}'. Valid: {list(VALID_THEMES)}")
+
+    from database import AsyncSessionLocal
+    from models.all_models import User
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(User).where(User.id == user["sub"]))
+        db_user = r.scalars().first()
+        if not db_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        if "theme" in updates:
+            db_user.theme = updates["theme"]
+        await db.commit()
+        return {"theme": db_user.theme}
