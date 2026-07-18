@@ -303,11 +303,38 @@ shipped. See each sub-step's own Status Table row for full verification detail �
 every one was live-verified against the real running server. Full backend suite:
 213 passed.
 
-**Next action:** Phase 17 (Team, Billing, Settings UI) — see `FRONTEND_BUILD_PLAN.md`'s
-Phase 17 row for scope once a session picks it up. Note the explicit warning already
-flagged in this session's work: the Settings UI's API-keys tab must not imply keys
-can authenticate requests yet (see the new Not-yet-built entry) — describe what
-they're actually for today, or label the capability as coming.
+**Phase 17 (Team, Billing, Settings UI) is planned and approved, ready to build —
+no code written yet.** A docs-only session (this one) proposed the full
+screen-by-screen plan and got explicit sign-off before writing anything, per
+Workflow Rule 4; the locked spec lives in `FRONTEND_BUILD_PLAN.md` under "Phase 17
+decisions (locked)" and should be treated as the spec for the next build session,
+not re-derived. Summary: **Team** (`/team`) — member roster + role change +
+soft-removal + invite create/list/revoke, all mutation controls hidden (not just
+disabled) for non-Owner/Admin via the JWT's `role` claim, matching the backend's
+real `require_role` gate. **Billing** (`/billing`) — current plan card, an
+Owner/Admin-gated upgrade picker calling the real (dev-mode-immediate)
+`POST /change-plan`, and 4 real usage bars off `GET /billing/usage` colored by its
+own `status` field — Stripe-stubbed checkout/invoices explicitly labeled "Coming
+soon," no fabricated invoice rows. **Settings** (`/settings`) — 5 tabs (Workspace,
+Notifications, AI Model, Theme, API Keys); the AI Model picker hardcodes the
+2-entry allowlist client-side with a code comment pointing at
+`services/llm_service.py`'s `SUPPORTED_MODEL_OVERRIDES` as the real source of
+truth (no list endpoint exists to fetch it from); the API Keys tab's copy
+explicitly does not imply keys can authenticate requests yet — describes what
+they're for today, labels the rest as coming, per the explicit instruction carried
+over from Phase 16's approval. Theme reconciles the existing localStorage
+pre-paint fast-path with the new server-persisted `GET/PATCH /auth/me` — server
+wins once loaded, both `ThemeToggle` and the Settings tab write through to both
+places. Invite live-verification is explicitly scoped to the account owner's own
+address only (Resend sandbox limit, unresolved on the user's side — see
+Outstanding items) — that counts as this phase's live proof, not a placeholder for
+broader testing. Build order: **Settings → Team → Billing**, each live-verified via
+Playwright against the real backend before moving to the next. No new
+backend/migration work needed anywhere in this phase — every endpoint it wires to
+already exists and is live-verified (Phase 15/16).
+
+**Next action:** build Phase 17 per the locked spec above / in
+`FRONTEND_BUILD_PLAN.md`.
 
 ---
 

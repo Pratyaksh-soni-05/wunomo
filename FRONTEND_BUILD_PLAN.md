@@ -1,7 +1,12 @@
 # Wunomo AI — Frontend Build Plan
 
 **Status: Phases 0, 2-10, and 12-16 complete and fully live-verified** (plus Phase
-11's lineage half, pulled forward into Phase 12 — see that row). Phase 16 (Settings
+11's lineage half, pulled forward into Phase 12 — see that row). **Phase 17 (Team,
+Billing, Settings UI) is planned and locked, ready to build** — see "Phase 17
+decisions (locked)" below for the full approved screen-by-screen spec (proposed and
+approved in a docs-only session, 2026-07-18, before any code was written; no new
+backend/migration work needed, everything it wires to already exists and is
+live-verified). Build order: Settings → Team → Billing. Phase 16 (Settings
 persistence) closed out this session — the `get_agent()` cache re-keying fix +
 per-tenant AI model override (Phase 0's approved pushback #2, live-verified with two
 real different LLM providers and zero cross-tenant leakage), workspace config,
@@ -249,6 +254,94 @@ that all of them change.
 
 ---
 
+## Phase 17 decisions (locked)
+
+Proposed and approved in a docs-only session (2026-07-18) before any code was
+written — build sessions should treat this as the spec, not re-derive it. No new
+backend/migration work is needed anywhere in this phase; every endpoint below
+already exists and is live-verified (Phase 15/16). Build order: **Settings → Team →
+Billing** (ascending complexity), each screen live-verified via Playwright against
+the real backend before moving to the next, both themes screenshotted, same
+methodology as every prior phase.
+
+**`lib/api.ts` additions** (typed client, same pattern as every prior phase):
+- Team: `TeamMember`, `TeamInvite` types; `getTeamMembers`, `getTeamInvites`,
+  `createTeamInvite`, `revokeTeamInvite`, `changeMemberRole`, `removeTeamMember`
+- Billing: `QuotaStatus`, `PlanLimits` types; `getUsage` (4-resource bars),
+  `getPlans`, `getCurrentPlan`, `changePlan`
+- Settings: `TenantSettings` type; `getSettings`, `updateSettings`
+- Auth `/me`: `getMe`, `updateMe` (theme)
+- API keys: `ApiKeyItem`, `ApiKeyCreated` types; `createApiKey`, `listApiKeys`,
+  `revokeApiKey`
+
+**Team screen (`/team`)**: member table (email, role, status, joined) + pending-
+invites table (email, role, status, expires, revoke). Invite modal (email + role
+`<Select>` from `ALL_ROLES`). Role change via inline `<Select>` per row →
+`PATCH /members/{id}/role`. All mutation controls (invite/revoke/role-change/
+remove) hidden — not just disabled — for non-Owner/Admin, using
+`decodeUserFromToken()`'s `role` claim, matching the backend's real `require_role`
+gate so a Viewer never sees a control they'd 403 on. Self-row and last-owner
+protections surfaced as disabled+tooltip rather than hidden, since those are
+legitimate-but-blocked states, not a permissions issue.
+
+**Billing screen (`/billing`)**: current plan card (name + limits from `GET
+/plan`) with an upgrade `<Select>` + confirm (Owner/Admin only) → `POST
+/change-plan`, labeled as taking effect immediately (dev-mode stand-in, matches
+the `BillingService` docstring — no fake "processing payment" UI). Four real usage
+bars from `GET /billing/usage` using the existing `<Progress>` component, colored
+by the real `status` field (`ok`/`warning`/`exceeded`) rather than a client-side
+recomputation. Checkout/invoices section explicitly labeled "Coming soon" with no
+fabricated invoice rows — matches the backend's honest-501 pattern
+(`POST /checkout`).
+
+**Settings screen (`/settings`)**, tabs (reusing `<Tabs>`, same pattern as
+Governance/Transforms):
+1. **Workspace** — name/timezone/description form → `PATCH /settings/`
+2. **Notifications** — Slack webhook + alert email + the 4 `notify_on` toggles,
+   deep-merge-safe (only send changed keys)
+3. **AI Model** — `<Select>` restricted to the 2-entry allowlist + "use plan
+   default" option. **Adjustment from the original proposal**: hardcode the
+   2-item list client-side (not fetched from the backend, since there's no list
+   endpoint for it) with a code comment pointing at
+   `services/llm_service.py`'s `SUPPORTED_MODEL_OVERRIDES` as the source of
+   truth — so a future reader knows exactly where to check/update if the
+   allowlist ever changes, rather than the two lists silently drifting apart
+4. **Theme** — Light/Dark/System, calls `PATCH /auth/me`
+5. **API Keys** — create (name input) → show raw key once in a `<Modal>` with a
+   copy button and a clear "you won't see this again" warning; list (masked,
+   last-used, created); revoke. Copy explicitly states keys are for
+   reference/audit today, **not yet accepted as request credentials** — no
+   wording implying they can authenticate anything (per the explicit instruction
+   carried over from Phase 16's approval).
+
+Tabs 1-3 and 5's mutations are Owner/Admin-gated (hidden for other roles,
+read-only view shown instead); Theme is self-service for anyone since it's
+per-user.
+
+**Theme reconciliation**: keep the existing localStorage pre-paint script
+(`app/layout.tsx`) as the synchronous fast-path — avoids flash-of-wrong-theme,
+can't be replaced by an async fetch before paint. Layer the server on top: on the
+`(app)` shell mount, fetch `GET /auth/me` and if the server's `theme` differs from
+localStorage, apply it (update `document.dataset.theme` + localStorage) — server
+wins once loaded, since it's the durable preference. Both `ThemeToggle`'s toggle
+and the Settings tab write through to `PATCH /auth/me` in addition to
+localStorage/DOM, so either entry point stays in sync. "System" resolves via
+`matchMedia('(prefers-color-scheme: dark)')` at apply time; the toggle button
+itself always writes an explicit `light`/`dark` (never `system`), since a binary
+click has no "system" gesture.
+
+**Resend/invite verification — adjustment from the original proposal**: the
+Resend account backing this project is still sandbox-limited (domain verification
+pending on the user's side, tracked in Outstanding items below). This phase's live
+proof of the invite flow is scoped to sending to **the account owner's own
+verified address only** — creation, real email delivery, `verify`/`accept` round
+trip, and role/roster updates. That counts as this phase's live verification gate
+for invites; sending to an arbitrary third-party address is out of reach until the
+domain is verified and gets flagged as untestable-pending-domain-verification, not
+silently skipped or claimed as fully verified.
+
+---
+
 ## The 19 phases
 
 Frontend scaffold/design-system/shell/screens-wiring-to-already-verified-endpoints
@@ -277,7 +370,7 @@ same commit as the change.
 | 14 | **Transforms + Data Catalog** — **done, fully live-verified** | Wired to Phase 13 | `GET /api/v1/transformations/runs` (addendum — Phase 13 had persistence but no read endpoint) | Live verification of NL/SQL/Python tabs + History; live catalog view — all done, see `CLAUDE.md`'s Phase 14 Status Table row | Phase 13 |
 | 15 | **Plan/quota + Team** (Track 2, largest phase) — **done, fully live-verified** | None | `require_role()` + `enforce_quota()` shared dependencies (retrofitted onto CI/CD approve/reject plus the rest of the approved high-priority list); `TeamInvite` schema + invite create/list/revoke/accept + team member list/role-change/soft-removal; 3-tier `PLANS` config + quota enforcement on the 4 clearest cost/volume drivers; `BillingService` interface with Stripe stubbed behind honest `501`s. Also fixed the long-standing CI/CD double-booked-approval bug along the way (see CLAUDE.md Known-broken, now resolved) | All 3 gates closed and live-verified against the real running server (not just pytest) — see CLAUDE.md's Phase 15 Status Table rows for full detail: (1) a real invite email delivered via Resend (`last_event: "delivered"`), accepted, joined the *existing* tenant with the locked role, real subsequent login succeeded; (2) a real downgraded-to-viewer JWT got a real 403 on CI/CD approve, the same commit's owner token still succeeded; (3) quota status/enforcement verified against *real pre-existing* `llm_usage_events` history on an actual tenant from earlier in this project (not synthetic seeds) — correctly reported `exceeded` and hard-blocked `/chat/` with a real 402, and a separately-seeded tenant correctly showed the soft-warn band at 85% without being blocked | Phase 1 (real usage numbers), Phase 3 (auth architecture) |
 | 16 | **Settings persistence** — **done, fully live-verified** | None | Workspace config, notification prefs, per-tenant AI model override (with the `_cache` re-keying fix), theme server-persistence, API-keys model + endpoints (CRUD only, not wired to request auth yet) | All 3 gates closed and live-verified against the real running server: two real tenants with different model overrides got two real, different LLM providers (`groq`/`llama-3.3-70b-versatile` vs `gemini`/`gemini-3.5-flash`) with zero cross-contamination; workspace rename/timezone/description and theme both round-tripped through a fresh `GET` after a `PATCH` (not a same-request echo); notification prefs verified by spying on the real `urlopen` call (trusting HTTP status alone was a false signal — Slack redirects bad webhook paths to a 200 page); API key create/list/revoke all confirmed live, raw secret shown exactly once and never in the list response. See `CLAUDE.md`'s Phase 16 Status Table rows for full detail. | Phase 1, 15 |
-| 17 | **Team, Billing, Settings UI** | Wired to Phase 15/16 | — | Live verification of invites, roles, plan/quota display, all settings tabs | Phase 15, 16 |
+| 17 | **Team, Billing, Settings UI** — **plan approved and locked, not yet built** | Wired to Phase 15/16 — see "Phase 17 decisions (locked)" above for the full approved spec (screen-by-screen breakdown, `lib/api.ts` additions, theme reconciliation, role-gating, invite-verification scope) | — | Live verification of invites (scoped to the account owner's own address, per the Resend sandbox limit), roles, plan/quota display, all settings tabs | Phase 15, 16 |
 | 18 | **AI Employees + Landing page** | Locked tiles (as designed), public landing page | None | Visual QA | Phase 2 (can move earlier for marketing urgency) |
 | 19 | **Polish** | Responsive/accessibility/visual QA/performance | — | Full cross-screen pass | All prior |
 
