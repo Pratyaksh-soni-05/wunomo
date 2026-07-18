@@ -192,46 +192,6 @@ async def run_history_check(db, tenant_id: UUID, pipeline_id) -> dict:
         return {"status": "error", "recent_failure_rate": 0, "runs_checked": 0}
 
 
-# ─── Approval Request Creator ────────────────────────────────────────────────
-
-async def create_approval_request(
-    db,
-    commit: PipelineCommit,
-    tenant_id: UUID,
-    check_results: dict,
-    risk_score: float,
-) -> None:
-    try:
-        from models.all_models import ApprovalRequest, ApprovalStatus
-
-        approval = ApprovalRequest(
-            tenant_id=str(tenant_id),
-            user_id="system",
-            session_id=f"cicd-commit-{commit.id}",
-            action_name="cicd_pipeline_deployment",
-            action_args={
-                "commit_id": str(commit.id),
-                "commit_sha": commit.commit_sha,
-                "pipeline_id": str(commit.pipeline_id) if commit.pipeline_id else None,
-                "check_results": check_results,
-                "branch": commit.branch,
-                "author": commit.author,
-            },
-            risk_level="high",
-            reason=(
-                f"High-risk pipeline change requires approval. "
-                f"Risk score: {risk_score:.0f}/100"
-            ),
-            status=ApprovalStatus.PENDING,
-        )
-        db.add(approval)
-        await db.commit()
-        log.info("cicd.approval_created", commit_id=str(commit.id), risk_score=risk_score)
-
-    except Exception as e:
-        log.warning("cicd.approval_create_failed", error=str(e))
-
-
 # ─── Main CI Runner Task ─────────────────────────────────────────────────────
 
 @shared_task(
@@ -343,7 +303,11 @@ def run_ci_pipeline(self, commit_id: str, tenant_id: str) -> None:
                         sha=commit.commit_sha[:8],
                     )
             else:
-                await create_approval_request(db, commit, tid, check_results, risk_score)
+                # PipelineCommit.gate_decision (just set above) is the real,
+                # role-gated, tested approval path - see CLAUDE.md's now-
+                # resolved "CI/CD high-risk commits double-book their
+                # approval into two never-linked tables" entry. No separate
+                # PolicyEngine ApprovalRequest is created here anymore.
 
                 # ── Notify approval required ──────────────────────────────────
                 await _safe_notify("approval_required", {
