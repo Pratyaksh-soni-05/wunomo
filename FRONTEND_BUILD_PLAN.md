@@ -1,19 +1,22 @@
 # Wunomo AI — Frontend Build Plan
 
-**Status: Phases 0, 2-9, and 12 complete and fully live-verified** (plus Phase 11's
+**Status: Phases 0, 2-10, and 12 complete and fully live-verified** (plus Phase 11's
 lineage half, pulled forward into Phase 12 — see that row). **Phase 10 (AXIOM chat
-UI) is built, with zero-cost checks (session list, saved prompts, attached context,
-both themes) fully live-verified — but live-send verification (multi-turn, tool-call
-trace rendering, mode switching, the advisory approval-gate flow) is blocked on both
-LLM providers' daily quotas being exhausted simultaneously and is the explicit first
-task of the next session** (see `CLAUDE.md`'s Phase 10 Status Table row and Gotchas).
-Phase 13+ can proceed in parallel if a session doesn't want to spend its first move
-on quota-gated verification. See the phase table below for the
-authoritative, per-phase status and verification detail for each — this banner is a
-quick pointer, not a substitute for it. This is the authoritative, signed-off plan
-for building the Wunomo AI frontend against the real `dataops-agent` backend.
-Referenced from `CLAUDE.md` — read that file first for the backend's current state,
-then this file for what's being built on top of it and in what order.
+UI)'s previously-deferred live-send checks (multi-turn continuity, tool-call trace
+rendering, mode switching, the advisory approval-gate flow) are now closed** — run
+in a follow-up session once Gemini's daily quota had reset, all via a real
+Playwright-driven browser against a real seeded tenant. That pass also settled the
+approval-persistence question with live proof (a real `ApprovalRequest` row is
+written and appears in `GET /approvals`/`GET /approvals/merged`) and caught + fixed
+a real bug: blocked tool calls always reported `risk_level: "high"` regardless of
+actual tier (see `CLAUDE.md`'s Phase 10 Status Table row and the resolved
+approval-persistence Known-broken row for full detail). See the phase table below
+for the authoritative, per-phase status and verification detail for each — this
+banner is a quick pointer, not a substitute for it. This is the authoritative,
+signed-off plan for building the Wunomo AI frontend against the real
+`dataops-agent` backend. Referenced from `CLAUDE.md` — read that file first for the
+backend's current state, then this file for what's being built on top of it and in
+what order.
 
 Source material: `dataops-agent/frontend/wunomo-ai MASTER DESIGN.html` (the master
 design prototype — all 18 post-login screens, component library, design tokens),
@@ -261,7 +264,7 @@ same commit as the change.
 | 7 | **App shell** — **done, fully live-verified** | Sidebar/topbar/routing/command palette/toasts/notifications/AXIOM FAB, light/dark theme switching (client-side, upgraded to server-persisted in Phase 16) | None | Visual + interaction comparison to prototype | Phase 2 |
 | 8 | **Chat sessions + tool trace** — **done, fully live-verified** | None | `GET /chat/sessions` (private-per-user AND tenant-scoped session list); real tool-call trace included in chat response | Multi-session real chat; session list correctly scoped; tool trace reflects tools actually executed — verified via 5 regression tests plus a real end-to-end round trip once Groq's quota freed up (real tool call, real result, real trace persisted and returned) | None |
 | 9 | **Dashboard** — **done, fully live-verified** | Wired to real KPIs (pipelines/quality/incidents/approvals/sources) + AXIOM Activity via Phase 8 | Small new `GET /analytics/recent-runs` endpoint | Live dashboard against real tenant data | Phase 7; Phase 8 for AXIOM Activity |
-| 10 | **AXIOM chat (3-panel)** — **built; live-send verification pending quota** | Wired to real chat/history; graceful loading/fallback UX; real provider-switch messaging via Phase 1's `provider` field | — | Real multi-turn conversation; loading states and provider display accurate — **zero-cost checks (session list, saved prompts, attached context, both themes) done; multi-turn/tool-trace/mode-switch/approval-gate live proof blocked on both providers' quota, first task next session** | Phase 7, 1, 8 — LangChain v1.x upgrade (done, see `CLAUDE.md`) and the 22-site `agent/tools/*.py` punch list (done) are no longer blockers |
+| 10 | **AXIOM chat (3-panel)** — **done, fully live-verified** | Wired to real chat/history; graceful loading/fallback UX; real provider-switch messaging via Phase 1's `provider` field | — | Real multi-turn conversation; loading states and provider display accurate — all checks done, including the previously-deferred multi-turn/tool-trace/mode-switch/approval-gate live proof (run once Gemini's daily quota reset; also settled approval-persistence with live proof and fixed a real risk_level bug found in the same pass — see `CLAUDE.md`) | Phase 7, 1, 8 — LangChain v1.x upgrade (done, see `CLAUDE.md`) and the 22-site `agent/tools/*.py` punch list (done) are no longer blockers |
 | 11 | **KPI instrumentation** — lineage half **done, pulled forward into Phase 12** | None | ~~auto-create `LineageNode`/`LineageEdge` on pipeline/source creation~~ **done** (`LineageTracker.sync_tenant_lineage()`, hooked into source/pipeline creation plus a self-healing sync on every `/governance/graph` read so pre-existing tenants backfill too — see CLAUDE.md Status Table). **Remaining scope**: write a `KpiValue` point on every quality-check run — not needed by any Phase 12 screen, still pending | Real quality check → KPI row appears in `/analytics/kpis` | None |
 | 12 | **Core DataOps screens** — **done, fully live-verified** | Sources, Pipelines, Quality (real trend), Incidents, CI/CD, Approvals (merged), Governance (real lineage/contracts/audit) — all 7 built, replacing their Phase 7 stubs | `GET /api/v1/approvals/merged` (done); lineage auto-population pulled forward from Phase 11 (done) | Full live Playwright walkthrough per screen against real tenant data (create/update/delete/action flows, both themes screenshotted). Also did the cross-cutting 401-handling fix as pre-work (see CLAUDE.md) | Phase 7; lineage auto-population (done, see Phase 11) |
 | 13 | **Transform history + catalog aggregation** | None | Transform-run persistence model; thin aggregation endpoint over `schema_snapshot` for catalog | Real SQL/pandas transform → listed/replayable; catalog reflects real profiled sources | None |
@@ -289,9 +292,10 @@ same commit as the change.
   20 requests/day free-tier cap as the preview model did — not a preview-vs-GA
   distinction, confirmed by direct counter-evidence (see `CLAUDE.md` Gotchas). Groq's
   shared org-level daily token quota has also been independently exhausted more than
-  once. Phase 10's live-send verification is currently blocked on both being spent
-  simultaneously — the next session should check quota state before spending anything
-  else on either provider.
+  once. Phase 10's live-send verification is now complete (run in a follow-up
+  session once Gemini's quota reset) — any future session doing live-LLM
+  verification should still check quota state first before spending, per the
+  established pattern.
 
 ---
 
