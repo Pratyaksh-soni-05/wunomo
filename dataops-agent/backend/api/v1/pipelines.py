@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from .auth import get_current_user
+from .auth import get_current_user, require_role
+from services.rbac import Role
 from modules.orchestration.dag_manager import DAGManager
 
 router = APIRouter()
@@ -73,7 +74,7 @@ async def update_pipeline(pipeline_id: str, req: PipelineUpdate,
 
 
 @router.delete("/{pipeline_id}")
-async def delete_pipeline(pipeline_id: str, user=Depends(get_current_user)):
+async def delete_pipeline(pipeline_id: str, user=Depends(require_role(Role.OWNER, Role.ADMIN, Role.DATA_ENGINEER))):
     from sqlalchemy import select, delete, update
     from database import AsyncSessionLocal
     from models.all_models import Pipeline, PipelineRun, QualityRule, Incident

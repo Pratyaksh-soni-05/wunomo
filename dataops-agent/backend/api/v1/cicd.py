@@ -478,7 +478,7 @@ async def list_incidents(
 async def resolve_incident(
     incident_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_role(Role.OWNER, Role.ADMIN)),
 ):
     """Mark a CICD incident as resolved."""
     result = await db.execute(

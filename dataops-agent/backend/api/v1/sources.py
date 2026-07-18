@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import select
-from .auth import get_current_user
+from .auth import get_current_user, require_role
+from services.rbac import Role
 from database import AsyncSessionLocal
 from models.all_models import DataSource
 from modules.ingestion.connector_manager import ConnectorManager
@@ -68,7 +69,7 @@ async def update_source(source_id: str, req: SourceUpdate, user=Depends(get_curr
         return {"message": "Source updated", "id": source_id}
 
 @router.delete("/{source_id}")
-async def delete_source(source_id: str, user=Depends(get_current_user)):
+async def delete_source(source_id: str, user=Depends(require_role(Role.OWNER, Role.ADMIN, Role.DATA_ENGINEER))):
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(DataSource).where(
             DataSource.id == source_id, DataSource.tenant_id == user["tenant_id"]))
