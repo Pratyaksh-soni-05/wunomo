@@ -329,3 +329,25 @@ class EmailLoginCode(Base):
     consumed_at = Column(DateTime, nullable=True)
     request_ip = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TransformRun(Base):
+    __tablename__ = "transform_runs"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    # Bare String, not FK'd — matches the majority convention in this codebase
+    # (only User/DataSource/Pipeline get a real tenant_id FK); accepted
+    # consciously, not by default, since app-level tenant scoping is what's
+    # actually load-bearing here (see CLAUDE.md).
+    tenant_id = Column(String, nullable=False, index=True)
+    user_id = Column(String, nullable=False)
+    session_id = Column(String, nullable=True)
+    source_id = Column(String, nullable=True, index=True)
+    transform_type = Column(String(20), nullable=False)  # "sql" | "pandas"
+    origin = Column(String(20), nullable=False)  # "chat_agent" | "manual"
+    code = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False)  # "success" | "error"
+    row_count = Column(Integer, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    result_preview = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
