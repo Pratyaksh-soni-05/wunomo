@@ -77,8 +77,12 @@ class AgentState(TypedDict):
     system_prompt: str
 
 
-def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.ASSISTED):
-    llm = get_llm_for_agent(temperature=0.0)
+def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.ASSISTED, primary_model=None):
+    # Only pass primary_model when actually set, preserving the exact
+    # get_llm_for_agent(temperature=0.0) call shape every existing
+    # monkeypatched test fixture (test_agent_graph.py) already expects -
+    # avoids touching ~8 unrelated test fixtures for a kwarg they never use.
+    llm = get_llm_for_agent(temperature=0.0, primary_model=primary_model) if primary_model else get_llm_for_agent(temperature=0.0)
     llm_with_tools = llm.bind_tools(ALL_TOOLS)
 
     # `messages` uses the `operator.add` reducer, so LangGraph automatically
@@ -181,17 +185,29 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
 
 _cache: dict = {}
 
-def get_agent(personality="engineer", operation="assisted"):
-    key = f"{personality}:{operation}"
+def get_agent(personality="engineer", operation="assisted", tenant_id=None, primary_model=None):
+    """Cache key MUST include tenant_id and the resolved primary_model, not
+    just personality/operation - see CLAUDE.md's get_agent() Gotcha
+    (Phase 0's approved pushback #2). The cached value is a fully-built
+    agent with a specific LLM already bound in; two tenants with different
+    model overrides sharing a cache key would leak one tenant's model
+    choice into another tenant's requests. tenant_id is required (not
+    defaulted) so this can never silently regress back to the old
+    personality:operation-only key by a caller forgetting to pass it."""
+    if tenant_id is None:
+        raise ValueError("get_agent() requires tenant_id - see the cache re-keying Gotcha in CLAUDE.md")
+    key = f"{tenant_id}:{personality}:{operation}:{primary_model or 'default'}"
     if key not in _cache:
-        _cache[key] = build_agent(PersonalityMode(personality), OperationMode(operation))
+        _cache[key] = build_agent(PersonalityMode(personality), OperationMode(operation), primary_model=primary_model)
     return _cache[key]
 
 
 async def run_agent(user_message, tenant_id, user_id, session_id,
                     personality_mode="engineer", operation_mode="assisted",
                     history=None, context=None) -> dict:
-    agent = get_agent(personality_mode, operation_mode)
+    from services.settings_service import get_ai_model_override
+    primary_model = await get_ai_model_override(tenant_id)
+    agent = get_agent(personality_mode, operation_mode, tenant_id=tenant_id, primary_model=primary_model)
     messages = list(history or []) + [HumanMessage(content=user_message)]
     # tenant_id/user_id/session_id are trusted values the caller derives from the
     # authenticated JWT (see api/v1/auth.py get_current_user, via api/v1/chat.py).

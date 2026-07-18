@@ -12,6 +12,18 @@ from groq import AuthenticationError as GroqAuthError
 
 log = structlog.get_logger()
 
+# The only models this project has actually live-verified end-to-end for
+# real tool-calling (see CLAUDE.md's LangChain v1.x upgrade row and the
+# Gemini quota-deprecation Gotcha). A tenant's AI model override (Phase
+# 16, Tenant.settings.ai_model_override) is validated against exactly this
+# list, not left as a free string - the Gemini-saga lesson applied: an
+# unvalidated/unsupported model name doesn't error clearly, it silently
+# degrades (falls through to the fallback on every request, or just fails
+# in a way that looks like an unrelated bug). Kept in this one place -
+# extend it only once a new model is actually proven working here, not
+# just because a provider released it.
+SUPPORTED_MODEL_OVERRIDES = ["gemini-3.5-flash", "llama-3.3-70b-versatile"]
+
 
 def _provider_for_model(model: str) -> str:
     """Same routing rule _build_llm() uses, exposed for usage logging."""
@@ -115,8 +127,8 @@ def _build_llm(model: str, temperature: float):
     )
 
 
-def get_primary_llm(temperature=0.0):
-    return _build_llm(settings.PRIMARY_LLM_MODEL, temperature)
+def get_primary_llm(temperature=0.0, model: str | None = None):
+    return _build_llm(model or settings.PRIMARY_LLM_MODEL, temperature)
 
 
 def get_fallback_llm(temperature=0.0):
@@ -235,11 +247,18 @@ class _TimeoutFallbackChatModel:
             return response
 
 
-def get_llm_for_agent(temperature=0.0):
+def get_llm_for_agent(temperature=0.0, primary_model: str | None = None):
+    """primary_model overrides settings.PRIMARY_LLM_MODEL for this call
+    only (Phase 16's per-tenant AI model override) - the fallback model is
+    always the global settings.FALLBACK_LLM_MODEL, since fallback is
+    reliability infrastructure, not a per-tenant preference."""
     try:
-        primary = get_primary_llm(temperature)
+        primary = get_primary_llm(temperature, model=primary_model)
         fallback = get_fallback_llm(temperature)
-        return _TimeoutFallbackChatModel(primary, fallback, PRIMARY_LLM_TIMEOUT_SECONDS)
+        return _TimeoutFallbackChatModel(
+            primary, fallback, PRIMARY_LLM_TIMEOUT_SECONDS,
+            primary_model=primary_model or settings.PRIMARY_LLM_MODEL,
+        )
     except Exception:
         return get_fallback_llm(temperature)
 
