@@ -922,6 +922,55 @@ export function acceptInvite(params: { token: string; password: string; full_nam
   return request("/api/v1/team/invites/accept", { method: "POST", body: JSON.stringify(params) });
 }
 
+// ---------- Billing (Phase 17) ----------
+
+export interface QuotaStatus {
+  resource: string;
+  used: number;
+  limit: number | null;
+  percent: number;
+  status: "ok" | "warning" | "exceeded";
+}
+
+export interface UsageSummary {
+  ai_credits: QuotaStatus;
+  pipeline_runs: QuotaStatus;
+  data_sources: QuotaStatus;
+  team_members: QuotaStatus;
+}
+
+export interface PlanLimits {
+  ai_credits_per_month: number;
+  pipeline_runs_per_month: number;
+  max_data_sources: number | null;
+  max_team_members: number | null;
+}
+
+export interface CurrentPlan {
+  plan: string;
+  limits: PlanLimits;
+}
+
+export function getUsage(token: string): Promise<{ usage: UsageSummary }> {
+  return authedRequest("/api/v1/billing/usage", token);
+}
+
+export function getCurrentPlan(token: string): Promise<CurrentPlan> {
+  return authedRequest("/api/v1/billing/plan", token);
+}
+
+// Public - no auth. Real tier definitions, not hardcoded client-side (unlike
+// the Settings AI Model list, which has no equivalent endpoint to fetch from).
+export function getPlans(): Promise<{ plans: Record<string, PlanLimits> }> {
+  return request("/api/v1/billing/plans");
+}
+
+export function changePlan(token: string, plan: string): Promise<CurrentPlan> {
+  return request("/api/v1/billing/change-plan", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ plan }),
+  });
+}
+
 // ---------- Local session storage ----------
 
 const TOKEN_KEY = "axiom_token";
