@@ -14,7 +14,7 @@ from api.v1 import (
     auth, chat, sources, pipelines, runs,
     incidents, quality, governance, uploads,
     analytics, approvals, transformations,
-    cicd, onboarding,
+    cicd, onboarding, catalog,
 )
 
 
@@ -106,6 +106,7 @@ app.include_router(analytics.router,       prefix="/api/v1/analytics",       tag
 
 # Phase 4 — Transformation
 app.include_router(transformations.router, prefix="/api/v1/transformations", tags=["Transformations"])
+app.include_router(catalog.router,         prefix="/api/v1/catalog",         tags=["Catalog"])
 
 
 # Phase 5 — CI/CD
