@@ -614,6 +614,237 @@ Backend reality, confirmed by grep across `api/v1/*.py`:
 
 ---
 
+## Screens — Group 3: Transforms, Quality, Incidents, Governance
+
+*Files read for this group: `frontend/src/app/(app)/transforms/page.tsx`,
+`frontend/src/app/(app)/quality/page.tsx`, `frontend/src/app/(app)/incidents/page.tsx`,
+`frontend/src/app/(app)/governance/page.tsx`, `frontend/src/lib/api.ts`,
+`backend/api/v1/{transformations,quality,incidents,governance}.py` (grepped for
+`role`/`require_role` in all four to confirm exact gating).*
+
+### 11. Transforms — `/transforms`
+
+**File:** `frontend/src/app/(app)/transforms/page.tsx`
+
+**Purpose:** Generate, edit, run, and replay SQL/Python data transformations
+against a selected source — via natural language, a raw SQL editor, or a raw
+Python (pandas) editor — plus a history of every real execution.
+
+**How to reach it:** Sidebar → Data → "Transforms". Also reachable indirectly:
+the Chat screen's agent can trigger real transform executions itself (see
+Chat, Group 5), which then appear in this screen's History tab regardless of
+whether the user ever opens Transforms directly.
+
+**Role visibility:** Mixed, and **not reflected in the UI at all.** A single
+data-source `<Select>` at the top applies to all four tabs. Backend reality,
+confirmed by grep:
+- Generate (Natural Language tab), Dry Run (SQL tab), Preview (Python tab),
+  and Explain (Python tab) are all **fully ungated** — any authenticated role,
+  including Viewer, can use them.
+- **Execute** (both the SQL tab's "Execute" and the Python tab's "Execute")
+  is role-gated to Owner/Admin/Data Engineer/Data Analyst — **Viewer is the
+  only role excluded.** The button itself is shown and enabled identically
+  for a Viewer; clicking it produces a real backend `403`. Unlike most other
+  screens in this app, this one's error handling **does** surface the real
+  backend detail message inline (via a shared `errMsg()` helper that reads
+  `ApiError.detail` when it's a string) rather than a generic toast — a
+  Viewer would actually see "Requires role: owner or admin or data_engineer
+  or data_analyst" printed under the editor, not a vague failure.
+- History tab (`GET /transformations/runs`) is ungated — any role can view it.
+
+**Interactive elements:**
+
+*Shared:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| Data source `<Select>` (above the tabs) | Select | Client-side only — feeds `source_id` into whichever tab's action is used next | — | — |
+| Tabs: Natural Language / SQL Editor / Python Editor / History | Click | Client-side only, switches the visible panel | — | — |
+
+*Natural Language tab:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| Goal text input | Type | Free text, e.g. "Filter rows where widget_count is greater than 15" | — | — |
+| Language `<Select>` (Auto / SQL / Pandas) | Select | **NEW FINDING**: "Auto" and "SQL" are functionally identical — the selected value only decides, client-side, whether `generatePandasTransform` (`pandas` selected) or `generateSqlTransform` (`auto` or `sql` selected) is called; the chosen value itself is never actually sent to the backend as a parameter (neither generate call has a `language` field). There is no real auto-detection — picking "Auto" always produces SQL, exactly like explicitly picking "SQL." | — | — |
+| "Generate" button (disabled until the goal field is non-empty) | Click | `POST /transformations/generate/sql` or `/generate/pandas` `{request, source_id?}` depending on the language selector above | Generated code renders in a read-only code block; a badge shows "Grounded in real schema" (green) or "No schema available" (yellow) reflecting the backend's real `schema_used` flag, plus a warning-count badge if the backend returned any | Inline red error text with the backend's detail message |
+| "Send to SQL/Python Editor" button (shown only once a result exists) | Click | Client-side only — copies the generated code into the matching editor's state and switches tabs | — | — |
+
+*SQL Editor tab:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| SQL code textarea | Type | Free-form, pre-filled with `SELECT 1;` | — | — |
+| "Dry Run" button | Click | Requires a source selected first (else a "Select a data source first." toast, no call made) → `POST /transformations/run/sql/dry-run` `{source_id, sql}` — ungated, any role | Renders the returned query plan as a table | Inline red error text |
+| "Execute" button | Click | Same source-required guard → `POST /transformations/run/sql` `{source_id, sql}` — **role-gated, see above** | Renders real result rows (capped at 100 shown client-side even if more are returned) with row count/duration/truncated flag; the transform-runs History query is invalidated so it appears there too | Inline red error text (a Viewer's 403 shows here, verbatim) |
+
+*Python Editor tab:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| Python code textarea | Type | Free-form, pre-filled with `result_df = df.head(10)` | — | — |
+| "Preview (100 rows)" button | Click | Source-required guard → `POST /transformations/preview/pandas` `{source_id, code}` — ungated | Renders preview result rows | Inline red error text |
+| "Execute" button | Click | Source-required guard → `POST /transformations/run/pandas` `{source_id, code}` — **role-gated, same as SQL Execute** | Renders real result rows, invalidates History | Inline red error text |
+| "✨ Explain" button | Click | `POST /transformations/explain` `{code, language: "pandas"}` — ungated. **Note**: this button only exists on the Python tab; there is no equivalent "Explain" control anywhere on the SQL tab. | Renders a plain-English explanation card below the editor | Danger toast with the backend detail message |
+
+*History tab:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| (on tab open) | — | `GET /transformations/runs?limit=50` — ungated, any role | Lists every real execution (both this screen's own Execute calls and any AXIOM chat-triggered transform runs — an "Origin" column distinguishes "AXIOM" vs "Manual"), truncated code preview, type badge, success/failed status badge, row count, timestamp | — |
+| "Replay" button per row | Click | Client-side only — no API call. Loads that run's exact source + code back into the matching editor tab and switches to it, with a "Loaded into editor — review and run." toast. **Does not re-execute anything by itself** — the user must click Execute again after reviewing. | — | — |
+
+**Empty states:** History tab with zero runs → "No transforms run yet" +
+explanatory text that both manual and AXIOM-triggered runs will appear here.
+Result areas (before any Generate/Dry Run/Execute/Preview) show a placeholder
+comment or nothing at all, not an "empty state" per se.
+
+**Known issues:**
+- Execute is role-gated (excludes Viewer) with no frontend hiding — though,
+  as noted above, this is the one screen where the resulting error message is
+  actually informative rather than generic.
+- The "Auto" language option's lack of real auto-detection (NEW FINDING,
+  above).
+- Dry Run / Preview / Explain / Generate are all safe to leave fully ungated
+  (read-only or sandboxed, matching `CLAUDE.md`'s stated reasoning for why
+  `run/sql/dry-run` was deliberately left out of the role retrofit).
+
+---
+
+### 12. Quality — `/quality`
+
+**File:** `frontend/src/app/(app)/quality/page.tsx`
+
+**Purpose:** Create and manage quality rules attached to pipelines (not_null,
+unique, accepted_values, range, freshness, regex, row_count, custom_sql), and
+manually trigger a check run.
+
+**How to reach it:** Sidebar → Quality & Ops → "Quality".
+
+**Role visibility:** **No role-based hiding.** Backend reality: `POST /quality/`
+(create rule) and `POST /quality/{pipeline_id}/run` (run checks) are both
+fully ungated — any role. `DELETE /quality/{rule_id}` is role-gated
+(Owner/Admin/Data Engineer) with no frontend hiding, same generic-toast
+pattern as Sources/Pipelines delete.
+
+**Interactive elements:**
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| "+ New Rule" button (disabled if there are zero pipelines to attach a rule to) | Click | Opens the "New Quality Rule" modal | — | — |
+| Modal — Name input | Type | Required | — | — |
+| Modal — Pipeline `<Select>` | Select | Required | — | — |
+| Modal — Rule type `<Select>` (not_null / unique / accepted_values / range / freshness / regex / row_count / custom_sql) | Select | These are exactly the 8 base rule types `QualityRuleEngine` actually supports — **this dropdown does not expose any of the separate "business rule" types** (`reconciliation`, `kpi_sanity`, etc.), so the known, documented `BusinessRules.create_rule()` bug (can't create any of its own 8 business-rule types — see `CLAUDE.md` Known-broken) is **not reachable from this screen at all**. | — | — |
+| Modal — Column (optional) input | Type | Optional | — | — |
+| Modal — Severity `<Select>` (low/medium/high/critical) | Select | Defaults to "high" | — | — |
+| Modal — "Create" button (disabled until Name + Pipeline are set) | Click | `POST /api/v1/quality/` `{pipeline_id, name, rule_type, column_name?, severity}` | Success toast, modal closes, list refetches | "Failed to create rule — check a pipeline is selected." toast |
+| Table row — "Run Checks" button | Click | `POST /api/v1/quality/{pipeline_id}/run` — **runs every rule attached to that rule's pipeline, not just the one row clicked.** The button is scoped per-row visually, but the action is pipeline-wide. | Toast with the real score and pass/fail counts, e.g. "Checks ran — score 100, 3 passed / 0 failed."; list refetches (pass/fail counts on every rule for that pipeline update) | "Failed to run checks." toast |
+| Table row — "Delete" button | Click | `DELETE /api/v1/quality/{rule_id}` — no confirmation dialog | "Rule deleted." toast, list refetches | "Failed to delete rule." toast (see role note above) |
+
+**Empty states:** Zero pipelines exist → "Create a pipeline first, then attach
+quality rules to it." (no "+ New Rule" button shown at all in this case).
+Pipelines exist but zero rules → "Attach rules to a pipeline to catch bad data
+before it spreads." + a working "+ New Rule" button.
+
+**Known issues:**
+- **NEW FINDING**: "Run Checks" is pipeline-scoped, not rule-scoped, despite
+  appearing as a per-rule row action — clicking it on any one rule re-runs
+  every rule attached to that pipeline.
+- Role-gated Delete with no frontend hiding, no confirmation dialog.
+
+---
+
+### 13. Incidents — `/incidents`
+
+**File:** `frontend/src/app/(app)/incidents/page.tsx`
+
+**Purpose:** View open incidents (raised automatically by AXIOM/the freshness
+checker, or logged manually here) and mark them resolved.
+
+**How to reach it:** Sidebar → Quality & Ops → "Incidents". Also reachable via
+the Dashboard's health banner "Investigate" button when at least one open
+incident exists.
+
+**Role visibility:** **No role gating anywhere on this screen or its two
+backend endpoints** — `POST /incidents/` (create/log) and
+`POST /incidents/{id}/resolve` have no `require_role` at all, confirmed by
+grep (zero matches in `incidents.py`). Every role can log and resolve
+incidents identically.
+
+**Interactive elements:**
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| "+ Log Incident" button (also in empty state) | Click | Opens the "Log Incident" modal | — | — |
+| Modal — Title input | Type | Required | — | — |
+| Modal — Description input | Type | Optional | — | — |
+| Modal — Severity `<Select>` (low/medium/high/critical) | Select | Defaults to "medium" | — | — |
+| Modal — Pipeline `<Select>` | Select | Optional — "None" is valid | — | — |
+| Modal — "Log Incident" button (disabled until Title is set) | Click | `POST /api/v1/incidents/` `{title, description?, severity, pipeline_id?}` | Success toast, modal closes, list refetches | "Failed to create incident." toast |
+| Table row — "Resolve" button (shown only when status ≠ `resolved`) | Click | Opens the "Resolve Incident" modal (does not resolve immediately) | — | — |
+| Resolve modal — Resolution notes input (required) | Type | — | — | — |
+| Resolve modal — "Mark Resolved" button (disabled until notes are non-empty) | Click | `POST /api/v1/incidents/{id}/resolve` `{resolution_notes}` | "Incident resolved." toast, modal closes, list refetches | "Failed to resolve incident." toast |
+
+**Empty states:** No open incidents → "No incidents — Nothing's on fire.
+Incidents raised by AXIOM or logged manually will show up here." + "+ Log
+Incident" button.
+
+**Known issues:** This screen's list query (`GET /incidents/`) returns *open*
+incidents — **UNVERIFIED** from the frontend code alone whether a resolved
+incident stays visible in this same list immediately after resolving (it
+still appears in the table with status `resolved` and a "—" in place of the
+Resolve button per the code, but whether the backend's underlying query
+continues to include already-resolved incidents indefinitely, or only briefly
+until the next fetch, was not traced into `incidents.py`'s query logic for
+this document).
+
+---
+
+### 14. Governance — `/governance`
+
+**File:** `frontend/src/app/(app)/governance/page.tsx`
+
+**Purpose:** Three tabs — Lineage (a graph of sources → pipelines → outputs),
+Contracts (schema/quality expectations defined against a source, with
+on-demand validation), and Audit Log (a read-only feed of governance and
+approval actions).
+
+**How to reach it:** Sidebar → Quality & Ops → "Governance".
+
+**Role visibility:** **No role gating anywhere** — `governance.py` has zero
+`role`/`require_role` references (confirmed by grep). Every role can view
+lineage, create/validate contracts, and read the audit log identically.
+
+**Interactive elements:**
+
+*Lineage tab (default):*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| (on tab load) | — | `GET /governance/graph` — this endpoint self-heals/backfills lineage for the tenant on every read (per `CLAUDE.md`'s Phase 12 lineage work), so the graph shown is always current even for older tenants that predate auto-population | Two read-only tables: Nodes (name + type badge: source/pipeline/output) and Edges (upstream → relationship → downstream, resolved to real node names where possible) | — |
+
+*Contracts tab:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| "+ New Contract" button (only shown while this tab is active; disabled if there are zero sources) | Click | Opens the "New Data Contract" modal | — | — |
+| Modal — Name input | Type | Required | — | — |
+| Modal — Producer source `<Select>` | Select | Required | — | — |
+| Modal — Consumer description input | Type | Optional | — | — |
+| Modal — "Create" button | Click | `POST /governance/contracts` `{name, producer_source_id, consumer_description?}` | Success toast, modal closes, contracts list **and** audit trail both refetch (contract creation is itself an audited action) | "Failed to create contract." toast |
+| Table row — "Validate" button | Click | `POST /governance/contracts/{id}/validate` | "Contract validated." toast, contracts list **and** audit trail both refetch, table's Status badge updates (valid/violated/pending) and Last Validated timestamp updates | "Validation failed." toast |
+
+*Audit Log tab:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| (on tab load) | — | `GET /governance/audit?limit=50` | Read-only table: actor, action (raw action string, e.g. `contract.created`), resource type + short ID, timestamp | — |
+
+**Empty states:** Lineage with no nodes → "No lineage yet — Lineage nodes are
+created automatically as you add sources and pipelines." Contracts with none
+yet → "Add a source first, then define a contract against it." (no sources)
+or "Define expectations for a source's schema and quality, then validate them
+anytime." (sources exist, zero contracts). Audit log with no entries → "No
+audit events yet."
+
+**Known issues:** None found specific to this screen — Contracts' Audit Log
+staleness bug (create/validate not invalidating the audit query) is already
+fixed per `CLAUDE.md`'s Phase 12 Status Table, confirmed still fixed by this
+screen's current code (both mutations explicitly invalidate `["audit-trail"]`
+alongside `["contracts"]`).
+
+---
+
 ## Progress tracker
 
 - [x] **Group 1: Landing & Authentication** — Landing, Login, Signup, Google
@@ -628,8 +859,15 @@ Backend reality, confirmed by grep across `api/v1/*.py`:
       Sources has no actual file-upload UI despite offering CSV/Excel as
       source types; Catalog's Sync Metadata silently swallows per-source
       failures; Pipelines has no delete confirmation dialog.
-- [ ] Group 3: Transforms, Quality, Incidents, Governance
-- [ ] Group 3: Transforms, Quality, Incidents, Governance
+- [x] **Group 3: Transforms, Quality, Incidents, Governance.** New findings
+      logged (not fixed): Transforms' "Auto" language selector doesn't
+      actually auto-detect — it's identical to picking "SQL"; Quality's
+      "Run Checks" button is per-rule visually but pipeline-wide in effect;
+      Execute (Transforms) and Delete (Quality) remain role-gated with no
+      frontend hiding, consistent with Group 2's pattern. Incidents and
+      Governance are both fully ungated by role, matching their backend code.
+      One UNVERIFIED item: whether resolved incidents remain in the
+      Incidents list indefinitely or only briefly.
 - [ ] Group 4: Automations, CI/CD, Approvals, Analytics, Audit
 - [ ] Group 5: AI Employees, Chat
 - [ ] Group 6: Team, Billing, Settings (5 tabs)
