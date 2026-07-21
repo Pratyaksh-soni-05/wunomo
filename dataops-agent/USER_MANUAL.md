@@ -845,6 +845,197 @@ alongside `["contracts"]`).
 
 ---
 
+## Screens — Group 4: Automations, CI/CD, Approvals, Analytics, Audit
+
+*Files read for this group: `frontend/src/app/(app)/automations/page.tsx`,
+`frontend/src/app/(app)/cicd/page.tsx`, `frontend/src/app/(app)/approvals/page.tsx`,
+`frontend/src/app/(app)/analytics/page.tsx`, `frontend/src/app/(app)/audit/page.tsx`,
+`frontend/src/components/shell/StubPage.tsx`, `frontend/src/lib/api.ts`,
+`backend/api/v1/{cicd,approvals}.py` (grepped for every mutating route and its
+role gate).*
+
+### 15. Automations — `/automations`
+
+**File:** `frontend/src/app/(app)/automations/page.tsx` — renders the shared
+`StubPage` component only.
+
+**Purpose:** None yet. Per both `CLAUDE.md` and `FRONTEND_BUILD_PLAN.md`, a
+real trigger→action rule engine for this screen is explicitly deferred as "a
+dedicated post-launch project," confirmed as one of the plan's three
+confirmed-Coming-Soon items at launch (alongside the 5 locked AI Employees and
+Governance's Compliance sub-tab, which doesn't exist as a separate tab at all
+in the current Governance screen — see Group 3).
+
+**How to reach it:** Sidebar → Quality & Ops → "Automations".
+
+**Role visibility:** N/A — static stub, identical for every role.
+
+**Interactive elements:** None.
+
+**Empty states:** The entire screen *is* the empty state — a centered icon,
+the title "Automations," and the generic stub message: "This screen is a
+routable stub for now — real content lands in a later phase." (This
+particular stub is not passed a `phase` prop, unlike some others, so it gets
+the generic message rather than a "wired to real data in Phase N" one.)
+
+**Known issues:** None beyond being unbuilt — this is documented,
+intentional, launch-scoped Coming Soon, not a defect.
+
+---
+
+### 16. CI / CD — `/cicd`
+
+**File:** `frontend/src/app/(app)/cicd/page.tsx`
+
+**Purpose:** GitHub-webhook-driven pipeline CI status — commit risk scoring
+and deploy-gate decisions, plus a log of real deployments and their
+post-deploy monitoring.
+
+**How to reach it:** Sidebar → Quality & Ops → "CI / CD".
+
+**Role visibility:** **No role-based hiding**, same recurring pattern as
+Groups 2–3. Backend reality (confirmed by grep of `cicd.py`):
+`POST /cicd/commits/{id}/approve` and `/reject` are both role-gated
+(Owner/Admin only) — the Commits tab shows Approve/Reject buttons to every
+role identically; a Data Engineer/Data Analyst/Viewer sees them, can click
+them, and gets a real `403` surfaced as the generic "Failed to approve/reject
+deployment." toast.
+
+**Interactive elements:**
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| (on load) | — | `GET /cicd/status/summary`, `GET /cicd/commits?limit=20`, `GET /cicd/deployments?limit=20` — all three ungated, any role | Populates the 4 summary cards (Pipeline Health, Active Deployments, Rollbacks, Pending Approvals) and both tabs | — |
+| Tabs: Commits / Deployments | Click | Client-side only | — | — |
+| Commits tab — "Approve" button (shown only when `gate_decision === "pending_approval"`) | Click | `POST /cicd/commits/{id}/approve` — **role-gated, see above** | "Deployment approved and queued." toast, summary + both tabs' data all refetch | "Failed to approve deployment." toast |
+| Commits tab — "Reject" button (same visibility condition) | Click | `POST /cicd/commits/{id}/reject` — **role-gated** | "Deployment rejected." toast, everything refetches | "Failed to reject deployment." toast |
+| Deployments tab | — | Read-only table (status, monitoring active/closed, post-deploy run count, failure count, deployed-at) | — | — |
+
+**Empty states:** No commits yet → "No commits yet — Commits arrive via the
+GitHub webhook when a pipeline definition file changes." No deployments yet →
+"No deployments yet — Deployments appear here once a commit is approved and
+deployed."
+
+**Known issues:**
+- Role-gated Approve/Reject with no frontend hiding — consistent with the
+  pattern documented in Group 2.
+- **NEW FINDING**: the backend exposes `PATCH /cicd/incidents/{incident_id}/resolve`
+  (also role-gated, Owner/Admin), for a **separate** incident system
+  (`models.cicd.CICDIncident`, distinct from the general `Incident` model the
+  `/incidents` screen manages — see `CLAUDE.md`'s note that "two different
+  'incident' systems exist in this codebase"). **No screen anywhere in this
+  app calls this endpoint** — grepped the entire `lib/api.ts` for any
+  `cicd/incidents` reference; there is none. Whatever this endpoint is for
+  is currently only reachable by a direct API call, not through any UI.
+- The 4-card summary's "Pending Approvals" count reflects only CI/CD gate
+  decisions (via `GET /cicd/status/summary`) — it is a **different number**
+  from the Dashboard's "Pending Approvals" KPI (which reflects only the
+  PolicyEngine queue) and from the dedicated Approvals screen's count (which
+  merges both). Seeing three different "pending approvals" numbers across
+  Dashboard, this screen, and Approvals is expected/correct given what each
+  actually counts, but is easy to misread as an inconsistency.
+
+---
+
+### 17. Approvals — `/approvals`
+
+**File:** `frontend/src/app/(app)/approvals/page.tsx`
+
+**Purpose:** The single merged view of every pending approval in the tenant —
+both general agent/policy-engine actions and CI/CD deployment gates — in one
+list, per the locked Phase 0 design decision to build this as a real backend
+aggregation endpoint rather than a frontend-side merge.
+
+**How to reach it:** Sidebar → Quality & Ops → "Approvals".
+
+**Role visibility:** **No role-based hiding**, same pattern again. Both
+underlying actions this screen can trigger are role-gated: `POST
+/approvals/{id}/approve`/`/reject` (inline check in `approvals.py`, not the
+shared `require_role` dependency, but functionally identical — Owner/Admin
+only) for `source: "policy_engine"` items, and `POST
+/cicd/commits/{id}/approve`/`/reject` (Owner/Admin) for
+`source: "cicd_deployment"` items. Every role sees identical Approve/Reject
+buttons on every row regardless of which source it is.
+
+**Interactive elements:**
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| (on load) | — | `GET /approvals/merged` | Lists every pending item from both queues, newest first, each tagged with a "Source" badge ("Agent Action" or "CI/CD Deployment") and a real risk-level badge | — |
+| Table row — "Approve" button | Click | Routed by the item's own `source` field: `POST /cicd/commits/{id}/approve` if `cicd_deployment`, else `POST /approvals/{id}/approve` — **the frontend never invents its own mutation path, it always defers to whichever real endpoint owns that item, per the locked design** | "Approved." toast, list refetches | "Failed to approve." toast (generic, same for either underlying source or a role 403) |
+| Table row — "Reject" button | Click | Same routing logic, reject variant | "Rejected." toast, list refetches | "Failed to reject." toast |
+
+**Empty states:** Nothing pending → "Nothing pending approval — Agent actions
+and CI/CD deployments that need a human sign-off will show up here."
+
+**Known issues:**
+- Role-gated actions with no frontend hiding — same recurring pattern.
+- This list deliberately excludes one specific category of stuck/orphaned
+  item by design (`policy_engine` requests with `action_name ==
+  "cicd_pipeline_deployment"`, a historical double-booking bug — see
+  `CLAUDE.md`'s now-`[RESOLVED]` "CI/CD high-risk commits double-book their
+  approval" row) — confirmed still present and correctly commented in the
+  current backend code, not a live bug today.
+
+---
+
+### 18. Analytics — `/analytics`
+
+**File:** `frontend/src/app/(app)/analytics/page.tsx` — renders the shared
+`StubPage` component only, with `phase={undefined}` (same generic stub
+message as Automations).
+
+**Purpose:** None yet, as its own dedicated screen. **This is a real gap
+worth being precise about**: a `GET /api/v1/analytics` endpoint (plus
+`/analytics/quality` and `/analytics/recent-runs`) genuinely exists and is
+real, live-verified, tenant-scoped data — but it is only ever consumed by the
+**Dashboard** screen (Group 2), not by this dedicated Analytics screen. A
+user clicking the sidebar's "Analytics" item expecting a deeper/different
+analytics view than the Dashboard's KPI cards gets an empty stub instead.
+
+**How to reach it:** Sidebar → Analytics → "Analytics".
+
+**Role visibility:** N/A — static stub.
+
+**Interactive elements:** None.
+
+**Empty states:** Entire screen is the stub message.
+
+**Known issues:** Unbuilt. Not called out as a launch-blocking gap in either
+`CLAUDE.md` or `FRONTEND_BUILD_PLAN.md`'s Coming-Soon list (which names only
+Automations, the 5 locked AI Employees, and Governance's Compliance tab) —
+**NEW FINDING**: this screen appears to be an unremarked gap, not a
+consciously-scoped Coming Soon item like the other three stubs in this group.
+
+---
+
+### 19. Audit Logs — `/audit`
+
+**File:** `frontend/src/app/(app)/audit/page.tsx` — renders the shared
+`StubPage` component only.
+
+**Purpose:** None yet, as its own dedicated screen. **Same shape of gap as
+Analytics**: a real, working audit trail already exists and is fully wired up
+— but only inside **Governance's "Audit Log" tab** (Group 3), which reads the
+exact same `GET /governance/audit` endpoint. The sidebar's separate,
+top-level "Audit Logs" item (under the Admin section) is unrelated to that
+tab and is just an empty stub.
+
+**How to reach it:** Sidebar → Admin → "Audit Logs".
+
+**Role visibility:** N/A — static stub.
+
+**Interactive elements:** None.
+
+**Empty states:** Entire screen is the stub message.
+
+**Known issues:** **NEW FINDING**: this creates a real, confusing duplication
+in the sidebar — two differently-labeled nav items ("Governance" and "Audit
+Logs") where only one of them (Governance's third tab) actually shows the
+real audit trail, and the other is a dead end. A user who specifically wants
+"the audit log" has no way to know, without trial and error, that the working
+version is one tab inside a differently-named screen.
+
+---
+
 ## Progress tracker
 
 - [x] **Group 1: Landing & Authentication** — Landing, Login, Signup, Google
@@ -868,7 +1059,17 @@ alongside `["contracts"]`).
       Governance are both fully ungated by role, matching their backend code.
       One UNVERIFIED item: whether resolved incidents remain in the
       Incidents list indefinitely or only briefly.
-- [ ] Group 4: Automations, CI/CD, Approvals, Analytics, Audit
+- [x] **Group 4: Automations, CI/CD, Approvals, Analytics, Audit.** Automations
+      is a documented, intentional Coming Soon stub. New findings logged (not
+      fixed): Analytics and Audit Logs are *undocumented* stubs — real,
+      working equivalents of both already exist (Dashboard for analytics,
+      Governance's Audit Log tab for the audit trail) but the sidebar's
+      dedicated top-level items for them are dead ends, which is confusing
+      and not called out anywhere as a known Coming Soon item; CI/CD's
+      `PATCH /cicd/incidents/{id}/resolve` endpoint has no frontend caller at
+      all; the same role-gated-but-unhidden button pattern from Groups 2–3
+      continues on CI/CD and Approvals.
+- [ ] Group 5: AI Employees, Chat
 - [ ] Group 5: AI Employees, Chat
 - [ ] Group 6: Team, Billing, Settings (5 tabs)
 - [ ] End-to-end user flows
