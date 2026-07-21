@@ -1183,6 +1183,170 @@ tool calls yet this session → "No tools called yet."
 
 ---
 
+## Screens — Group 6: Team, Billing, Settings
+
+*Files read for this group: `frontend/src/app/(app)/team/page.tsx`,
+`frontend/src/app/(app)/billing/page.tsx`, `frontend/src/app/(app)/settings/page.tsx`,
+`frontend/src/lib/{api,theme}.ts`, `backend/api/v1/{team,billing,settings}.py`.
+These three screens (Phase 17) are the only ones in the app where the frontend's
+role-based hiding was built to deliberately mirror the backend's real role
+gates — a useful contrast to every screen in Groups 2–5, which show every
+control to every role regardless of what the backend actually allows.*
+
+### 22. Team — `/team`
+
+**File:** `frontend/src/app/(app)/team/page.tsx`
+
+**Purpose:** View the member roster, invite new teammates, change roles,
+remove members, and manage pending invites.
+
+**How to reach it:** Sidebar → Admin → "Team".
+
+**Role visibility:** **Real, deliberate role-based hiding**, unlike every
+screen in Groups 2–5. `canManage` (`role === "owner" || "admin"`, read from
+the decoded JWT) gates:
+- The "+ Invite Member" button — entirely absent for Data Engineer/Data
+  Analyst/Viewer, not just disabled.
+- The "Pending Invites" card — not rendered at all for non-managers, and its
+  underlying query (`GET /team/invites`) is never even fired for them
+  (`enabled: canManage`) — matches the backend's own restriction of that
+  endpoint to Owner/Admin exactly.
+- Per-member role editing — non-managers see a plain read-only badge instead
+  of the `<Select>`; the "Actions" column (Remove button) is omitted
+  entirely for them.
+Every role, including Viewer, can still see the member roster itself
+(name/email/role/status/joined) — matches `GET /team/members` being ungated
+for any authenticated tenant member.
+
+**Interactive elements:**
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| "+ Invite Member" button (Owner/Admin only) | Click | Opens the invite modal | — | — |
+| Modal — Email + Role `<Select>` (defaults to Viewer) + "Send Invite" (disabled until email is non-empty) | Click | `POST /team/invites` `{email, role}` | The modal **does not close** — it switches to showing the created invite's manually-shareable link (`{origin}/invite/accept?token=...`), with an explicit note that Resend's sandbox can only actually deliver to the workspace owner's own address today, so this link may need to be shared by hand. A "Done" button closes it. | Danger toast with the real backend message (e.g. "This email is already a member of this workspace") |
+| Member row — role `<Select>` (Owner/Admin only; disabled + tooltip if blocked) | Select | `PATCH /team/members/{id}/role` `{role}` — blocked (disabled, with the real reason as a tooltip) when: the target is an Owner and the caller isn't ("Only an owner can change an owner's role"), or the target is the last active Owner ("Cannot demote the last owner") — these client-side checks are computed from the same roster data already on the page and mirror the backend's actual guard, not an invented stricter rule | "Role updated." toast, roster refetches | Danger toast with the real backend error message (this mutation's error handler does surface `ApiError`'s real message, unlike most other screens' generic toasts) |
+| Member row — "Remove" button (Owner/Admin only, shown only for currently-active members; disabled + tooltip if blocked) | Click | `DELETE /team/members/{id}` — **no confirmation dialog**, immediate. Blocked (disabled+tooltip) when: it's the caller's own row ("You can't remove yourself"), the target is an Owner and the caller isn't, or the target is the last active Owner. | "Member removed." toast, roster refetches — the row is **not** deleted from the table, it flips to a gray "Removed" status badge and its Actions disappear (soft-removal, matches the backend's `is_active=False`, not a hard delete) | Danger toast with the real backend message |
+| Pending Invites row — "Revoke" button (shown only while `status === "pending"`) | Click | `DELETE /team/invites/{id}` | "Invite revoked." toast, list refetches | Generic "Failed to revoke invite." toast (this one does *not* surface the backend's real message, unlike the role/remove mutations above) |
+
+**Empty states:** The member roster is never empty (every tenant has at least
+one member). Pending Invites (managers only) with zero invites ever created →
+"No invites yet."
+
+**Known issues:** None beyond the already-documented, cross-referenced gap
+that a removed member's still-valid JWT keeps working until it naturally
+expires (`CLAUDE.md` Known-broken, "Removed/demoted team members keep full
+access...") — this screen's own soft-removal behavior (row goes gray,
+Actions disappear) is correct and working exactly as designed; the gap is in
+session/token handling elsewhere, not in anything this screen does wrong.
+
+---
+
+### 23. Billing — `/billing`
+
+**File:** `frontend/src/app/(app)/billing/page.tsx`
+
+**Purpose:** View the current plan and this month's usage against its
+limits, and (Owner/Admin) change plans.
+
+**How to reach it:** Sidebar → Admin → "Billing".
+
+**Role visibility:** Plan name and all 4 usage bars are visible to every
+role (`GET /billing/usage` and `GET /billing/plan` are both ungated). The
+plan-change `<Select>` + "Confirm change" control, and the exceeded-limit
+warning beneath it, only render for Owner/Admin (`canManage`) — matches
+`POST /billing/change-plan` being role-gated server-side.
+
+**Interactive elements:**
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| "Change plan" `<Select>` (Owner/Admin only) | Select | Client-side only — populated from the real `GET /billing/plans` (public endpoint, not a hardcoded list, unlike the Settings AI Model tab) | If the newly-selected plan's real limits would already be exceeded by the tenant's *current* usage, a red warning appears immediately (computed client-side from data already loaded, no extra call): "Your current usage already exceeds {plan}'s limits for: {resources}. The change will still go through — existing usage is grandfathered, but any new usage of these will be blocked until you're back under the limit." **This is an honest reflection of real backend behavior, not an invented client-side rule** — the backend genuinely allows the downgrade unconditionally (see `CLAUDE.md`'s "`POST /billing/change-plan` executes real, unconditional plan changes..." Known-broken row) and this banner does not disable the Confirm button. | — |
+| "Confirm change" button (disabled while pending, no plan selected, or the selection matches the current plan) | Click | `POST /billing/change-plan` `{plan}` | "Plan changed to {Name}." toast; both the plan card and usage bars refetch | Danger toast with the real backend message |
+| Usage bars (4: AI Credits, Pipeline Runs, Data Sources, Team Members) | — | Read-only, from the already-fetched usage data. Colored by the backend's own real `status` field (`ok`→green, `warning`→yellow, `exceeded`→red) — **not recomputed client-side from the raw numbers**. A `null` limit (Scale tier's unlimited resources) shows "· Unlimited" and a full/inert bar rather than a percentage. | — | — |
+| "Checkout & invoices" section | — | Fully static, zero API calls, zero fabricated data: "Coming soon — Stripe billing isn't wired up yet." | — | — |
+
+**Empty states:** N/A — plan and usage data always exist for a real tenant.
+
+**Known issues:** This screen's own copy is unusually transparent about a
+real, already-documented backend gap rather than hiding it: the plan card
+states outright "Plan changes take effect immediately — there's no payment
+step yet (dev mode). This will change before launch," and the
+exceeded-limit warning (above) discloses the unconditional-downgrade
+behavior honestly instead of pretending to block it. See `CLAUDE.md`'s
+Known-broken table for the two underlying gaps this screen is being honest
+about: no payment gate at all, and no usage-based downgrade block.
+
+---
+
+### 24. Settings — `/settings`
+
+**File:** `frontend/src/app/(app)/settings/page.tsx`
+
+**Purpose:** Five tabs — Workspace (name/timezone/description), Notifications
+(Slack/email alert routing), AI Model (per-tenant LLM override), Theme
+(per-user light/dark/system), and API Keys (CRUD for platform API keys that
+don't yet authenticate anything).
+
+**How to reach it:** Sidebar → Admin → "Settings".
+
+**Role visibility:** Mixed per tab, and correctly reflected in the UI:
+- **Workspace, Notifications, AI Model**: read-only for Data Engineer/Data
+  Analyst/Viewer (real current values shown, every input `disabled`, no Save
+  button rendered, an explicit "Only owners and admins can change this — you
+  have read-only access." notice) — matches `PATCH /settings/` being
+  Owner/Admin-gated.
+- **API Keys**: fully hidden behind a message ("Only owners and admins can
+  view or manage API keys.") for other roles — and unlike the read-only
+  pattern above, the underlying list query (`GET /api-keys/`) is never even
+  fired for them (`enabled: canManage`), matching that endpoint being
+  Owner/Admin-only server-side, not just its mutations.
+- **Theme**: **no role gating at all** — every role can change their own
+  theme, since it's a personal preference (`PATCH /auth/me` has no role
+  requirement).
+
+**Interactive elements:**
+
+*Workspace tab:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| Name / Timezone / Description inputs | Type (managers only — disabled otherwise) | — | — | — |
+| "Save" button (managers only, disabled if saving or Name is empty) | Click | `PATCH /settings/` `{name, timezone, description}` | "Settings saved." toast, settings refetch (shared query backing this + Notifications + AI Model tabs) | "Failed to save settings." toast |
+
+*Notifications tab:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| Slack webhook URL / Alert email inputs, 4 "Notify on" checkboxes (Incident created / Pipeline failed / Deployment failed / Approval required) | Type/toggle (managers only) | — | — | — |
+| "Save" button (managers only) | Click | `PATCH /settings/` `{notification_prefs: {slack_webhook_url, alert_email, notify_on}}` — **always sends the complete current state of all 4 toggles and both fields, not just what changed**; the backend's own deep-merge logic (documented in `CLAUDE.md` as handling a genuinely partial update correctly) is never actually exercised by this specific caller, since this form never sends a partial object | "Settings saved." toast, settings refetch | "Failed to save settings." toast |
+
+*AI Model tab:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| Model `<Select>` ("Use plan default" / "Gemini 3.5 Flash" / "Llama 3.3 70B (Groq)") | Select (managers only) | This 2-entry list is hardcoded client-side, deliberately kept in manual sync with the backend's `SUPPORTED_MODEL_OVERRIDES` — already tracked as a known drift risk in `CLAUDE.md`'s Known-broken table, not a new finding here | — | — |
+| "Save" button (managers only) | Click | `PATCH /settings/` `{ai_model_override: value \|\| null}` | "Settings saved." toast, refetch | "Failed to save settings." toast |
+
+*Theme tab (no role gate):*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| Light / Dark / System buttons (highlighted button reflects the current preference) | Click | Applies the new theme to the page **immediately and optimistically** (DOM attribute + `localStorage`) *before* the network call resolves, then `PATCH /auth/me` `{theme}` | "Theme updated." toast; the highlighted button updates to match (state only actually updates in the success handler) | "Failed to save theme preference." toast. **NEW FINDING**: because the theme was already applied optimistically before the call was even made, a failed save leaves the page visibly rendering the new theme (and `localStorage` already holding it) while the highlighted button reverts to reflecting the old value once `onError` — or doesn't update at all, since only `onSuccess` calls `setPref` — leaving the button selection and the actually-rendered theme out of sync until the next full reload. On that reload, the `(app)` shell's own server-reconciliation effect would pull the *old* value back from `GET /auth/me` (since the save never actually persisted), silently overwriting the just-applied `localStorage` choice back to the previous theme — a subtle, self-correcting-on-reload inconsistency, not a persistent bug. |
+| "Currently rendering: Light/Dark" text | — | Read-only, resolves "System" to the OS's actual current preference via `matchMedia` for display purposes only | — | — |
+
+*API Keys tab (managers only; others see a single restricted-access message):*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| Explanatory text | — | States plainly: "API keys are for reference and audit today — nothing in AXIOM currently accepts one as a request credential. Authenticating requests with a key is planned but not yet built." — matches the real, current backend capability exactly (`CLAUDE.md`'s Not-yet-built list), no oversold copy | — | — |
+| Key name input + "Create" button (disabled if empty) | Click | `POST /api-keys/` `{name}` | Opens a modal showing the real raw secret **exactly once**, with an explicit "won't be shown again" warning, a "Copy" button (writes to the clipboard), and "Done." The raw key lives only in local component state (`revealedKey`) — never written into the React Query cache, never logged, reset to `null` the moment the modal closes. List refetches in the background (masked shape only, `key_prefix`/timestamps, never the raw key). | "Failed to create API key." toast |
+| Key row — "Revoke" button (shown only if not already revoked) | Click | `DELETE /api-keys/{id}` — no confirmation dialog | "Key revoked." toast, list refetches, row shows a gray "Revoked" badge in place of the button | "Failed to revoke key." toast |
+
+**Empty states:** API Keys tab with none created yet → "No API keys yet."
+Other tabs always have real current values to show (even if blank/unset).
+
+**Known issues:**
+- The Theme tab's optimistic-apply-before-confirm race (**NEW FINDING**,
+  above) — minor and self-correcting, but real.
+- AI Model allowlist drift risk — already tracked in `CLAUDE.md`, not new.
+- API Keys' honest "not yet a real credential" copy is a positive example,
+  not an issue — noted for contrast with less careful copy elsewhere.
+
+---
+
 ## Progress tracker
 
 - [x] **Group 1: Landing & Authentication** — Landing, Login, Signup, Google
@@ -1229,7 +1393,17 @@ tool calls yet this session → "No tools called yet."
       bookkeeping gap class as the two already cleaned up pre-walkthrough.
       Confirmed the WS chat auth gap, while real, is unreachable from any
       actual product screen.
-- [ ] Group 6: Team, Billing, Settings (5 tabs)
+- [x] **Group 6: Team, Billing, Settings (5 tabs).** All screens documented.
+      These three (Phase 17) are the only screens in the app that correctly
+      mirror backend role gates in the UI — a real, positive contrast to
+      Groups 2–5's recurring pattern. One new finding: Settings' Theme tab
+      applies a new theme optimistically (DOM + localStorage) before its
+      `PATCH /auth/me` call resolves; on a failed save the button highlight
+      and the actually-rendered theme can go out of sync until the next
+      reload, which silently reverts to the server's old value. Billing's own
+      copy is unusually transparent about its two known backend gaps (no
+      payment gate, no usage-based downgrade block) rather than hiding them.
+      **All 24 screens are now documented — screen coverage is complete.**
 - [ ] End-to-end user flows
 - [ ] Glossary
 - [ ] Role-permission matrix
