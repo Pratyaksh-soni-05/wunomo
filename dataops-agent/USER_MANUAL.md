@@ -1036,6 +1036,153 @@ version is one tab inside a differently-named screen.
 
 ---
 
+## Screens — Group 5: AI Employees, Chat
+
+*Files read for this group: `frontend/src/app/(app)/ai-employees/page.tsx`,
+`frontend/src/lib/employees.ts`, `frontend/src/components/shared/EmployeeCard.tsx`,
+`frontend/src/app/(app)/chat/page.tsx`,
+`frontend/src/components/chat/{SessionList,MessageThread,ContextPanel,ToolCallBlock,useSavedPrompts}.tsx`,
+`frontend/src/lib/api.ts`, `backend/api/v1/chat.py`, `backend/agent/personality.py`
+(plus a grep of `backend/agent/` for any `role` check, and of the frontend for any
+WebSocket usage).*
+
+### 20. AI Employees — `/ai-employees`
+
+**File:** `frontend/src/app/(app)/ai-employees/page.tsx` +
+`frontend/src/lib/employees.ts` + `frontend/src/components/shared/EmployeeCard.tsx`
+
+**Purpose:** A 6-tile roster page — AXIOM (real, active) plus 5 honestly
+locked "Coming Soon" employees (LEDGER, DEPLOY, INSIGHT, SENTINEL, PULSE).
+
+**How to reach it:** Sidebar → Workspace → "AI Employees".
+
+**Role visibility:** N/A — purely static content, no API calls of any kind
+(the roster data is a hardcoded local module, `lib/employees.ts`, shared
+verbatim with the landing page's roster section so the two can't drift).
+
+**Interactive elements:**
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| AXIOM tile's "Open AXIOM →" button | Click | Navigates to `/chat` | — | — |
+| 5 locked tiles | — | Non-interactive — each shows a translucent "Coming Soon" overlay badge over the card, no button, no click target | — | — |
+
+**Empty states:** N/A — always renders all 6 tiles.
+
+**Known issues:** None — this screen matches its own documented, intentional
+scope exactly (`CLAUDE.md` Phase 18: no waitlist button, no marketplace
+button, no per-tile pricing, all deliberate).
+
+---
+
+### 21. AXIOM Chat — `/chat`
+
+**File:** `frontend/src/app/(app)/chat/page.tsx` +
+`frontend/src/components/chat/{SessionList,MessageThread,ContextPanel,ToolCallBlock,useSavedPrompts}.tsx`
+
+**Purpose:** The real 3-panel conversational interface to AXIOM, the one
+active AI employee — send messages, see real tool calls it executes against
+the tenant's real data, and manage saved prompts/session history.
+
+**How to reach it:** Sidebar → Workspace → "AXIOM" (badge: "Live"). Also: the
+AXIOM FAB (floating button, visible on every other authenticated screen, hides
+itself here), Dashboard's "Ask AXIOM" button and AXIOM Activity card, AI
+Employees' "Open AXIOM →" tile CTA, the landing page's AXIOM tile CTA when
+logged in.
+
+**Role visibility:** `POST /api/v1/chat/` has **no role gate at all** — it is
+only gated by `enforce_quota("ai_credits")` (blocks on the tenant's plan
+credit limit, not on who's asking). `GET /chat/sessions` and
+`GET /chat/sessions/{id}/history` are likewise ungated. **Every role,
+including Viewer, can converse with AXIOM freely (subject to quota).**
+
+**NEW FINDING, significant**: the tools AXIOM calls on a user's behalf are
+gated **only by `operation_mode` and a hardcoded per-tool risk tier
+(`personality.py`'s `RISK_ACTIONS`)** — never by the calling user's `role`.
+Grepping the entire `backend/agent/` tree for any `role` check found none
+(the single unrelated hit is a chat-message-role field, not a user role).
+This matters because tool execution calls the same underlying service-layer
+functions the REST endpoints call, **in-process, not through this app's own
+role-gated REST API** — so a Viewer chatting with AXIOM under
+`operation_mode: autonomous` could have AXIOM successfully execute an action
+(e.g. triggering a pipeline run, requesting an approval, generating a report)
+that the exact same Viewer would get a real `403` for if they tried it
+directly through this app's own screens. This compounds with an already-
+documented bug: `RISK_ACTIONS`'s `"high"` tier lists four tool names
+(`delete_records`, `drop_table`, `modify_schema`, `revoke_access`) that
+**aren't real registered tools at all** (see `CLAUDE.md`'s "Phantom high-risk
+tools" row) — so in practice almost every real tool resolves to `medium` or
+`low` risk, and `autonomous` mode (which only routes literal `high`-risk
+calls through approval) ends up approving nearly everything automatically,
+regardless of who's asking.
+
+**Interactive elements:**
+
+*Left panel — Session List:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| "+ New Chat" button | Click | Client-side only — clears the local message thread, draft, attached context, and active session ID. Does **not** call the backend; the previous conversation isn't deleted, just deselected. | — | — |
+| A session row in "Recent" | Click | `GET /chat/sessions/{id}/history` | Loads that session's full real message history (including its real tool-call trace) into the thread | "Failed to load conversation history." toast |
+| A "Saved Prompts" entry | Click | Client-side only — replaces (not appends to) the current draft text with the saved prompt's text | — | — |
+| Saved prompt's "✕" remove button | Click | Client-side only, removes it from `localStorage` | — | — |
+| "+ Save current draft" (disabled when the draft is empty) | Click | Client-side only, appends the current draft text to `localStorage` | — | — |
+
+Saved prompts are stored in `localStorage` under a per-tenant key
+(`axiom_saved_prompts_{tenantId}`) — **personal to the browser they were
+saved in, not synced across devices, and not shared with teammates**, even
+though they visually sit right next to session history.
+
+*Middle panel — Message Thread:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| Personality mode `<Select>` (Engineer/Founder/Analyst/Auditor) | Select | Client-side only, sent as `personality_mode` on the *next* message — changes the system prompt's tone/verbosity going forward; does not retroactively affect already-rendered messages | — | — |
+| Operation mode `<Select>` (Advisory/Assisted/Autonomous/Audit) | Select | Client-side only, sent as `operation_mode` on the *next* message — see the approval-gating explanation above and in "Glossary"/"End-to-end flows" below | — | — |
+| Message textarea | Type | Enter sends (unless Shift+Enter, which inserts a newline); disabled while a send is in flight | — | — |
+| "Send" button (disabled while empty or sending) | Click | `POST /api/v1/chat/` `{message, session_id?, personality_mode, operation_mode, context?}` | Real assistant response appended to the thread, along with its real tool-call trace (each rendered as a collapsible `ToolCallBlock`); the header's status line updates to "Ready · last reply via {provider}" (the real LLM provider that served this specific reply — `gemini` or `groq` — surfaced transparently to the user); if this was a brand-new conversation, the newly-assigned `session_id` is captured so the next message continues the same thread; the session list on the left refetches so the (possibly new) session appears there | Two distinct inline+toast messages depending on failure type: a real backend error → "AXIOM couldn't complete that request — it may have tried an action it couldn't format correctly. Try rephrasing, or try again."; a network-level failure (can't reach the backend at all) → "Couldn't reach AXIOM. Check your connection and try again." **The user's own just-sent message is never rolled back or removed on failure** — it stays visible in the thread either way. |
+| 5 "Quick Prompt" buttons (fixed suggestions: "List my data sources", "Show failed pipeline runs", "Run quality checks on a pipeline", "List open incidents", "Generate a status report") | Click | Client-side only — inserts the prompt text into the draft. **Does not send automatically** — the user still has to press Enter or click Send. | — | — |
+| Attached-context chip's "✕" (shown only when a source is attached) | Click | Client-side only, clears `attachedContext` | — | — |
+| Assistant message text | — | Rendered via a small hand-rolled formatter: HTML-escapes the raw text first (`&`, `<`, `>`), *then* converts `**bold**` to `<strong>` and newlines to `<br>` before injecting via `dangerouslySetInnerHTML` — the escape-first ordering means AXIOM's own response text cannot inject arbitrary HTML/script tags into the page even though `dangerouslySetInnerHTML` is used. | — | — | — |
+| A `ToolCallBlock` header (tool name + "Completed"/"Needs approval" badge) | Click | Client-side only — expands/collapses to show the real raw `Arguments` (JSON) and `Result` (pretty-printed JSON, or the raw string if it isn't valid JSON) for that specific tool call | — | — |
+| A blocked tool call's approval notice (shown only when the tool call's `status` is `blocked_pending_approval`) | — | Displays the real risk level and reason (when the backend supplied them) inline, plus a "Approvals screen" link | Click navigates to `/approvals` | — |
+
+*Right panel — Context Panel:*
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| "Attach a source…" `<Select>` (shown only when nothing is currently attached) | Select | Client-side only — stores `{source_id, source_name}`, sent as `context` on the *next* message. The backend genuinely reads this to inject the source into AXIOM's system prompt (confirmed real, not decorative, per `CLAUDE.md`'s Phase 10 verification). When nothing is attached, an explicit note clarifies: "AXIOM will still use its tools, this just hints which source you mean." | — | — |
+| Attached-context chip's "✕" | Click | Client-side only, clears the attachment | — | — |
+| "Tool Calls This Session" log | — | Read-only, aggregates every tool call across every message already loaded into the thread, reusing the same `ToolCallBlock` component as the inline per-message rendering — **seeing a tool name appear twice on screen (once inline, once here) is correct-by-design, not a duplication bug** (per `CLAUDE.md`'s own note on this exact point) | — | — |
+
+**Empty states:** No messages in the current thread yet (and not currently
+sending) → "Ask AXIOM anything" + explanatory text. No saved sessions yet →
+"No conversations yet." No saved prompts yet → "No saved prompts yet." No
+tool calls yet this session → "No tools called yet."
+
+**Known issues:**
+- The role-bypass finding above (**NEW FINDING**) — this is the single most
+  consequential access-control gap surfaced anywhere in this document.
+- The already-documented "Phantom high-risk tools" bug (`CLAUDE.md`
+  Known-broken) directly affects how much this screen's Autonomous mode
+  actually gates in practice — see above.
+- **NEW FINDING**: `CLAUDE.md`'s Known-broken table still carries an open row
+  titled "`request_approval` tool is broken" (claiming
+  `PolicyEngine.request_approval()` doesn't exist) — but a *later* row in the
+  same table ("22-site tool punch list — `governance_tools.py`") describes
+  this exact tool being fixed (redirected to the real `create_request()`
+  method) and **live-verified**, including a real `ApprovalRequest` row being
+  created through it. This looks like the same class of stale-row
+  bookkeeping gap already caught and partially cleaned up in this project's
+  own Phase 19 pre-walkthrough session (two other rows were marked
+  `[RESOLVED]` then) — this third one appears to have been missed. Not fixed
+  here, logged for the same triage.
+- The severe, already-documented WebSocket auth gap (`WS /ws/chat/{tenant_id}/{session_id}`,
+  no JWT check at all) is real but **not reachable through this screen or any
+  other part of the actual product UI** — grepped the entire frontend for any
+  WebSocket usage and found none; this screen (and the whole app) only ever
+  uses the REST `POST /chat/` endpoint. The WS route is exposed by the
+  backend but dormant from the product's own perspective — still a real gap
+  if hit directly, just not one a normal user path can trigger.
+
+---
+
 ## Progress tracker
 
 - [x] **Group 1: Landing & Authentication** — Landing, Login, Signup, Google
@@ -1069,8 +1216,19 @@ version is one tab inside a differently-named screen.
       `PATCH /cicd/incidents/{id}/resolve` endpoint has no frontend caller at
       all; the same role-gated-but-unhidden button pattern from Groups 2–3
       continues on CI/CD and Approvals.
-- [ ] Group 5: AI Employees, Chat
-- [ ] Group 5: AI Employees, Chat
+- [x] **Group 5: AI Employees, Chat.** AI Employees matches its documented
+      scope exactly, no findings. Chat has the single most consequential
+      finding in this document (**NEW**): AXIOM's tool-calling path is gated
+      only by `operation_mode` + a hardcoded risk tier, never by the calling
+      user's role — a Viewer can have AXIOM execute, via chat, actions the
+      same Viewer would be 403'd on through the normal UI, compounded by the
+      already-documented "phantom high-risk tools" bug that leaves Autonomous
+      mode gating almost nothing in practice. Also found a second stale
+      Known-broken row in `CLAUDE.md` (`request_approval` tool marked broken
+      but actually fixed and live-verified later in the same table) — same
+      bookkeeping gap class as the two already cleaned up pre-walkthrough.
+      Confirmed the WS chat auth gap, while real, is unreachable from any
+      actual product screen.
 - [ ] Group 6: Team, Billing, Settings (5 tabs)
 - [ ] End-to-end user flows
 - [ ] Glossary
