@@ -356,6 +356,16 @@ skeleton placeholder bars instead of the form.
   Team screen's create-invite response, which is how this project's own live
   verification worked around it), but the emailed link itself is broken. Not
   fixed here, per this document's own rule — logged for the Phase 19 triage.
+  **Resolved: checked whether any other generated link in the app shares this
+  flaw — it does not, because there is no "any other."** Grepped the entire
+  backend for `APP_CORS_ORIGINS` (the setting `_invite_link()` uses to build
+  its base URL): the only two hits are `config.py`'s own declaration and this
+  one call site in `team_service.py`. `_invite_link()` is the **only**
+  backend-generated frontend link anywhere in this codebase — the wrong-path
+  bug is isolated to this single function, not a systemic pattern repeated
+  elsewhere. (The Google OAuth `redirect_uri` is a separately-configured,
+  unrelated env var, not built by this same mechanism, and was not found to
+  have an equivalent path mismatch.)
 
 ---
 
@@ -498,13 +508,17 @@ the generic "Failed to delete source." toast (no status-code branching in the
   that endpoint at all.** There is no file-upload control anywhere on this
   screen; a CSV/Excel source created here requires the operator to already
   know a real server-side file path to type into the JSON textarea by hand.
-  **NEW FINDING**: this screen has no UI path to actually upload a file — the
-  only way to get a real, working CSV/Excel source registered today is either
-  hand-typing a path to a file already present on the server's filesystem
-  (not realistic for an end user), or calling `POST /uploads/register`
-  directly (no frontend page calls this endpoint at all — **UNVERIFIED**
-  whether any other screen in this app exposes a file-picker wired to it; not
-  found in Sources, Catalog, or Pipelines).
+  **NEW FINDING, launch-blocking**: this screen has no UI path to actually
+  upload a file — the only way to get a real, working CSV/Excel source
+  registered today is either hand-typing a path to a file already present on
+  the server's filesystem (not realistic for an end user), or calling
+  `POST /uploads/register` directly. **Resolved, not just suspected**:
+  grepped every `.tsx` file under `frontend/src` for `uploads` — zero matches
+  anywhere in the entire frontend. No screen in this app — not Sources, not
+  Catalog, not Pipelines, not anywhere — calls `POST /uploads/register` or
+  exposes a file picker at all. A first-time user cannot add a real CSV or
+  Excel source (2 of the 6 source types this screen itself advertises)
+  through this product's UI today, full stop.
 - Role-gated Delete with no frontend hiding — see Role visibility above.
 - No delete confirmation dialog — a misclick deletes a source immediately
   (cascades to any pipelines/runs depending on it per the backend's own
@@ -607,10 +621,38 @@ Backend reality, confirmed by grep across `api/v1/*.py`:
   500s) — only the missing frontend confirmation step before firing the
   delete is a new finding here.
 - No client-side cron syntax validation on the Schedule field — a malformed
-  cron string is accepted by this form and sent to the backend as-is;
-  **UNVERIFIED** what the backend does with an invalid cron string (whether
-  it silently never fires, or errors at save time) — not traced further for
-  this document since it's outside the frontend's own behavior.
+  cron string is accepted by this form and sent to the backend as-is.
+  **Resolved**: the backend performs **zero validation at save time either**.
+  Both `POST /pipelines/` (create, with an initial `schedule_cron`) and
+  `PUT /pipelines/{id}/schedule` write the raw string straight into the
+  `schedule_cron` column unconditionally — `DAGManager.set_schedule()` never
+  calls the one real cron parser that exists in this codebase
+  (`modules/orchestration/scheduler.py`'s `_parse_cron()`). That parser only
+  ever runs later, deep inside `Scheduler.register()`, which is a separate
+  code path not directly reachable from this screen at all — and even when it
+  does run, an invalid cron there just silently fails to register
+  (`{"registered": False, "reason": "..."}"`) with **no surfacing back to
+  this UI in any form**. A user can save a nonsense cron string here and get
+  zero feedback, ever, that it will never actually fire. See also the
+  confirmed scheduler crash below — even a *valid* cron doesn't reliably run.
+- **Resolved, confirmed via code read (not just CLAUDE.md's prior "flagged
+  from a static read, not runtime-verified" hedge)**: the already-documented
+  Celery beat argument mismatch is real and will crash on every actual
+  firing, not just a suspicion. `scheduler.py`'s `register()` schedules
+  `services.tasks.execute_pipeline_run` with `"args": [pipeline_id,
+  tenant_id]` (2 positional args) but `tasks.py`'s real signature is
+  `execute_pipeline_run(self, run_id, pipeline_id, tenant_id)` (3 required
+  positional args, `run_id` first) — a scheduled firing passes `pipeline_id`
+  into the `run_id` slot and is missing `tenant_id` entirely, guaranteed to
+  raise `TypeError` the moment Celery beat actually invokes it. Combined with
+  the two points above: **this screen's Schedule field cannot be trusted to
+  do anything reliable today** — an invalid cron gives no feedback, a valid
+  cron isn't validated at save time, and even a correctly-parsed valid cron
+  crashes the task that's supposed to run it. There is also no "next run" or
+  "last scheduled run" indicator anywhere on this screen — the only way to
+  see whether a scheduled pipeline has ever actually fired is the Runs modal,
+  which shows manually-triggered runs identically to (nonexistent) scheduled
+  ones with no way to tell them apart.
 
 ---
 
@@ -778,18 +820,23 @@ incidents identically.
 | Resolve modal — Resolution notes input (required) | Type | — | — | — |
 | Resolve modal — "Mark Resolved" button (disabled until notes are non-empty) | Click | `POST /api/v1/incidents/{id}/resolve` `{resolution_notes}` | "Incident resolved." toast, modal closes, list refetches | "Failed to resolve incident." toast |
 
-**Empty states:** No open incidents → "No incidents — Nothing's on fire.
-Incidents raised by AXIOM or logged manually will show up here." + "+ Log
-Incident" button.
+**Empty states:** Zero incidents of *any* status → "No incidents — Nothing's
+on fire. Incidents raised by AXIOM or logged manually will show up here." +
+"+ Log Incident" button. **Correcting an assumption the empty-state copy
+itself invites**: this is not "no *open* incidents" — see below.
 
-**Known issues:** This screen's list query (`GET /incidents/`) returns *open*
-incidents — **UNVERIFIED** from the frontend code alone whether a resolved
-incident stays visible in this same list immediately after resolving (it
-still appears in the table with status `resolved` and a "—" in place of the
-Resolve button per the code, but whether the backend's underlying query
-continues to include already-resolved incidents indefinitely, or only briefly
-until the next fetch, was not traced into `incidents.py`'s query logic for
-this document).
+**Known issues:** **Resolved (was UNVERIFIED)**: this screen's name and its
+frontend function name (`getOpenIncidents()`) both imply it shows only open
+incidents, but it doesn't. `GET /incidents/` (`incidents.py`) accepts an
+optional `status` query parameter to filter server-side — but the frontend
+never sends one (`authedRequest("/api/v1/incidents/", token)`, no query
+string). **This screen lists every incident regardless of status, newest
+first, up to the backend's default limit of 50** — a resolved incident
+doesn't disappear or get less prominent, it just sits in the table with a
+`resolved` badge and a "—" where the Resolve button used to be, indefinitely,
+identically to how it behaved the moment before resolving. On a tenant with
+more than 50 incidents total, the oldest ones (open or resolved) silently
+fall off the list with no pagination control to reach them.
 
 ---
 
@@ -1536,10 +1583,20 @@ who's asking.
    approval is later granted or rejected — that message's `ToolCallBlock`
    keeps showing "Needs approval" indefinitely in its own history; the real
    outcome is only visible on `/approvals` or wherever the approved action's
-   effect actually shows up (e.g. a newly-created row elsewhere). **UNVERIFIED**:
-   whether asking AXIOM again in the *same* session afterward would surface
-   the now-approved outcome — not traced into the agent graph's session-state
-   handling for this document.
+   effect actually shows up (e.g. a newly-created row elsewhere).
+   **Resolved (was UNVERIFIED) — confirmed no, a re-ask does not surface the
+   outcome, for two independent, compounding reasons**: (1) grepped
+   `PolicyEngine.approve()`/`reject()` (`modules/governance/policy_engine.py`)
+   for any write back to `ChatMessage` — there is none; the original stored
+   `tool_calls` JSON for that message is permanently frozen at
+   `blocked_pending_approval`, never updated after the fact. (2) AXIOM has no
+   tool in its 38-tool inventory (above) that reads approval/execution
+   status at all — asking it "did that get approved?" gives it nothing to
+   call to find out; it can only answer from its own chat history, which
+   still says "blocked." The only ways a user learns the real outcome are
+   checking `/approvals` directly, or independently noticing the approved
+   action's real side effect elsewhere in the app (e.g. a new `DataSource`
+   row appearing on `/sources`).
 
 ---
 
@@ -1634,8 +1691,9 @@ above are actually hidden or disabled in the UI to match this table exactly.
       Execute (Transforms) and Delete (Quality) remain role-gated with no
       frontend hiding, consistent with Group 2's pattern. Incidents and
       Governance are both fully ungated by role, matching their backend code.
-      One UNVERIFIED item: whether resolved incidents remain in the
-      Incidents list indefinitely or only briefly.
+      One item later resolved (see the post-review update below): resolved
+      incidents remain in the Incidents list indefinitely, not briefly — the
+      screen has no status filter applied at all despite its name.
 - [x] **Group 4: Automations, CI/CD, Approvals, Analytics, Audit.** Automations
       is a documented, intentional Coming Soon stub. New findings logged (not
       fixed): Analytics and Audit Logs are *undocumented* stubs — real,
@@ -1677,8 +1735,9 @@ above are actually hidden or disabled in the UI to match this table exactly.
       is always manual, and AXIOM has no tool to create an incident either.
       Flow (e) enumerates all 38 real registered AXIOM tools by domain
       (grepped directly from `agent/tools/*.py`) and walks the approval-gate
-      flow step by step, including one UNVERIFIED item (whether a later
-      chat message reflects an approval granted after the fact).
+      flow step by step, including one item later resolved: a later chat
+      message does **not** reflect an approval granted after the fact —
+      neither the stored message nor any AXIOM tool can learn the outcome.
 - [x] **Glossary.** 15 terms defined, cross-referencing the role/tool
       findings above rather than restating them.
 - [x] **Role-permission matrix.** Built from a direct grep of every
@@ -1687,4 +1746,21 @@ above are actually hidden or disabled in the UI to match this table exactly.
       Billing/Settings are the only screens where the frontend actually
       hides what this table says a role can't do; every other screen shows
       the control anyway and lets the backend's 403 be the only real gate.
-- [ ] Export to PDF
+- [x] **Post-review resolution pass (2026-07-22).** After a full read-through,
+      every remaining UNVERIFIED item in this document was resolved with a
+      real code check (not a guess) and the affected sections updated
+      in place: the Incidents screen's list is confirmed to show every
+      status indefinitely, not just open ones (the screen's own name and
+      function name are misnomers); the Pipelines Schedule field is
+      confirmed to have zero cron validation at save time on top of the
+      already-documented, now-confirmed-not-just-suspected Celery beat
+      argument-count crash; a re-ask in Chat is confirmed not to surface a
+      later-approved outcome, for two independent reasons; and the
+      invite-email wrong-path bug is confirmed to be an isolated,
+      one-function flaw, not a repeated pattern (the only backend-generated
+      frontend link in the whole codebase). These findings, plus this
+      session's full review, feed the merged Phase 19 partition proposal
+      posted alongside this update — see that proposal for prioritization.
+- [ ] Export to PDF — held per explicit instruction until the Phase 19
+      fixes below actually land, to avoid shipping a PDF that goes stale
+      immediately.
