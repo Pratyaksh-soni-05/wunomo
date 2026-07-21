@@ -1347,6 +1347,272 @@ Other tabs always have real current values to show (even if blank/unset).
 
 ---
 
+## End-to-end user flows
+
+*Grounded entirely in the screen-by-screen behavior documented above, plus a
+direct grep of `backend/` for every real `Incident(...)` construction site
+and every real tool function in `backend/agent/tools/*.py` — not assumed.*
+
+### (a) New user signup → onboarding → first data source → first pipeline run
+
+1. Visit `/` or `/signup`. Fill Full name / Email / Workspace name /
+   Password, click "Create account" → `POST /auth/register` (Screen 3). A
+   new tenant + Owner-role user is created **immediately and
+   unconditionally** — even if this email already exists elsewhere, that's
+   just a non-blocking informational nudge afterward, not a gate.
+2. If the nudge appears, click "Continue to your new workspace" (the new
+   workspace already exists either way).
+3. Redirected to `/onboarding` (a fresh tenant's `GET /onboarding/` reports
+   `completed: false`). Answer the 4 steps (role, industry, company size,
+   use cases — data stack optional), click "Finish" → `POST /onboarding/`.
+4. Redirected to `/dashboard` — real KPIs, mostly zero/empty for a brand-new
+   tenant.
+5. Sidebar → Data Sources → "+ Add Source." **Note the real gap documented
+   in Screen 8**: this modal's own JSON config path requires already knowing
+   a real server-side file path for CSV/Excel — there is no file-picker
+   anywhere in this screen. The realistic paths are either a database/API
+   source type (Postgres/MySQL/REST API/Google Sheets, where the config is
+   real connection details, not a file path) or a direct
+   `POST /uploads/register` call outside this UI. Submit → `POST /sources/`.
+6. Click "Profile" on the new source row → `POST /sources/{id}/profile` —
+   reads its real schema. This matters beyond just the Catalog screen: both
+   AXIOM's chat-driven transform generation and the Transforms screen's
+   Natural Language tab only produce schema-grounded code (the "Grounded in
+   real schema" badge) once a source has been profiled at least once.
+7. Sidebar → Pipelines → "+ New Pipeline." Name it, optionally select the
+   source and a cron schedule, "Create" → `POST /pipelines/`.
+8. Click "Trigger" on the pipeline row → `POST /pipelines/{id}/trigger`
+   (subject to the `pipeline_runs` quota — see flow (d)) runs a real
+   sync-then-quality-check sequence.
+9. Click the pipeline's name to open its Runs modal → confirms the real
+   run's status/rows/duration.
+
+### (b) Invite a teammate → they accept → role change → removal
+
+1. Owner/Admin: `/team` → "+ Invite Member" (hidden entirely for other
+   roles) → email + role → "Send Invite" → `POST /team/invites`.
+2. Resend's sandbox can only actually deliver to the account owner's own
+   verified address (see Outstanding items) — for any other real teammate,
+   the invite modal's own manual-share link
+   (`{origin}/invite/accept?token=...`) has to be copied and sent by some
+   other channel. **Separately**: if a real email *does* get delivered
+   (i.e. the invitee is the sandbox-allowed address), its link currently
+   points at the wrong path (`/accept-invite` — see Screen 6's finding) and
+   would 404; the manual-share link shown in the modal is the correct one.
+3. The invitee opens the (correct) link while logged out → `/invite/accept`
+   shows the real workspace name and locked role → sets a password (name
+   optional) → "Accept invite & join" → `POST /team/invites/accept` creates
+   their real `User` row in the *inviting* tenant with that locked role, and
+   logs them straight into `/dashboard` — **skipping `/onboarding` entirely**,
+   regardless of whether the tenant's own onboarding profile exists (Screen 5's
+   finding).
+4. Owner/Admin sees the new Active member on `/team`; the invite's status
+   flips to "accepted." Role change: the inline `<Select>` →
+   `PATCH /team/members/{id}/role` (blocked, with the real reason as a
+   tooltip, if targeting an Owner while not one, or demoting the last Owner).
+5. Removal: "Remove" (blocked for self, or the last Owner) →
+   `DELETE /team/members/{id}` — a **soft removal** (`is_active: false`),
+   the row stays visible with a gray "Removed" badge, not deleted.
+6. **Real, open caveat**: a removed member's already-issued JWT (if they were
+   logged in at removal time) keeps working for up to its full 60-minute
+   lifetime regardless — password login is blocked on their *next fresh*
+   login attempt, but email-code/Google login are not, and nothing revokes
+   an already-issued token early (`CLAUDE.md` Known-broken, cross-referenced
+   from Screen 2 and Screen 22). This flow's UI does not hide or soften that
+   gap.
+
+### (c) A quality check failing → incident created → resolution
+
+**This section corrects a reasonable assumption a reader might otherwise
+make.** There is **no automatic link** between a failing quality check and a
+created Incident anywhere in this codebase — confirmed by grepping the
+entire backend for every real `Incident(...)` construction site: there are
+exactly two, the manual "+ Log Incident" button on `/incidents`, and the
+unrelated freshness checker (an automatic "stale data" incident when a
+source misses its sync SLA — a different trigger entirely, not a quality
+check). **AXIOM has no tool to create an incident either** — its
+observability tools can only list, triage, and resolve *existing* incidents
+(see flow (e)'s tool list). The real, current flow is manual end-to-end:
+
+1. A quality rule fails during a real run — visible on `/quality`'s
+   Pass/Fail column after clicking "Run Checks" (Screen 12), or inside a
+   pipeline's Runs modal on `/pipelines` (Screen 10).
+2. A human notices and manually logs it: `/incidents` → "+ Log Incident" →
+   title/description/severity/optional pipeline link → `POST /incidents/`
+   (Screen 13, ungated — any role).
+3. It appears on `/incidents` with status `open`, and on the Dashboard's
+   health banner (Screen 7, which reads the same open-incidents list).
+4. AXIOM can be asked to help investigate (`list_open_incidents`,
+   `triage_incident` — real tool calls, see flow (e)), but not to create the
+   original incident.
+5. Once addressed: `/incidents` → "Resolve" → required resolution notes →
+   "Mark Resolved" → `POST /incidents/{id}/resolve` (also ungated — any
+   role).
+
+### (d) Plan change and quota behavior
+
+1. Every tenant starts on `starter`: 25,000 AI credits/mo, 100 pipeline
+   runs/mo, 3 data sources, 3 team members (`growth`: 100,000 / 1,000 / 15 /
+   10; `scale`: 500,000 / 10,000 / unlimited / 25 — real, hardcoded tiers in
+   `services/quota_service.py`, not fetched from any external billing system).
+2. Exactly four actions are quota-gated: sending an AXIOM chat message
+   (`ai_credits` — checked *before* any LLM call is made, so an over-quota
+   tenant never spends provider tokens on a request that's going to be
+   rejected anyway), triggering a pipeline run (`pipeline_runs`), creating a
+   data source (`data_sources`), and creating a team invite
+   (`team_members`). Every other mutation in the app is unaffected by quota.
+3. `GET /billing/usage` (Screen 23) reports each resource's real
+   `used`/`limit`/`percent`/`status`: `"ok"` below 80%, `"warning"` from 80%
+   up to (not including) 100%, `"exceeded"` at/above 100%.
+4. Crossing 80% only turns that resource's usage bar yellow — nothing is
+   blocked yet.
+5. Reaching 100% hard-blocks *that specific resource's* gated action with a
+   real `402` (`{"error": "quota_exceeded", ...}`) — surfaced only as a
+   **generic failure toast wherever that action lives** (Chat's send error,
+   Sources'/Pipelines'/Team's "Failed to..." toasts). None of these toasts
+   distinguish a quota block from any other kind of failure — a user hitting
+   this for the first time has to check `/billing` to learn why.
+6. An Owner/Admin can change plans on `/billing` at any time —
+   **unconditionally and immediately, with no payment step** (a dev-mode
+   stand-in, honestly disclosed in the UI itself). Downgrading below current
+   usage is allowed; existing usage is grandfathered (not deleted or
+   blocked), but any *new* usage of the now-over-limit resource is blocked
+   going forward by the same mechanism as step 5.
+7. `scale`'s `data_sources` limit is `null` (unlimited) — that bar always
+   shows "· Unlimited" and never blocks.
+
+### (e) AXIOM chat: what it can actually call, and an approval-gated action
+
+**Real tool inventory** — 38 registered tools across 8 files (grepped
+directly from `backend/agent/tools/*.py`, not from documentation):
+- **Ingestion**: `list_data_sources`, `register_data_source`,
+  `profile_schema`, `ingest_file`, `sync_source`, `preview_source_data`,
+  `detect_schema_drift`
+- **Transformation**: `generate_sql_transform`, `execute_sql_transform`,
+  `run_python_transform`, `standardize_dataset` (always returns an honest
+  "not implemented" error — no real equivalent exists anywhere in the
+  codebase, per `CLAUDE.md`)
+- **Quality**: `run_quality_checks`, `create_quality_rule`,
+  `get_quality_report`, `validate_business_rule`, `list_business_rules`
+- **Orchestration**: `create_pipeline`, `run_pipeline`, `pause_pipeline`,
+  `get_pipeline_run_history`, `backfill_pipeline`, `set_pipeline_schedule`
+- **Observability**: `check_freshness`, `detect_anomalies`,
+  `list_open_incidents`, `triage_incident`, `resolve_incident`,
+  `get_system_health` — **no incident-creation tool exists** (see flow (c))
+- **Governance**: `get_lineage`, `get_audit_trail`, `create_data_contract`,
+  `validate_data_contract`, `request_approval`
+- **Reporting**: `generate_status_report`, `generate_incident_report`,
+  `send_alert`, `export_dataset` (also an honest "not implemented" stub),
+  `get_kpi_summary`
+- **CI/CD**: `get_cicd_status`
+
+Every tool call is server-side stamped with the caller's real `tenant_id`
+(and `user_id`/`session_id` where relevant) — an LLM's own guess at these is
+always overridden, so a crafted prompt cannot smuggle a different tenant's
+data into a response. **What is genuinely not enforced is the caller's
+role** — see Screen 21's Known Issues for the full finding: only
+`operation_mode` plus a hardcoded per-tool risk tier gate execution, never
+who's asking.
+
+**What an approval-gated action looks like, step by step:**
+1. In the Chat composer, set Operation Mode to "Advisory" (blocks every tool
+   call) or "Assisted" (blocks medium/high-risk calls — though the
+   already-documented "Phantom high-risk tools" bug means almost nothing
+   actually resolves to `high` today, so Assisted mostly gates on `medium`
+   in practice).
+2. Ask AXIOM something that triggers a gated tool call (under Advisory,
+   anything at all — even a read-only `list_data_sources`).
+3. The reply's `ToolCallBlock` shows a yellow "Needs approval" badge instead
+   of green "Completed." Expanding it shows the real arguments AXIOM tried
+   to send, plus a callout with the real risk level/reason (when known) and
+   a link to Approvals. **The action has not executed** — nothing was read
+   or changed yet.
+4. `/approvals` (Screen 17) shows the same request, tagged "Agent Action."
+5. An Owner/Admin clicks "Approve" → `POST /approvals/{id}/approve` —
+   this genuinely executes the original tool call server-side (via
+   `PolicyEngine`'s dynamic dispatch) and records the result on the request.
+   "Reject" leaves it un-executed permanently.
+6. There is no notification back inside the original Chat thread when the
+   approval is later granted or rejected — that message's `ToolCallBlock`
+   keeps showing "Needs approval" indefinitely in its own history; the real
+   outcome is only visible on `/approvals` or wherever the approved action's
+   effect actually shows up (e.g. a newly-created row elsewhere). **UNVERIFIED**:
+   whether asking AXIOM again in the *same* session afterward would surface
+   the now-approved outcome — not traced into the agent graph's session-state
+   handling for this document.
+
+---
+
+## Glossary
+
+| Term | Meaning |
+|---|---|
+| **Tenant / Workspace** | The top-level account boundary — every source, pipeline, user, etc. belongs to exactly one tenant. "Workspace" is the user-facing name for the same thing (e.g. the login disambiguation picker, Settings' Workspace tab). |
+| **Data Source** | A registered connection (CSV/Excel file, Postgres, MySQL, REST API, Google Sheets), identified by a type-specific `connection_config` JSON blob. |
+| **Pipeline** | A named, optionally-scheduled sequence that syncs a source and runs its attached quality rules. Despite the module name `DAGManager`, this is **not** a real dependency graph — it's a fixed, linear 2-step sequence (per `CLAUDE.md`). |
+| **Transform** | A SQL or Python (pandas) snippet run against a source's real data — generated from natural language, hand-written, or replayed from history. Every real execution is logged as a `TransformRun`. |
+| **Data Contract** | A named schema/quality expectation defined against a source, checkable on demand via "Validate" to see if the source still meets it. |
+| **Lineage** | The graph of how sources, pipelines, and outputs relate to each other (`feeds`/`produces` edges) — auto-populated and self-healing on every read. |
+| **Quality Rule** | A check attached to a pipeline — one of 8 types (not_null, unique, accepted_values, range, freshness, regex, row_count, custom_sql) with a severity. Running it produces pass/fail counts and a numeric score. |
+| **Incident** | A record of something wrong, with a severity and status (open/investigating/resolved). Created only manually via `/incidents`, or automatically by the freshness checker for stale sources — **never automatically from a failing quality check** (see flow (c)). |
+| **Approval** | A paused, not-yet-executed action awaiting Owner/Admin sign-off. Two real, separate underlying sources — general "Agent Action" requests (`PolicyEngine`) and CI/CD deployment gates — merged into one list on `/approvals`. |
+| **AI Employee** | A named, role-branded AI agent persona in the product's roster. AXIOM is the one that's real today; the other 5 (LEDGER, DEPLOY, INSIGHT, SENTINEL, PULSE) are locked placeholders with no backend behind them. |
+| **Operation Mode** | AXIOM's execution posture for a chat message: **Advisory** (recommend only, always needs approval), **Assisted** (execute low-risk, gate medium/high), **Autonomous** (execute everything except literal high-risk), **Audit** (read-only, always needs approval). |
+| **Personality Mode** | AXIOM's response tone/framing (Engineer/Founder/Analyst/Auditor) — purely cosmetic, does not change what it's allowed to do. |
+| **Risk Tier** | A hardcoded low/medium/high classification per tool name (`RISK_ACTIONS` in `personality.py`), combined with Operation Mode to decide whether a tool call needs approval. Its `"high"` tier currently lists 4 tool names that aren't real registered tools at all (a known, open bug). |
+| **Plan / Quota** | A tenant's tier (Starter/Growth/Scale), each with 4 hard limits (AI credits/mo, pipeline runs/mo, data sources, team members). Crossing 80% warns; reaching 100% blocks new usage of that specific resource. |
+| **AI Credits** | A computed number (`input_tokens × 1 + output_tokens × 3`) approximating real LLM cost, accumulated from every real chat/generation call and checked against the plan's monthly limit. Not a real-dollar figure — a documented placeholder formula. |
+| **Role** | One of 5 fixed values: Owner, Admin, Data Engineer, Data Analyst, Viewer. See the Role-permission matrix below for what each can do — and note the Chat/AXIOM caveat: role does **not** gate what AXIOM can do on a user's behalf, only what the REST screens allow that user to do directly. |
+
+---
+
+## Role-permission matrix
+
+Built from a direct grep of every `require_role`/inline role check across
+`backend/api/v1/*.py`, not from assumption — this reflects **real backend
+enforcement**, which (per every screen section above except Team/Billing/
+Settings) is often *not* the same as what the frontend UI shows or hides.
+✅ = allowed, ❌ = blocked (backend returns a real `403`).
+
+| Action | Owner | Admin | Data Engineer | Data Analyst | Viewer |
+|---|---|---|---|---|---|
+| View any read-only screen/list (Dashboard, Sources, Catalog, Pipelines, Quality, Incidents, Governance, CI/CD, Approvals, Team roster, Transforms History) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Create a data source (quota-gated, not role-gated) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Sync / profile a data source | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Delete a data source** | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Create a pipeline | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Trigger / pause / activate a pipeline (quota-gated on trigger only) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Delete a pipeline** | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Create / run a quality rule | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Delete a quality rule** | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Generate / dry-run / preview / explain a transform | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Execute a real SQL or Python transform** | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Log / resolve a general incident | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Create / validate a governance contract | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Approve / reject a general "Agent Action" approval** | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Approve / reject a CI/CD deployment commit** | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **Resolve a CI/CD-specific incident** (`PATCH /cicd/incidents/{id}/resolve` — no frontend UI calls this at all) | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Send a chat message to AXIOM (quota-gated, not role-gated) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **What AXIOM does on your behalf via chat** | Gated by Operation Mode + risk tier only — **identical for every role, including Viewer** (see flow (e)'s finding) | | | | |
+| View team roster | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Invite / remove a team member, change a member's role** | ✅ | ✅ | ❌ | ❌ | ❌ |
+| — of which, change/remove **another Owner's** role or status | ✅ | ❌ (Admin cannot touch an Owner) | ❌ | ❌ | ❌ |
+| — of which, demote/remove the **last active Owner** | ❌ (blocked for everyone, including that Owner) | ❌ | ❌ | ❌ | ❌ |
+| View/edit Workspace, Notifications, AI Model settings | View: ✅ Edit: ✅ | View: ✅ Edit: ✅ | View: ✅ Edit: ❌ | View: ✅ Edit: ❌ | View: ✅ Edit: ❌ |
+| Change own theme preference (self-service, personal) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Create / list / revoke platform API keys** | ✅ | ✅ | ❌ | ❌ | ❌ |
+| View billing plan and usage | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Change the tenant's plan** | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+**Reading this table against the actual UI**: for every row marked ❌ for a
+role, the corresponding button is still **shown and clickable** to that role
+on Dashboard, Sources, Pipelines, Quality, CI/CD, and Approvals (Groups 2–4) —
+clicking it produces a real `403` surfaced only as a generic failure toast.
+Team, Billing, and Settings (Group 6) are the only screens where the ❌ rows
+above are actually hidden or disabled in the UI to match this table exactly.
+
+---
+
 ## Progress tracker
 
 - [x] **Group 1: Landing & Authentication** — Landing, Login, Signup, Google
@@ -1404,7 +1670,21 @@ Other tabs always have real current values to show (even if blank/unset).
       copy is unusually transparent about its two known backend gaps (no
       payment gate, no usage-based downgrade block) rather than hiding them.
       **All 24 screens are now documented — screen coverage is complete.**
-- [ ] End-to-end user flows
-- [ ] Glossary
-- [ ] Role-permission matrix
+- [x] **End-to-end user flows.** All 5 requested flows written. Flow (c)
+      corrects a likely wrong assumption: quality-check failures do **not**
+      automatically create incidents anywhere in the codebase (confirmed by
+      grepping every real `Incident(...)` construction site) — logging one
+      is always manual, and AXIOM has no tool to create an incident either.
+      Flow (e) enumerates all 38 real registered AXIOM tools by domain
+      (grepped directly from `agent/tools/*.py`) and walks the approval-gate
+      flow step by step, including one UNVERIFIED item (whether a later
+      chat message reflects an approval granted after the fact).
+- [x] **Glossary.** 15 terms defined, cross-referencing the role/tool
+      findings above rather than restating them.
+- [x] **Role-permission matrix.** Built from a direct grep of every
+      `require_role`/inline role check across `backend/api/v1/*.py` — reflects
+      real backend enforcement, with an explicit closing note that Team/
+      Billing/Settings are the only screens where the frontend actually
+      hides what this table says a role can't do; every other screen shows
+      the control anyway and lets the backend's 403 be the only real gate.
 - [ ] Export to PDF
