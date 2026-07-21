@@ -359,13 +359,276 @@ skeleton placeholder bars instead of the form.
 
 ---
 
+## Screens — Group 2: Dashboard, Sources, Catalog, Pipelines
+
+*Files read for this group: `frontend/src/app/(app)/layout.tsx`,
+`frontend/src/app/(app)/dashboard/page.tsx`,
+`frontend/src/components/dashboard/{KpiCard,HealthBanner,TrendCharts,RecentRunsCard,ApprovalsCard,AxiomActivityCard}.tsx`,
+`frontend/src/app/(app)/sources/page.tsx`, `frontend/src/app/(app)/catalog/page.tsx`,
+`frontend/src/app/(app)/pipelines/page.tsx`, `frontend/src/lib/api.ts`,
+`backend/api/v1/{pipelines,sources,quality,approvals,transformations}.py` (grepped for
+`require_role`/`enforce_quota` across all of `api/v1/*.py` to get exact role-gating
+per endpoint, not assumed from `CLAUDE.md` prose).*
+
+**Shared app-shell context (applies to every screen from here on):** every
+route under the `(app)` route group is wrapped by `frontend/src/app/(app)/layout.tsx`,
+which (1) redirects to `/login` if no token is present in `localStorage` — this
+is the **only** access check at the shell level, it does not check onboarding
+completion or role; (2) on mount, fetches `GET /api/v1/auth/me` and reconciles
+the server-stored theme over whatever `localStorage`'s pre-paint script already
+applied; (3) renders `Sidebar` + `Topbar` + `AxiomFab` + `CommandPalette`
+(`Ctrl+K`) around the page content. Individual screens are responsible for
+their own role-based UI gating — the shell itself does not enforce or hide
+anything by role.
+
+### 7. Dashboard — `/dashboard`
+
+**File:** `frontend/src/app/(app)/dashboard/page.tsx` +
+`frontend/src/components/dashboard/*.tsx`
+
+**Purpose:** Tenant-wide overview — 7 KPI cards, an open-incident banner, two
+trend charts, recent pipeline runs, pending approvals, and recent AXIOM chat
+activity.
+
+**How to reach it:** Sidebar's first nav item ("Dashboard", no section label).
+Default post-login landing point once onboarding is complete. Not otherwise
+linked from most other screens except a few explicit "View all" buttons on
+other cards that point back here.
+
+**Role visibility:** **No role-based hiding anywhere on this screen.** Every
+KPI, chart, and card renders identically for Owner/Admin/Data Engineer/Data
+Analyst/Viewer. This includes the Approve/Reject buttons on the Pending
+Approvals card (see below) — the backend actually restricts approve/reject to
+Owner/Admin, but the frontend button is shown to every role regardless; a
+Data Engineer/Data Analyst/Viewer who clicks it gets a real backend `403`,
+surfaced only as the generic "Couldn't approve — try again." toast (the
+mutation's `onError` handler doesn't inspect the status code to say
+anything more specific). **NEW FINDING** — this is the same "role-gated
+backend action, ungated frontend control" pattern found again on Sources and
+Pipelines below; unlike Team/Settings/Billing (Phase 17), which hide
+controls per role to match the backend guard, these earlier (Phase 9/12)
+screens never got that treatment.
+
+**Interactive elements:**
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| "Refresh" button | Click | Re-fires all 6 queries on the page (`GET /analytics`, `GET /analytics/quality?window_days=7`, `GET /analytics/recent-runs?limit=5`, `GET /approvals`, `GET /incidents/`, `GET /chat/sessions`) | "Dashboard refreshed." toast | Individual queries fail silently into their own empty/zero states (React Query default — no page-level error banner) |
+| "Ask AXIOM" button | Click | Navigates to `/chat` | — | — |
+| Health banner "Investigate" button (shown only when at least one open incident exists) | Click | Navigates to `/incidents` | — | — |
+| Pending Approvals card — "Approve" button per item | Click | `POST /api/v1/approvals/{id}/approve` `{notes: ""}` | "Approved." toast, approvals list + KPI count both refetch (same query key) | Generic "Couldn't approve — try again." toast (see role note above — a 403 looks identical to a network error here) |
+| Pending Approvals card — "Reject" button per item | Click | `POST /api/v1/approvals/{id}/reject` `{notes: ""}` | "Rejected." toast, list + KPI refetch | Generic "Couldn't reject — try again." toast |
+| AXIOM Activity card — "Open" button, or clicking a listed session row | Click | Navigates to `/chat` (no session ID is passed — clicking a specific past conversation's row does **not** reopen that specific session, it just opens the Chat screen generically; re-selecting that conversation happens inside `/chat`'s own session list) | — | — |
+| Recent Pipeline Runs card — "View all" button | Click | Navigates to `/pipelines` | — | — |
+| KPI cards, charts | — | Read-only, no click handlers | — | — |
+
+**Empty states:**
+- Loading (`overview` or `quality` queries still in flight): one large skeleton
+  block + a 4-card skeleton grid, replacing the entire content area.
+- **NEW FINDING**, minor: the loading gate above only covers 2 of the 6 queries
+  the page fires. The other four (`recentRuns`, `approvals`, `incidents`,
+  `sessions`) have no independent loading state of their own — if they resolve
+  slower than `overview`/`quality` (e.g. under a slow network), their cards
+  briefly render as if genuinely empty ("No pipeline runs yet.", "Nothing
+  pending approval.", "No conversations with AXIOM yet.") even on a tenant
+  with real data, until that specific query resolves a moment later.
+  Self-corrects, not persistent — but a real, observable flash of an
+  inaccurate empty state.
+- No incidents open → health banner simply doesn't render (not an empty-state
+  message, just absent).
+- No quality trend data yet (`trends.length === 0`) → both trend charts are
+  omitted entirely (not shown as empty charts).
+- Recent Pipeline Runs / Pending Approvals / AXIOM Activity cards each show
+  their own "No … yet." message when their respective list is genuinely empty.
+
+**Known issues:** See the role-visibility note above (approve/reject shown to
+all roles; backend correctly blocks Data Engineer/Data Analyst/Viewer, but the
+403 isn't distinguished in the UI). The Pending Approvals card and KPI reflect
+only the **PolicyEngine** general-approval queue (`GET /approvals`) — CI/CD
+deployment gates (`PipelineCommit.gate_decision`) are a separate queue, only
+visible on the dedicated `/approvals` screen's merged view (Group 4).
+
+---
+
+### 8. Data Sources — `/sources`
+
+**File:** `frontend/src/app/(app)/sources/page.tsx`
+
+**Purpose:** Register, sync, profile, and delete the tenant's data sources
+(CSV/Excel files, Postgres, MySQL, REST API, Google Sheets).
+
+**How to reach it:** Sidebar → Data → "Data Sources".
+
+**Role visibility:** **No role-based hiding.** Every role sees identical
+Sync/Profile/Delete buttons and the "+ Add Source" button. Backend reality:
+`POST /sources/` (create) is gated only by `enforce_quota("data_sources")` —
+any authenticated role can create a source, subject to the tenant's plan
+limit, not role. `POST /sources/{id}/sync` and `POST /sources/{id}/profile`
+are **fully ungated** (any role). `DELETE /sources/{id}` **is** role-gated
+(Owner/Admin/Data Engineer only) — a Data Analyst or Viewer sees and can click
+the Delete button, and will get a real backend `403`, again surfaced only as
+the generic "Failed to delete source." toast (no status-code branching in the
+`onError` handler).
+
+**Interactive elements:**
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| "+ Add Source" button (also shown inside the empty state) | Click | Opens the "Add Data Source" modal | — | — |
+| Modal — Name input | Type | Required; "Create" stays disabled until non-empty | — | — |
+| Modal — Type `<Select>` (CSV file / Excel file / Postgres / MySQL / REST API / Google Sheets) | Select | Client-side only — swaps the connection-config textarea's placeholder to a type-specific example JSON blob | — | — |
+| Modal — "Connection config (JSON)" textarea | Type | Free-form JSON, pre-filled with the selected type's placeholder | — | — |
+| Modal — "Create" button | Click | Parses the textarea as JSON client-side first (invalid JSON → toast "Connection config must be valid JSON", never reaches the network); on valid JSON, `POST /api/v1/sources/` `{name, source_type, connection_config}` | Success toast naming the source, modal closes, name field resets, list refetches | Backend error message via toast, or generic "Failed to create source." |
+| Table row — "Sync" button | Click | `POST /api/v1/sources/{id}/sync?mode=incremental` | "Sync started." toast, list refetches | "Sync failed." toast |
+| Table row — "Profile" button | Click | `POST /api/v1/sources/{id}/profile` | "Source profiled." toast, list refetches | "Profiling failed." toast |
+| Table row — "Delete" button | Click | `DELETE /api/v1/sources/{id}` — **no confirmation dialog before this fires**, the click is immediate and irreversible | "Source deleted." toast, list refetches | "Failed to delete source." toast (see role note above) |
+
+**Empty states:** No sources yet → "No data sources yet" message + a
+"+ Add Source" button (identical action to the header button).
+
+**Known issues:**
+- **Resolved, historical:** the CSV/Excel "Add Source" modal placeholders used
+  to suggest a `{"path": "..."}` connection config, but the real connector
+  (`FileConnector`) only reads `file_path` — a source created by typing the
+  placeholder verbatim would silently fail to profile (`No such file or
+  directory: ''`). Fixed in this project's own Phase 19 pre-walkthrough pass;
+  the placeholders shown today already read `{"file_path": "sales.csv"}` /
+  `{"file_path": "report.xlsx"}`, confirmed by the code read for this
+  document. **The safer, real registration path for a file upload is
+  `POST /api/v1/uploads/register` (multipart file upload, auto-generates a
+  correct `file_path`) — this Sources screen's "Add Source" modal does not use
+  that endpoint at all.** There is no file-upload control anywhere on this
+  screen; a CSV/Excel source created here requires the operator to already
+  know a real server-side file path to type into the JSON textarea by hand.
+  **NEW FINDING**: this screen has no UI path to actually upload a file — the
+  only way to get a real, working CSV/Excel source registered today is either
+  hand-typing a path to a file already present on the server's filesystem
+  (not realistic for an end user), or calling `POST /uploads/register`
+  directly (no frontend page calls this endpoint at all — **UNVERIFIED**
+  whether any other screen in this app exposes a file-picker wired to it; not
+  found in Sources, Catalog, or Pipelines).
+- Role-gated Delete with no frontend hiding — see Role visibility above.
+- No delete confirmation dialog — a misclick deletes a source immediately
+  (cascades to any pipelines/runs depending on it per the backend's own
+  cascade behavior — not re-verified for this document, see Pipelines below
+  for the related, already-fixed `DELETE /pipelines/{id}` history).
+
+---
+
+### 9. Data Catalog — `/catalog`
+
+**File:** `frontend/src/app/(app)/catalog/page.tsx`
+
+**Purpose:** Read-only, searchable view of every profiled (and not-yet-profiled)
+table across all data sources, aggregated from each source's stored schema
+snapshot.
+
+**How to reach it:** Sidebar → Data → "Data Catalog".
+
+**Role visibility:** No role-based hiding — `GET /api/v1/catalog/` and
+`POST /sources/{id}/profile` (used by Sync Metadata) are both fully ungated;
+every role sees and can use identical controls.
+
+**Interactive elements:**
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| Search input | Type | Client-side only filter over already-fetched entries (matches table name, source name, tags, or column names, case-insensitive) | — | — |
+| "Sync Metadata" button (disabled while syncing, or if there are zero catalog entries) | Click | Calls `POST /api/v1/sources/{id}/profile` **sequentially, once per unique source** appearing in the catalog (not in parallel) — button label shows live "Profiling N of M…" progress. One source failing to profile does not stop the loop (each call is individually try/caught and ignored). | "Metadata sync complete." toast after the full loop finishes; catalog list refetches | (No distinct failure state — per-source failures are silently swallowed, so a sync where every single source failed to profile would still end with the same "Metadata sync complete." success toast) |
+
+**Empty states:**
+- No sources at all → "No sources to catalog yet" + guidance to add and
+  profile a source (no button here — the nearest add-source action is on the
+  Sources screen, not linked directly from this empty state).
+- Sources exist but a search term matches nothing → "No matches" + "Try a
+  different search term."
+- A source that has never been profiled still appears as its own row (not
+  hidden), with a "Not profiled" badge in place of a table name and `—` for
+  column/row counts — this is deliberate per the backend's aggregation design
+  (`profiled: false` entries are included, not filtered out).
+
+**Known issues:**
+- **NEW FINDING**: "Sync Metadata"'s per-source failures are completely
+  silent — the toast always says "complete" regardless of whether any/all of
+  the underlying profile calls actually succeeded. A user has no way to tell,
+  from this screen alone, whether a sync partially failed; they'd only notice
+  via a source's "Last Profiled" timestamp not advancing.
+
+---
+
+### 10. Pipelines — `/pipelines`
+
+**File:** `frontend/src/app/(app)/pipelines/page.tsx`
+
+**Purpose:** Create, trigger, pause/activate, inspect run history for, and
+delete pipelines (a pipeline = a scheduled or manually-triggered sync-then-
+quality-check sequence against one data source).
+
+**How to reach it:** Sidebar → Data → "Pipelines". Also reachable via
+Dashboard's Recent Pipeline Runs "View all" button, and (per the pipeline-name
+being a clickable link that opens the run-history modal) from within this
+page itself.
+
+**Role visibility:** **No role-based hiding**, same pattern as Sources.
+Backend reality, confirmed by grep across `api/v1/*.py`:
+- `POST /pipelines/` (create) — ungated, any authenticated role.
+- `POST /pipelines/{id}/trigger` — gated only by `enforce_quota("pipeline_runs")`
+  (blocks on quota, not role).
+- `POST /pipelines/{id}/pause` and `/activate` — fully ungated, any role.
+- `DELETE /pipelines/{id}` — role-gated (Owner/Admin/Data Engineer only,
+  same three roles as Sources' delete). A Data Analyst or Viewer sees and can
+  click Delete, gets a real `403`, sees the same generic "Failed to delete
+  pipeline." toast either way.
+
+**Interactive elements:**
+| Element | Action | Calls | On success | On failure |
+|---|---|---|---|---|
+| "+ New Pipeline" button (also in the empty state) | Click | Opens the "New Pipeline" modal | — | — |
+| Modal — Name input | Type | Required; "Create" disabled until non-empty | — | — |
+| Modal — Source `<Select>` | Select | Optional — "No source (manual)" is a valid choice, leaving the pipeline with `source_id: null` | — | — |
+| Modal — Description input | Type | Optional | — | — |
+| Modal — Schedule (cron) input | Type | Optional free-text, e.g. `0 */6 * * *`; **no client-side cron validation** — any string is submitted as-is | — | — |
+| Modal — "Create" button | Click | `POST /api/v1/pipelines/` `{name, source_id?, description?, schedule_cron?}` | Success toast naming the pipeline, modal closes and resets, list refetches | Generic "Failed to create pipeline." toast (no backend detail message surfaced) |
+| Table row — pipeline name (clickable link) | Click | Opens the "Runs — {name}" modal | `GET /api/v1/pipelines/{id}/runs?limit=20` fires (query is `enabled` only while this modal is open) | — |
+| Table row — "Trigger" button | Click | `POST /api/v1/pipelines/{id}/trigger` | "Run triggered." toast, list refetches (note: the table's own `status`/columns don't show run-in-progress state directly — that's only visible via the Runs modal or Dashboard) | "Failed to trigger run." toast (this is also the visible symptom of a quota-exceeded `402` — not distinguished from any other failure) |
+| Table row — "Pause" button (shown when status ≠ `paused`) | Click | `POST /api/v1/pipelines/{id}/pause` | "Pipeline paused." toast, list refetches | "Failed to pause pipeline." toast |
+| Table row — "Activate" button (shown when status = `paused`) | Click | `POST /api/v1/pipelines/{id}/activate` | "Pipeline activated." toast, list refetches | "Failed to activate pipeline." toast |
+| Table row — "Delete" button | Click | `DELETE /api/v1/pipelines/{id}` — **no confirmation dialog**, immediate | "Pipeline deleted." toast, list refetches | "Failed to delete pipeline." toast (see role note above) |
+| Runs modal — read-only table (status/rows/duration/when) | — | Populated by the query triggered when the modal opens | — | — |
+
+**Empty states:**
+- No pipelines yet → "No pipelines yet" + "+ New Pipeline" button.
+- Runs modal, pipeline has never run → "No runs yet."
+
+**Known issues:**
+- Role-gated Delete with no frontend hiding — see Role visibility above.
+- No delete confirmation dialog on a destructive, backend-cascading action
+  (deleting a pipeline with run history deletes its `PipelineRun`/
+  `QualityRule` rows and clears incident references — see `CLAUDE.md`'s
+  `DELETE /pipelines/{id}` history). The underlying delete-cascade behavior
+  itself is correct and already fixed/tested per `CLAUDE.md` (it no longer
+  500s) — only the missing frontend confirmation step before firing the
+  delete is a new finding here.
+- No client-side cron syntax validation on the Schedule field — a malformed
+  cron string is accepted by this form and sent to the backend as-is;
+  **UNVERIFIED** what the backend does with an invalid cron string (whether
+  it silently never fires, or errors at save time) — not traced further for
+  this document since it's outside the frontend's own behavior.
+
+---
+
 ## Progress tracker
 
 - [x] **Group 1: Landing & Authentication** — Landing, Login, Signup, Google
       callback, Onboarding, Invite accept. 2 new findings logged (both above,
       not yet fixed): the broken `/accept-invite` vs `/invite/accept` emailed
       link path, and invited members skipping onboarding.
-- [ ] Group 2: Dashboard, Sources, Catalog, Pipelines
+- [x] **Group 2: Dashboard, Sources, Catalog, Pipelines.** New findings logged
+      (not fixed): role-gated backend actions (approve/reject, source/pipeline
+      delete) have no frontend role-based hiding on these four screens, unlike
+      Team/Settings/Billing; Dashboard's 4 secondary queries have no
+      independent loading state and can flash an inaccurate empty state;
+      Sources has no actual file-upload UI despite offering CSV/Excel as
+      source types; Catalog's Sync Metadata silently swallows per-source
+      failures; Pipelines has no delete confirmation dialog.
+- [ ] Group 3: Transforms, Quality, Incidents, Governance
 - [ ] Group 3: Transforms, Quality, Incidents, Governance
 - [ ] Group 4: Automations, CI/CD, Approvals, Analytics, Audit
 - [ ] Group 5: AI Employees, Chat
