@@ -413,6 +413,15 @@ scaffold that had silently occupied root `/` since Phase 2. Real production
 deployment is separately gated on the domain purchase (see Outstanding items) —
 this phase's own definition of done was built-and-verified-locally only.
 
+**Phase 19 polish addendum**: the landing page was substantially rebuilt in a
+later session — real logo (nav/footer mark + hero wordmark), a real
+screenshot carousel from a freshly-seeded demo tenant (no fabricated
+numbers), real About and Contact sections, section-anchor nav with a
+light/dark toggle, and a hero load-in animation that fully respects
+`prefers-reduced-motion`. See `CLAUDE.md`'s "Landing page rebuild" Status
+Table row for the complete build and live-verification detail — this note
+is a pointer, not a duplicate.
+
 ---
 
 ## The 19 phases
