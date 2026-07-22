@@ -7,14 +7,29 @@ import type { QualityTrendPoint } from "@/lib/api";
 
 const gridColor = "rgba(107,124,148,0.15)";
 
+// Canvas 2D silently rejects unresolved CSS var() strings (confirmed live -
+// assigning ctx.strokeStyle = "var(--x)" is a no-op, not an error, so the
+// previous/default color quietly stays instead) - Chart.js draws straight to
+// canvas, so every color here must be a real resolved value, not a raw
+// var() reference. Read fresh at render time so light/dark both work
+// correctly on load (a live theme toggle without a page reload won't
+// re-resolve these until the component next re-renders - a known, narrower
+// gap than the "colors don't render at all" bug this fixes).
+function resolveToken(name: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
 function baseOptions() {
+  const tickColor = resolveToken("--text-muted", "#6B7C94");
   return {
     responsive: true,
     maintainAspectRatio: false,
     plugins: { legend: { display: false } },
     scales: {
-      x: { grid: { display: false }, ticks: { color: "var(--text-muted)", font: { size: 10 } } },
-      y: { grid: { color: gridColor }, ticks: { color: "var(--text-muted)", font: { size: 10 } } },
+      x: { grid: { display: false }, ticks: { color: tickColor, font: { size: 10 } } },
+      y: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 10 } } },
     },
   };
 }
@@ -35,7 +50,7 @@ export function RunHistoryChart({ trends }: { trends: QualityTrendPoint[] }) {
                 {
                   label: "Passed",
                   data: trends.map((t) => t.pass_count),
-                  borderColor: "var(--success)",
+                  borderColor: resolveToken("--success", "#16a34a"),
                   backgroundColor: "rgba(22,163,74,0.12)",
                   fill: true,
                   tension: 0.3,
@@ -43,7 +58,7 @@ export function RunHistoryChart({ trends }: { trends: QualityTrendPoint[] }) {
                 {
                   label: "Failed",
                   data: trends.map((t) => t.fail_count),
-                  borderColor: "var(--danger)",
+                  borderColor: resolveToken("--danger", "#dc2626"),
                   backgroundColor: "rgba(220,38,38,0.1)",
                   fill: true,
                   tension: 0.3,
@@ -73,7 +88,7 @@ export function QualityTrendChart({ trends }: { trends: QualityTrendPoint[] }) {
                 {
                   label: "Avg quality score",
                   data: trends.map((t) => t.avg_quality_score),
-                  borderColor: "var(--ocean-600)",
+                  borderColor: resolveToken("--ocean-600", "#4C76A0"),
                   backgroundColor: "rgba(91,136,178,0.12)",
                   fill: true,
                   tension: 0.3,
