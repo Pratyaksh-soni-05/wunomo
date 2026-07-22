@@ -476,6 +476,125 @@ consciously accept each of them, not let them ride through undecided.
 
 ---
 
+## Phase 19 partition status (as of 2026-07-23 — keep this current every session)
+
+**NEXT SESSION STARTS HERE.** Recommended next item: the **dark-theme
+screenshot verification pass** (see below) — the token redesign already
+landed and is the freshest unfinished thread. If Gemini's daily quota is
+tight when you start (check first, cheap probe — see `CLAUDE.md`'s
+quota Gotchas), that's not a blocker for this item, since the screenshot
+pass needs zero LLM calls. The **migration-drift session** (below) is the
+other reasonable starting point and is arguably higher-risk/higher-value
+if you'd rather tackle that first — both are unblocked and don't depend
+on each other.
+
+One line per item: **DONE** (live-verified, closed), **REMAINING**
+(still open, no decision made on priority), **UNDECIDED** (a real gap
+with a written rationale needed, not yet triaged into fix-vs-accept per
+the note above), **ACCEPTED-FOR-LAUNCH** (consciously decided safe to
+ship as-is), or **DOMAIN-GATED** (blocked on the user's side, tracked in
+Outstanding items).
+
+**P0 (launch-blocking) — all 5 DONE.** Unified permission spec + AXIOM
+tool-call bypass; file-upload UI for CSV/Excel; `is_active`/role
+integrity (both `resolve_identity()` and the per-request re-check);
+invite email link fix; scheduled pipelines cluster. See `CLAUDE.md`'s
+Status Table rows, each live-verified against the real running server.
+
+**Dark theme redesign — STARTED, REMAINING.** Token change landed
+(`tokens.css`, warm near-black neutral surfaces, measured 4.5:1+
+contrast) but the commit's own required next step — a screenshot
+verification pass across every screen, both themes — has not happened.
+Two real, unrelated bugs were found and fixed while starting that pass
+(both DONE): Dashboard's Chart.js trend colors silently never resolving
+CSS custom properties in either theme; a pre-existing
+`react/no-unescaped-entities` production-build failure on the Team
+screen. **This is the most likely next-session starting point** — see
+the note at the top of this section.
+
+**Migration-drift dedicated session — REMAINING, own highest-risk slot,
+not started.** `CLAUDE.md`'s Known-broken table carries two real,
+related gaps that have never been addressed: the `incidentstatus`
+Postgres enum migration doesn't match the Python-side enum (lowercase
+3-value vs. uppercase 4-value); `pipeline_commits`/`pipeline_deployments`
+have no Alembic migration creating them at all. Both trace back to the
+same root cause documented in `CLAUDE.md`'s Gotchas: this dev DB's schema
+was never actually created by Alembic — `alembic_version` doesn't exist,
+`Base.metadata.create_all()` on backend startup is the real source of
+truth here, and running `alembic upgrade head` against this DB fails
+immediately (`DuplicateObject`). This is deliberately called out as its
+own dedicated session, not a quick fix folded into something else —
+reconciling the migration chain against the real live schema (likely via
+`alembic stamp` at the right revision, per the Gotcha's own worked
+example for the one migration that's already needed this) touches
+every table in the app and deserves undivided attention, not a
+tail-end-of-session pass.
+
+**P1 (10 items) — all REMAINING, none started.** Centralized 402/403
+handling in `lib/api.ts`; shared role-aware control component (replacing
+the copy-pasted `canManage` pattern); shared delete-confirmation dialog;
+promote Audit Log to a top-level `/audit` page + remove the dead
+"Analytics" nav item; Catalog's Sync Metadata real per-source
+pass/fail reporting; rename Quality's "Run Checks" to reflect its real
+scope; Transforms' "Auto" language selector (implement or remove);
+approval outcomes returning to the chat thread on reopen; remove the
+notifications bell (**re-confirmed still hardcoded placeholder data**
+during this session's shell audit — see `CLAUDE.md`'s Part 4 answers);
+remove the decorative "Production" environment dropdown (**re-confirmed
+still a no-op toast** during the same audit); wire "AXIOM Online" to the
+real `GET /health/db` (**re-confirmed still fully decorative**); fix the
+role-display `capitalize` bug on underscored role names. See
+`FRONTEND_BUILD_PLAN.md`'s own P1 list above for full detail per item —
+unchanged this session, just independently re-confirmed for 3 of the 12.
+
+**P2 (small items) — 1 DONE this session, rest REMAINING.** "+ New Chat"
+giving no feedback on an already-empty thread is **DONE** — turned out to
+be a real race condition, not just missing feedback (see `CLAUDE.md`'s
+"New Chat button race condition" row). Still open: "Attach a source…"'s
+missing empty-state message on a zero-source tenant; "+ Save current
+draft"'s missing disabled-state tooltip; Dashboard secondary-query
+empty-state flash; no redirect for authed users hitting `/login`/`/signup`;
+saved-prompts device-local labeling; the three different "Pending
+Approvals" counts meaning different things; the orphan `PATCH
+/cicd/incidents/{id}/resolve` endpoint (recommend deleting); missing
+SQL-tab Explain button; Command Palette's placeholder text overpromising
+"actions, pages, sources" when it only searches page names (**re-confirmed
+navigation-only, not a stub**, during this session's shell audit); the
+Sidebar's self-disclosing "Production" workspace selector.
+
+**Known-broken rows still UNDECIDED (real gaps, not yet triaged
+fix-vs-accept, per the note above)**: WebSocket chat auth (still the most
+severe issue in the codebase — unauthenticated, though narrowed to
+Viewer-tier tool access by the permission spec); removed/demoted members
+keep access for up to the JWT TTL (60 min) after removal — real fix
+directions already written up, not yet chosen between; `change_plan()`
+allows unconditional downgrades with no usage check and no payment gate;
+CI/CD webhook tenant spoofable if `GITHUB_WEBHOOK_SECRET` is unset;
+`BusinessRules.create_rule()` can't create any of its own 8 supported
+rule types; `QualityTestRunner` is a no-op stub (not wired into the real
+check path, but would silently lie if anything ever called it);
+`approval_executor.py`/`update_contract`'s no-op approval action are both
+dead code, not gaps per se, but still undecided whether to delete or
+wire up.
+
+**ACCEPTED-FOR-LAUNCH (rationale already on record, not silently
+carried forward)**: onboarding enforcement staying per-tenant/
+first-responder-wins (explicit product decision, Phase 19 plan); invited
+members skipping onboarding (correct behavior, not a gap); `ENABLE_
+AUTONOMOUS_MODE`/`ENABLE_DESTRUCTIVE_ACTIONS`/`SYNC_DATABASE_URL` dead
+config (harmless, no call sites); the freshness-checker duplicate-incident
+issue and the CSV connector's cosmetic `rows_processed: 0` display bug
+(both flagged, both low-severity, neither blocks anything real); the
+Settings AI Model tab's hardcoded allowlist (explicit adjustment in the
+original Phase 17 spec).
+
+**DOMAIN-GATED (blocked on the user's side — see Outstanding items,
+`CLAUDE.md`)**: real production deployment; Privacy Policy/Terms of
+Service pages; Resend domain verification (blocks real invite/email-code
+delivery to anyone but the account owner).
+
+---
+
 ## Phase 19 plan (locked, 2026-07-22)
 
 Produced from a full code-derived audit of the product (`dataops-agent/USER_MANUAL.md`,
