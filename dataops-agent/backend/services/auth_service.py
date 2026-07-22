@@ -178,13 +178,14 @@ async def resolve_identity(
         if intended_tenant_id:
             r = await db.execute(select(User).where(
                 User.tenant_id == intended_tenant_id, User.email == email,
+                User.is_active.is_(True),
             ))
             user = r.scalars().first()
             if user is None:
                 return {"status": "none"}
             return await _link_and_issue(db, user, auth_method, google_id, provider_email_verified)
 
-        r = await db.execute(select(User).where(User.email == email))
+        r = await db.execute(select(User).where(User.email == email, User.is_active.is_(True)))
         users = r.scalars().all()
         if not users:
             return {"status": "none"}

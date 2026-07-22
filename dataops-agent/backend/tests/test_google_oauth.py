@@ -165,6 +165,40 @@ async def test_returning_google_user_logs_in_without_reverifying(client, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_deactivated_user_cannot_log_back_in_via_google(client, monkeypatch):
+    """Same Phase 19 fix as email-code: a deactivated/removed user must not
+    be able to log back into their old tenant via Google either. Before the
+    fix, resolve_identity() had no is_active filter at all, so this path
+    silently ignored deactivation entirely."""
+    email = unique_email()
+    _mock_google(monkeypatch, email, google_sub="google-sub-deactivated", email_verified=True)
+
+    url1 = await client.get("/api/v1/auth/google/login-url")
+    first = await client.post("/api/v1/auth/google/callback", json={
+        "code": "fake", "state": url1.json()["state"], "new_tenant_name": "Deactivated Google Corp",
+    })
+    assert first.status_code == 200
+    user_id = first.json()["user_id"]
+
+    from database import AsyncSessionLocal
+    from models.all_models import User as UserModel
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(UserModel).where(UserModel.id == user_id))
+        u = r.scalar_one()
+        u.is_active = False
+        await db.commit()
+
+    url2 = await client.get("/api/v1/auth/google/login-url")
+    second = await client.post("/api/v1/auth/google/callback", json={
+        "code": "fake", "state": url2.json()["state"],
+    })
+    assert second.status_code == 200
+    assert second.json()["status"] == "no_account"
+    assert "access_token" not in second.json()
+
+
+@pytest.mark.asyncio
 async def test_multiple_tenant_matches_returns_choose_workspace(client, monkeypatch):
     email = unique_email()
     tenant_a, _ = await create_new_tenant_and_user(

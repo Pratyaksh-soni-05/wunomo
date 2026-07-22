@@ -624,11 +624,13 @@ they can't execute anything. Recorded here, not left implicit.
    file input hidden; a real upload produces a real success toast and
    the new source appears in the table. `npx tsc --noEmit` clean. Full
    backend suite: 242 passed.
-3. `is_active`/role integrity: (a) `resolve_identity()` (email-code/Google
-   login) gains the same `is_active` filter `resolve_password_login()`
-   already has — **not started**; (b) `get_current_user()`'s per-request
-   re-check, now re-reading both `is_active` and `role`, not just
-   `is_active`, since a demoted user must lose their old capabilities
+3. **Done.** `is_active`/role integrity: (a) `resolve_identity()`
+   (email-code/Google login) gains the same `is_active` filter
+   `resolve_password_login()` already has — **done, fully live-verified
+   (2026-07-22)**, see `CLAUDE.md`'s "`resolve_identity()` missing
+   `is_active` filter" Status Table row; (b) `get_current_user()`'s
+   per-request re-check, now re-reading both `is_active` and `role`, not
+   just `is_active`, since a demoted user must lose their old capabilities
    immediately under the new permission model, not just an active/inactive
    user losing all access — **done, shipped with item 1 above, see
    `CLAUDE.md`**.

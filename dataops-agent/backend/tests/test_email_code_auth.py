@@ -122,6 +122,36 @@ async def test_returning_user_single_match_logs_in_to_same_tenant(client, captur
 
 
 @pytest.mark.asyncio
+async def test_deactivated_user_cannot_log_back_in_via_email_code(client, captured_code):
+    """Phase 19 fix: resolve_identity() previously had no is_active filter at
+    all, so a removed team member could still log back into their old
+    (deactivated) tenant via email-code even though resolve_password_login()
+    already blocked the identical scenario for password login. A deactivated
+    user must be treated as if no account exists — same enumeration-safety
+    behavior resolve_password_login() already has — not silently logged back
+    into their old tenant."""
+    email = unique_email()
+    tenant, user = await create_new_tenant_and_user(
+        tenant_name="Deactivated Corp", email=email, auth_method="email_code", email_verified=True,
+    )
+    from database import AsyncSessionLocal
+    from models.all_models import User as UserModel
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(UserModel).where(UserModel.id == user.id))
+        u = r.scalar_one()
+        u.is_active = False
+        await db.commit()
+
+    await client.post("/api/v1/auth/email-code/request", json={"email": email})
+    code = captured_code["code"]
+    verify = await client.post("/api/v1/auth/email-code/verify", json={"email": email, "code": code})
+    assert verify.status_code == 200
+    assert verify.json()["status"] == "no_account"
+    assert "access_token" not in verify.json()
+
+
+@pytest.mark.asyncio
 async def test_multiple_tenant_matches_returns_choose_workspace(client, captured_code):
     email = unique_email()
     tenant_a, _ = await create_new_tenant_and_user(
