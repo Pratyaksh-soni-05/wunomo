@@ -207,8 +207,8 @@ export default function TeamPage() {
         {createdInvite ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <p className="text-sm">
-              Invite created for <strong>{createdInvite.email}</strong>. Resend's sandbox can only deliver to
-              this workspace owner's own verified address today — if that's not who you invited, share this
+              Invite created for <strong>{createdInvite.email}</strong>. Resend&apos;s sandbox can only deliver to
+              this workspace owner&apos;s own verified address today — if that&apos;s not who you invited, share this
               link manually instead:
             </p>
             <code className="code-block" style={{ display: "block", wordBreak: "break-all" }}>
