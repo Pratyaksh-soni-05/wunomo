@@ -411,6 +411,14 @@ export interface PipelineItem {
   schedule_cron: string | null;
   description?: string | null;
   created_at?: string;
+  last_run: {
+    id: string;
+    status: string;
+    triggered_by: string;
+    created_at: string;
+    completed_at: string | null;
+  } | null;
+  next_run_at: string | null;
 }
 
 export interface PipelineRunItem {

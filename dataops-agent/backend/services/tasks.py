@@ -104,6 +104,132 @@ async def _execute_run(run_id: str, pipeline_id: str, tenant_id: str):
         raise
 
 
+async def _create_scheduled_run(pipeline_id: str, tenant_id: str):
+    """Pre-creates a PipelineRun row for a scheduled firing - unlike the
+    manual/API trigger path (DAGManager.trigger_run(), which pre-creates the
+    run inside the request/response cycle before dispatching), a scheduled
+    firing has no such window: each firing needs its own fresh run_id, and
+    nothing calls this ahead of time. Returns the new run_id, or None if the
+    pipeline was deleted/paused/deactivated since this firing was decided
+    (skip silently rather than run a pipeline that's no longer supposed to
+    be scheduled)."""
+    import uuid
+    from sqlalchemy import select
+    from database import AsyncSessionLocal
+    from models.all_models import Pipeline, PipelineRun, PipelineStatus, RunStatus
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Pipeline).where(
+            Pipeline.id == pipeline_id, Pipeline.tenant_id == tenant_id,
+        ))
+        pipeline = r.scalars().first()
+        if pipeline is None or pipeline.status != PipelineStatus.ACTIVE:
+            return None
+
+        run = PipelineRun(
+            id=str(uuid.uuid4()),
+            pipeline_id=pipeline_id,
+            tenant_id=tenant_id,
+            status=RunStatus.PENDING,
+            triggered_by="scheduled",
+            run_logs=[],
+            output_summary={},
+            created_at=utcnow(),
+        )
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        return run.id
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def execute_scheduled_pipeline_run(self, pipeline_id: str, tenant_id: str):
+    """Entry point for a single scheduled firing (2 args - no run_id, since
+    beat/the caller can't pre-create one). Creates its own PipelineRun row,
+    then delegates to the same _execute_run() core execute_pipeline_run()
+    uses for manual/API-triggered runs."""
+    import asyncio
+    from database import engine
+
+    async def _run():
+        await engine.dispose()
+        run_id = await _create_scheduled_run(pipeline_id, tenant_id)
+        if run_id is None:
+            log.info("scheduled_run_skipped", pipeline_id=pipeline_id, reason="not found or not active")
+            return
+        await _execute_run(run_id, pipeline_id, tenant_id)
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        log.error("scheduled_pipeline_run_failed", pipeline_id=pipeline_id, error=str(exc))
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def check_scheduled_pipelines(self):
+    """The real, live scheduling mechanism (static beat entry, every 60s -
+    see services/celery_app.py). Polls every active pipeline with a
+    schedule_cron directly from the DB and fires any whose cron matches the
+    current UTC minute, via the same execute_scheduled_pipeline_run() path.
+    Deliberately NOT the dynamic per-pipeline beat_schedule injection design
+    in modules/orchestration/scheduler.py (Scheduler.register()/sync_all())
+    - that design mutates celery_app.conf.beat_schedule in whichever process
+    calls it, which never reaches the actual separate celery_beat process's
+    own in-memory schedule. This polling design sidesteps that entirely: one
+    static entry, always running in the same process as everything else on
+    the beat schedule, reading real DB state on every tick - the exact same
+    proven pattern as check_all_freshness() (also a static, always-on entry
+    that iterates all tenants directly, no per-tenant dynamic registration).
+    """
+    import asyncio
+    from database import engine
+
+    async def _run():
+        await engine.dispose()
+        await _check_scheduled_pipelines()
+
+    try:
+        asyncio.run(_run())
+    except Exception as exc:
+        log.error("scheduled_pipeline_check_failed", error=str(exc))
+        raise self.retry(exc=exc)
+
+
+async def _check_scheduled_pipelines():
+    from sqlalchemy import select
+    from database import AsyncSessionLocal
+    from models.all_models import Pipeline, PipelineStatus
+    from croniter import croniter
+
+    now = utcnow().replace(second=0, microsecond=0)
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Pipeline).where(
+            Pipeline.status == PipelineStatus.ACTIVE,
+            Pipeline.schedule_cron.isnot(None),
+        ))
+        pipelines = r.scalars().all()
+
+    fired = 0
+    for p in pipelines:
+        cron = (p.schedule_cron or "").strip()
+        if not cron:
+            continue
+        try:
+            is_due = croniter.match(cron, now)
+        except (ValueError, KeyError):
+            log.warning("scheduled_pipeline_invalid_cron", pipeline_id=p.id, cron=cron)
+            continue
+        if not is_due:
+            continue
+        execute_scheduled_pipeline_run.delay(p.id, p.tenant_id)
+        fired += 1
+        log.info("scheduled_pipeline_fired", pipeline_id=p.id, tenant_id=p.tenant_id, cron=cron)
+
+    log.info("scheduled_pipeline_check_complete", checked=len(pipelines), fired=fired)
+
+
 @celery_app.task
 def check_all_freshness():
     import asyncio

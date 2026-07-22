@@ -1,10 +1,25 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from croniter import croniter
 from .auth import get_current_user, require_permission, enforce_quota
 from modules.orchestration.dag_manager import DAGManager
 
 router = APIRouter()
+
+
+def _validate_cron_or_400(cron: Optional[str]) -> None:
+    """Save-time validation, checked before schedule_cron ever reaches the
+    DB - without this, a malformed cron silently persists and only ever
+    surfaces (if at all) as a log line in check_scheduled_pipelines(), never
+    to the user who typed it."""
+    if cron is None:
+        return
+    if not croniter.is_valid(cron.strip()):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{cron}' is not a valid cron expression (expected 5 fields: minute hour day-of-month month day-of-week).",
+        )
 
 
 class PipelineCreate(BaseModel):
@@ -45,6 +60,7 @@ async def list_pipelines(user=Depends(get_current_user)):
 
 @router.post("/")
 async def create_pipeline(req: PipelineCreate, user=Depends(require_permission("pipelines.create"))):
+    _validate_cron_or_400(req.schedule_cron)
     return await DAGManager(user["tenant_id"]).create_pipeline(
         name=req.name, source_id=req.source_id,
         description=req.description, schedule_cron=req.schedule_cron,
@@ -64,6 +80,7 @@ async def get_pipeline(pipeline_id: str, user=Depends(get_current_user)):
 @router.put("/{pipeline_id}")
 async def update_pipeline(pipeline_id: str, req: PipelineUpdate,
                           user=Depends(require_permission("pipelines.create"))):
+    _validate_cron_or_400(req.schedule_cron)
     result = await DAGManager(user["tenant_id"]).update_pipeline(
         pipeline_id, **req.model_dump(exclude_none=True)
     )
@@ -139,6 +156,7 @@ async def activate_pipeline(pipeline_id: str, user=Depends(require_permission("p
 @router.put("/{pipeline_id}/schedule")
 async def set_schedule(pipeline_id: str, req: ScheduleUpdate,
                        user=Depends(require_permission("pipelines.create"))):
+    _validate_cron_or_400(req.cron)
     result = await DAGManager(user["tenant_id"]).set_schedule(pipeline_id, req.cron)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])

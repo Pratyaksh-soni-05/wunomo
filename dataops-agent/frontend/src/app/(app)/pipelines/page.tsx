@@ -123,6 +123,7 @@ export default function PipelinesPage() {
                   <Th>Status</Th>
                   <Th>Source</Th>
                   <Th>Schedule</Th>
+                  <Th>Next / Last Run</Th>
                   <Th>Actions</Th>
                 </Tr>
               </Thead>
@@ -135,6 +136,24 @@ export default function PipelinesPage() {
                     <Td><Badge variant={statusVariant(p.status)}>{p.status}</Badge></Td>
                     <Td>{sourceName(p.source_id)}</Td>
                     <Td>{p.schedule_cron || "Manual"}</Td>
+                    <Td>
+                      <div className="flex flex-col gap-1" style={{ fontSize: 12 }}>
+                        {p.next_run_at ? (
+                          <span className="text-muted">Next: {new Date(p.next_run_at).toLocaleString()}</span>
+                        ) : p.schedule_cron ? (
+                          <span className="text-muted">Not scheduled (paused)</span>
+                        ) : null}
+                        {p.last_run ? (
+                          <span className="flex items-center gap-1">
+                            Last:
+                            <Badge variant={runStatusVariant(p.last_run.status)}>{p.last_run.status}</Badge>
+                            <span className="text-muted">{new Date(p.last_run.created_at).toLocaleString()}</span>
+                          </span>
+                        ) : (
+                          <span className="text-muted">Never run</span>
+                        )}
+                      </div>
+                    </Td>
                     <Td>
                       <div className="flex gap-2">
                         <Button size="sm" variant="secondary" disabled={triggerMut.isPending} onClick={() => triggerMut.mutate(p.id)}>Trigger</Button>

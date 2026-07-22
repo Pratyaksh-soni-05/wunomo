@@ -34,6 +34,15 @@ celery_app.conf.beat_schedule = {
         "task": "services.tasks.run_anomaly_detection",
         "schedule": 3600.0,
     },
+    # The real, live scheduled-pipelines mechanism (Phase 19 fix) - polls
+    # every active pipeline's schedule_cron directly against the DB each
+    # tick. Replaces the dynamic per-pipeline beat_schedule injection design
+    # in modules/orchestration/scheduler.py, which never actually reached
+    # this process's schedule (see that module's docstring for why).
+    "check-scheduled-pipelines-1min": {
+        "task": "services.tasks.check_scheduled_pipelines",
+        "schedule": 60.0,
+    },
     "daily-reports-24hr": {
         "task": "services.tasks.generate_daily_reports",
         "schedule": 86400.0,

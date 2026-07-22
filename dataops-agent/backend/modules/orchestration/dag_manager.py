@@ -16,6 +16,34 @@ log = structlog.get_logger()
 def utcnow(): return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _run_summary(run) -> dict | None:
+    if run is None:
+        return None
+    return {
+        "id": run.id, "status": run.status,
+        "triggered_by": run.triggered_by,
+        "created_at": str(run.created_at),
+        "completed_at": str(run.completed_at) if run.completed_at else None,
+    }
+
+
+def _next_run_at(pipeline) -> str | None:
+    """Computed, not stored - purely derived from schedule_cron each time
+    this list is read, so it's always accurate even if the cron or status
+    just changed. None for unscheduled or non-active pipelines, since
+    services.tasks.check_scheduled_pipelines() only ever fires ACTIVE
+    pipelines with a schedule_cron - showing a next-run time for anything
+    else would be showing a time that will never actually fire."""
+    if not pipeline.schedule_cron or pipeline.status != PipelineStatus.ACTIVE:
+        return None
+    try:
+        from croniter import croniter
+        it = croniter(pipeline.schedule_cron.strip(), utcnow())
+        return it.get_next(datetime).isoformat()
+    except (ValueError, KeyError):
+        return None
+
+
 class DAGManager:
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
@@ -80,6 +108,22 @@ class DAGManager:
                 .order_by(desc(Pipeline.created_at))
             )
             pipelines = r.scalars().all()
+
+            # Most recent run per pipeline, one query for the whole tenant
+            # rather than N+1 - runs are ordered newest-first, so the first
+            # occurrence of each pipeline_id in this list is its latest run.
+            pipeline_ids = [p.id for p in pipelines]
+            last_run_by_pipeline = {}
+            if pipeline_ids:
+                rr = await db.execute(
+                    select(PipelineRun)
+                    .where(PipelineRun.pipeline_id.in_(pipeline_ids))
+                    .order_by(desc(PipelineRun.created_at))
+                )
+                for run in rr.scalars().all():
+                    if run.pipeline_id not in last_run_by_pipeline:
+                        last_run_by_pipeline[run.pipeline_id] = run
+
             return {
                 "pipelines": [
                     {
@@ -89,7 +133,9 @@ class DAGManager:
                         "tags": p.tags or [], "version": p.version,
                         "sla_minutes": p.sla_minutes,
                         "created_at": str(p.created_at),
-                        "updated_at": str(p.updated_at)
+                        "updated_at": str(p.updated_at),
+                        "last_run": _run_summary(last_run_by_pipeline.get(p.id)),
+                        "next_run_at": _next_run_at(p),
                     }
                     for p in pipelines
                 ],

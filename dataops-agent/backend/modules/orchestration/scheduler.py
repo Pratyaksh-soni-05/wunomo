@@ -17,11 +17,23 @@ def utcnow() -> datetime:
 
 class Scheduler:
     """
-    Manages dynamic Celery-beat schedules for AXIOM pipelines.
-
-    Uses Celery's beat scheduler (redis_scheduler or django_celery_beat depending on config).
-    For portability, we use the in-memory/redis beat store pattern:
-    schedules are written to the celery beat_schedule config at runtime.
+    NOT the live scheduling mechanism as of Phase 19 - see
+    services/tasks.py's check_scheduled_pipelines() for what actually runs
+    scheduled pipelines today. This class mutates celery_app.conf
+    .beat_schedule in whichever OS process calls it, but celery_beat runs
+    as its own separate process with its own independent in-memory
+    schedule (the default Celery PersistentScheduler is not shared across
+    processes) - a call to register()/sync_all() from the FastAPI backend
+    process was never going to reach the actual running beat process,
+    regardless of the arg-count bug fixed below. Confirmed via a
+    repo-wide grep that nothing in the running app calls register(),
+    unregister(), or sync_all() at all - not at pipeline create/update,
+    not at container startup, nowhere. Kept in place (not deleted) since
+    its logic is otherwise correct and has its own test coverage
+    (test_scheduler_sync_all_no_attribute_error) - a genuinely shared
+    scheduler store (e.g. RedBeat with Redis) could resurrect this design
+    properly in the future, but that's a real architecture change, not
+    this fix's scope.
 
     Each active pipeline with a schedule_cron gets a periodic task entry:
         axiom-pipeline-{pipeline_id} → execute_pipeline_run.apply_async
@@ -89,8 +101,16 @@ class Scheduler:
 
             from celery.schedules import crontab as CeleryTab
 
+            # execute_pipeline_run(self, run_id, pipeline_id, tenant_id) needs
+            # a real, pre-created run_id as its first arg - a static 2-arg
+            # beat entry can never supply one (each firing needs its own new
+            # run, and beat has no way to compute a fresh id per firing).
+            # Pointed at execute_scheduled_pipeline_run(pipeline_id, tenant_id)
+            # instead, which creates its own PipelineRun row on each firing
+            # before delegating to the same execution core - see
+            # services/tasks.py.
             celery_app.conf.beat_schedule[entry_name] = {
-                "task": "services.tasks.execute_pipeline_run",
+                "task": "services.tasks.execute_scheduled_pipeline_run",
                 "schedule": CeleryTab(**crontab),
                 "args": [pipeline_id, tenant_id],
                 "options": {"queue": "default"},

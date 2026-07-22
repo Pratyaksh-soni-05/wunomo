@@ -644,15 +644,25 @@ they can't execute anything. Recorded here, not left implicit.
    the corrected link, and that exact link loaded in a real browser
    correctly resolved to the real tenant/role instead of a 404. See
    `CLAUDE.md`'s "Invite email link pointed at a 404" Status Table row.
-5. Scheduled pipelines: fix the Celery beat argument mismatch (`args:
-   [pipeline_id, tenant_id]` vs. `execute_pipeline_run(run_id, pipeline_id,
-   tenant_id)` — confirmed guaranteed crash on every real firing, not a
-   suspicion), add save-time cron validation (the real parser,
-   `scheduler.py`'s `_parse_cron()`, already exists but is never called from
-   the save path), add next-run/last-run visibility to the Pipelines screen.
-   Verify live with a real `* * * * *` schedule (cheap, no LLM quota — watch
-   a real run land within ~60–90s). Hide the Schedule field only if this
-   verification fails.
+5. **Done, fully live-verified (2026-07-22).** Scheduled pipelines: the
+   originally-scoped arg-mismatch bug turned out to be the smaller half of
+   a bigger finding — the entire dynamic per-pipeline scheduling mechanism
+   (`Scheduler.register()`/`sync_all()`) was never actually called from
+   anywhere in the running app, and even a correctly-wired call couldn't
+   have worked, since it mutates a `beat_schedule` dict that isn't shared
+   between the `backend` and `celery_beat` processes. Replaced with a real,
+   live static-polling beat task (`check_scheduled_pipelines()`, every 60s,
+   same pattern as the already-working `check_all_freshness()`) that polls
+   active scheduled pipelines against the DB directly and fires due ones via
+   `croniter.match()`. Added save-time cron validation (`croniter.is_valid()`,
+   all 3 write paths) and real next-run/last-run visibility (new "Next /
+   Last Run" column, Pipelines screen). **Verified live exactly per this
+   item's own gate**: a real `* * * * *` pipeline produced 3 real,
+   correctly-timed runs one minute apart, no duplicates, confirmed via the
+   real run-history endpoint and a real Playwright DOM check of the UI. See
+   `CLAUDE.md`'s "Scheduled pipelines cluster" Status Table row and its new
+   Gotchas (the cross-process `beat_schedule` mutation issue, and a
+   confirmed-pre-existing/benign asyncio warning found during verification).
 
 ### P1
 
