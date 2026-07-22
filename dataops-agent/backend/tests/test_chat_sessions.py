@@ -52,6 +52,7 @@ async def test_chat_response_includes_tool_trace(client, monkeypatch):
     ])
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
     dataops_agent._cache.clear()
 
@@ -82,6 +83,7 @@ async def test_blocked_tool_call_shows_up_in_trace(client, monkeypatch):
     ])
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: True)
     dataops_agent._cache.clear()
 
@@ -105,6 +107,7 @@ async def test_chat_sessions_list_is_scoped_to_the_requesting_user(client, monke
     fake_llm = FakeToolCallLLM([AIMessage(content="hi there")])
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
     dataops_agent._cache.clear()
 
@@ -139,6 +142,7 @@ async def test_chat_sessions_list_shape_and_title(client, monkeypatch):
     fake_llm = FakeToolCallLLM([AIMessage(content="Paris is the capital.")])
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
     dataops_agent._cache.clear()
 
@@ -170,6 +174,7 @@ async def test_session_history_includes_tool_calls(client, monkeypatch):
     ])
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
     dataops_agent._cache.clear()
 

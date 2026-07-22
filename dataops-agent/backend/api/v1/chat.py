@@ -16,11 +16,16 @@ from langchain_core.messages import AIMessage as LCAIMessage, ToolMessage as LCT
 router = APIRouter()
 
 
-def _extract_tool_trace(new_messages, blocked_tool_calls) -> list[dict]:
+def _extract_tool_trace(new_messages, blocked_tool_calls, role_denied_calls) -> list[dict]:
     """Build a tool-call trace for this turn from the graph's own new messages:
     every AIMessage.tool_calls paired with its ToolMessage result (matched by
     tool_call_id), plus any tool calls approval_gate_node blocked before they
-    ever reached ToolNode. Tool outputs are already capped by cap_tool_result()
+    ever reached ToolNode, plus any tool calls the role-permission gate
+    stripped before approval_gate_node ever saw them (role_denied_calls —
+    these are a distinct status from "blocked_pending_approval": a role
+    denial can never later become approved, unlike a risk-blocked call, so
+    the frontend must not offer the same "review on the Approvals screen"
+    affordance for it). Tool outputs are already capped by cap_tool_result()
     before they enter this list (see agent/tools/_utils.py) — no re-truncation
     needed here."""
     results_by_id = {
@@ -43,6 +48,11 @@ def _extract_tool_trace(new_messages, blocked_tool_calls) -> list[dict]:
                     "tool": call["name"], "args": call["args"],
                     "result": result, "status": status,
                 })
+    for call in role_denied_calls:
+        trace.append({
+            "tool": call["name"], "args": call.get("args", {}),
+            "result": None, "status": "denied_insufficient_role",
+        })
     return trace
 
 @router.post("/")
@@ -67,7 +77,7 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
 
     result = await run_agent(
         user_message=req.message, tenant_id=tenant_id, user_id=user["sub"],
-        session_id=session_id, personality_mode=req.personality_mode,
+        session_id=session_id, caller_role=user["role"], personality_mode=req.personality_mode,
         operation_mode=req.operation_mode, history=history, context=req.context,
     )
 
@@ -91,7 +101,7 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
         # reducer) — slice off the history prefix chat.py itself passed in to
         # isolate just this turn's new AI/tool messages for the trace.
         new_messages = result["messages"][len(history):]
-        tool_trace = _extract_tool_trace(new_messages, result["pending_approvals"])
+        tool_trace = _extract_tool_trace(new_messages, result["pending_approvals"], result.get("role_denied", []))
 
         for role, content, calls in [
             ("user", req.message, []),

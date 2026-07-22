@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from .auth import require_role
-from services.rbac import Role
+from .auth import require_permission
 from services.api_key_service import create_api_key, list_api_keys, revoke_api_key
 
 router = APIRouter()
@@ -15,7 +14,7 @@ class ApiKeyCreate(BaseModel):
 @router.post("/")
 async def create_key(
     body: ApiKeyCreate,
-    user=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    user=Depends(require_permission("api_keys.manage")),
 ):
     """Returns the raw key exactly once - it is never retrievable again
     after this response (only its hash is stored)."""
@@ -26,7 +25,7 @@ async def create_key(
 
 
 @router.get("/")
-async def list_keys(user=Depends(require_role(Role.OWNER, Role.ADMIN))):
+async def list_keys(user=Depends(require_permission("api_keys.manage"))):
     """Owner/Admin only - unlike team roster or usage, API keys are
     sensitive infrastructure credentials even in masked form (know which
     ones exist, when they were last used)."""
@@ -36,7 +35,7 @@ async def list_keys(user=Depends(require_role(Role.OWNER, Role.ADMIN))):
 @router.delete("/{key_id}")
 async def revoke_key(
     key_id: str,
-    user=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    user=Depends(require_permission("api_keys.manage")),
 ):
     result = await revoke_api_key(user["tenant_id"], key_id)
     if "error" in result:

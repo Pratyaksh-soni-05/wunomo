@@ -10,10 +10,52 @@ from langgraph.prebuilt import ToolNode
 from agent.personality import build_system_prompt, requires_approval, get_risk_level
 from agent.tools import ALL_TOOLS
 from services.llm_service import get_llm_for_agent, log_llm_usage, content_as_text
+from services.rbac import has_permission, TOOL_CAPABILITIES
 from models.all_models import PersonalityMode, OperationMode
 import structlog
 
 log = structlog.get_logger()
+
+# Fail-closed, checked at import time (not lazily on first call): every real
+# tool AXIOM can call must have a TOOL_CAPABILITIES entry, or it's silently
+# denied for every role forever — better to crash the process at boot than
+# let a newly-added tool go unmapped and undiscovered. This is the mechanism
+# that makes "gating was opt-in" (the root cause of the original bypass)
+# structurally impossible to repeat.
+_unmapped_tools = sorted(set(t.name for t in ALL_TOOLS) - set(TOOL_CAPABILITIES))
+assert not _unmapped_tools, (
+    f"Tool(s) missing a TOOL_CAPABILITIES entry in services/rbac.py: {_unmapped_tools} "
+    "— every registered AXIOM tool must be mapped or it's unreachable for every role."
+)
+
+
+def role_denied_tool_calls(caller_role: str, tool_calls: list[dict]) -> list[dict]:
+    """The agent-side half of the unified permission gate — mirrors
+    require_permission() on the REST side, reading the exact same
+    services/rbac.py map so REST and chat can never silently drift onto two
+    different rulebooks. Mutates `tool_calls` in place to remove any call
+    the caller's role isn't permitted to make (so they never reach ToolNode
+    and never execute), and returns the removed calls, each tagged with a
+    human-readable reason, for the caller to surface back to the user.
+    Fail-closed: a tool with no TOOL_CAPABILITIES entry is denied for every
+    role (though the startup assertion above should make that state
+    unreachable in practice). Deliberately a standalone function, not
+    embedded in agent_node's closure, so it can be unit-tested directly with
+    a synthetic role and a plain list of tool-call dicts — no LLM, no graph,
+    no real AXIOM conversation required."""
+    denied = []
+    kept = []
+    for call in tool_calls:
+        capability = TOOL_CAPABILITIES.get(call["name"])
+        if capability is None or not has_permission(caller_role, capability):
+            denied.append({
+                **call,
+                "reason": f"Your role does not have permission to use '{call['name']}'.",
+            })
+        else:
+            kept.append(call)
+    tool_calls[:] = kept
+    return denied
 
 # langchain-google-genai 3.2.0 (see CLAUDE.md Gotchas) consistently returns
 # dict/list-typed tool arguments as JSON-encoded strings rather than native
@@ -69,9 +111,11 @@ class AgentState(TypedDict):
     tenant_id: str
     user_id: str
     session_id: str
+    caller_role: str
     personality_mode: str
     operation_mode: str
     pending_approvals: list
+    role_denied: list
     iteration_count: int
     context: dict
     system_prompt: str
@@ -144,7 +188,20 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
             if "session_id" in args:
                 args["session_id"] = state["session_id"]
             _coerce_stringified_object_args(call["name"], args)
-        return {"messages": [response], "iteration_count": state.get("iteration_count", 0) + 1}
+
+        # Role-permission gate — evaluated before and independently of
+        # approval_gate_node's operation_mode/risk-tier check below. A call
+        # denied here never reaches approval_gate_node or ToolNode at all;
+        # it cannot become approvable later the way a risk-blocked call can,
+        # because the caller's role was never allowed to request it in the
+        # first place. See role_denied_tool_calls' own docstring.
+        denied = role_denied_tool_calls(state["caller_role"], response.tool_calls or [])
+
+        return {
+            "messages": [response],
+            "iteration_count": state.get("iteration_count", 0) + 1,
+            "role_denied": state.get("role_denied", []) + denied,
+        }
 
     def approval_gate_node(state):
         last_msg = state["messages"][-1]
@@ -202,7 +259,7 @@ def get_agent(personality="engineer", operation="assisted", tenant_id=None, prim
     return _cache[key]
 
 
-async def run_agent(user_message, tenant_id, user_id, session_id,
+async def run_agent(user_message, tenant_id, user_id, session_id, caller_role,
                     personality_mode="engineer", operation_mode="assisted",
                     history=None, context=None) -> dict:
     from services.settings_service import get_ai_model_override
@@ -213,13 +270,16 @@ async def run_agent(user_message, tenant_id, user_id, session_id,
     # authenticated JWT (see api/v1/auth.py get_current_user, via api/v1/chat.py).
     # Any client-supplied `context` must never be able to override them — force
     # (not merge) so a malicious or mistaken client-supplied context can't smuggle
-    # in a different identity for the LLM to be told about.
+    # in a different identity for the LLM to be told about. caller_role is the
+    # same freshly-re-read role get_current_user() now provides (never the
+    # client-supplied JWT claim alone) — see role_denied_tool_calls().
     safe_context = dict(context or {})
     safe_context.update({"tenant_id": tenant_id, "user_id": user_id, "session_id": session_id})
     final = await agent.ainvoke({
         "messages": messages, "tenant_id": tenant_id, "user_id": user_id,
-        "session_id": session_id, "personality_mode": personality_mode,
-        "operation_mode": operation_mode, "pending_approvals": [],
+        "session_id": session_id, "caller_role": caller_role,
+        "personality_mode": personality_mode,
+        "operation_mode": operation_mode, "pending_approvals": [], "role_denied": [],
         "iteration_count": 0, "context": safe_context, "system_prompt": "",
     }, config={"recursion_limit": AGENT_RECURSION_LIMIT})
     last_ai = next((m for m in reversed(final["messages"]) if isinstance(m, AIMessage)), None)
@@ -228,10 +288,21 @@ async def run_agent(user_message, tenant_id, user_id, session_id,
          if isinstance(m, AIMessage) and m.additional_kwargs.get("llm_provider")),
         None,
     )
+    role_denied = final.get("role_denied", [])
+    response_text = content_as_text(last_ai.content) if last_ai else "No response."
+    if role_denied and not response_text.strip():
+        # The LLM's own text is typically blank/minimal when it was mainly
+        # trying to call a now-stripped tool — make sure the user sees
+        # *something* explaining why nothing happened, rather than a blank
+        # reply that looks like a silent failure.
+        response_text = "I don't have permission to do that with your current role: " + ", ".join(
+            f"`{c['name']}`" for c in role_denied
+        )
     return {
-        "response": content_as_text(last_ai.content) if last_ai else "No response.",
+        "response": response_text,
         "provider": last_llm_call.additional_kwargs["llm_provider"] if last_llm_call else None,
         "pending_approvals": final.get("pending_approvals", []),
+        "role_denied": role_denied,
         "messages": final["messages"],
         "session_id": session_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),

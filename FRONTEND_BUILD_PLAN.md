@@ -583,18 +583,30 @@ they can't execute anything. Recorded here, not left implicit.
 
 ### P0 (launch-blocking, this phase)
 
-1. Unified permission spec + AXIOM tool-call bypass (above).
+1. **Done, fully live-verified (2026-07-22).** Unified permission spec +
+   AXIOM tool-call bypass (above) — see `CLAUDE.md`'s new "Unified
+   permission spec" Status Table row for the complete implementation,
+   241-test regression detail, and the real-server live-verification
+   (including the headline proof: a Viewer promoted to Data Engineer via a
+   direct DB write, with no new JWT issued, had their existing token's
+   *next request* immediately reflect the new capability — and the same
+   still-valid token was immediately rejected the moment the user was
+   deactivated). Item 3(b) below (the `get_current_user()` per-request
+   `is_active`/role re-check) shipped as part of this same work, not
+   separately.
 2. File-upload UI for CSV/Excel in the Sources "Add Source" modal — zero
    frontend callers of `POST /uploads/register` exist today; a first-time
    user cannot add either of the two source types most likely to be tried
    first. Real `<input type="file">` wired to `/uploads/register`, replacing
-   the raw JSON-textarea path for `csv`/`excel` only.
+   the raw JSON-textarea path for `csv`/`excel` only. **Not started.**
 3. `is_active`/role integrity: (a) `resolve_identity()` (email-code/Google
    login) gains the same `is_active` filter `resolve_password_login()`
-   already has; (b) `get_current_user()`'s per-request re-check (above),
-   now re-reading both `is_active` and `role`, not just `is_active`, since a
-   demoted user must lose their old capabilities immediately under the new
-   permission model, not just an active/inactive user losing all access.
+   already has — **not started**; (b) `get_current_user()`'s per-request
+   re-check, now re-reading both `is_active` and `role`, not just
+   `is_active`, since a demoted user must lose their old capabilities
+   immediately under the new permission model, not just an active/inactive
+   user losing all access — **done, shipped with item 1 above, see
+   `CLAUDE.md`**.
 4. Fix `_invite_link()`'s `/accept-invite` → `/invite/accept` (confirmed the
    only backend-generated frontend link in the codebase — isolated fix, no
    pattern to hunt elsewhere).

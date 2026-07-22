@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import select
 
-from .auth import get_current_user
+from .auth import get_current_user, require_permission
 from database import AsyncSessionLocal
 from models.all_models import DataContract, DataSource
 from modules.governance.lineage_tracker import LineageTracker
@@ -176,7 +176,7 @@ async def get_contract(contract_id: str, user=Depends(get_current_user)):
 @router.post("/contracts", status_code=201)
 async def create_contract(
     body: CreateContractRequest,
-    user=Depends(get_current_user),
+    user=Depends(require_permission("contracts.create")),
 ):
     """Create a new data contract."""
     result = await contract_service.create_contract(
@@ -196,7 +196,7 @@ async def create_contract(
 @router.post("/contracts/{contract_id}/validate")
 async def validate_contract(
     contract_id: str,
-    user=Depends(get_current_user),
+    user=Depends(require_permission("contracts.validate")),
 ):
     """
     Validate a data contract against the current source schema.

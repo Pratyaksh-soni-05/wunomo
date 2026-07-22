@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import select, desc
 
-from .auth import get_current_user
+from .auth import get_current_user, require_permission
 from database import get_db
 from models.cicd import PipelineCommit
 from modules.governance.policy_engine import PolicyEngine
@@ -131,19 +131,12 @@ async def get_approval(approval_id: str, user=Depends(get_current_user)):
 async def approve_action(
     approval_id: str,
     body: ResolveRequest,
-    user=Depends(get_current_user),
+    user=Depends(require_permission("approvals.manage")),
 ):
     """
     Approve a pending action and execute it immediately.
     The execution result is stored on the approval request.
-    Only users with role 'admin' or 'owner' may approve.
     """
-    if user.get("role") not in ("admin", "owner"):
-        raise HTTPException(
-            status_code=403,
-            detail="Only admins and owners can approve actions",
-        )
-
     engine = PolicyEngine(user["tenant_id"])
     result = await engine.approve(
         approval_id=approval_id,
@@ -170,18 +163,11 @@ async def approve_action(
 async def reject_action(
     approval_id: str,
     body: ResolveRequest,
-    user=Depends(get_current_user),
+    user=Depends(require_permission("approvals.manage")),
 ):
     """
     Reject a pending action. The action will not be executed.
-    Only users with role 'admin' or 'owner' may reject.
     """
-    if user.get("role") not in ("admin", "owner"):
-        raise HTTPException(
-            status_code=403,
-            detail="Only admins and owners can reject actions",
-        )
-
     engine = PolicyEngine(user["tenant_id"])
     result = await engine.reject(
         approval_id=approval_id,

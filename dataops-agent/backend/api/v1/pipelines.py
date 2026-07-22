@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from .auth import get_current_user, require_role, enforce_quota
-from services.rbac import Role
+from .auth import get_current_user, require_permission, enforce_quota
 from modules.orchestration.dag_manager import DAGManager
 
 router = APIRouter()
@@ -45,7 +44,7 @@ async def list_pipelines(user=Depends(get_current_user)):
 
 
 @router.post("/")
-async def create_pipeline(req: PipelineCreate, user=Depends(get_current_user)):
+async def create_pipeline(req: PipelineCreate, user=Depends(require_permission("pipelines.create"))):
     return await DAGManager(user["tenant_id"]).create_pipeline(
         name=req.name, source_id=req.source_id,
         description=req.description, schedule_cron=req.schedule_cron,
@@ -64,7 +63,7 @@ async def get_pipeline(pipeline_id: str, user=Depends(get_current_user)):
 
 @router.put("/{pipeline_id}")
 async def update_pipeline(pipeline_id: str, req: PipelineUpdate,
-                          user=Depends(get_current_user)):
+                          user=Depends(require_permission("pipelines.create"))):
     result = await DAGManager(user["tenant_id"]).update_pipeline(
         pipeline_id, **req.model_dump(exclude_none=True)
     )
@@ -74,7 +73,7 @@ async def update_pipeline(pipeline_id: str, req: PipelineUpdate,
 
 
 @router.delete("/{pipeline_id}")
-async def delete_pipeline(pipeline_id: str, user=Depends(require_role(Role.OWNER, Role.ADMIN, Role.DATA_ENGINEER))):
+async def delete_pipeline(pipeline_id: str, user=Depends(require_permission("pipelines.delete"))):
     from sqlalchemy import select, delete, update
     from database import AsyncSessionLocal
     from models.all_models import Pipeline, PipelineRun, QualityRule, Incident
@@ -108,7 +107,11 @@ async def delete_pipeline(pipeline_id: str, user=Depends(require_role(Role.OWNER
 
 
 @router.post("/{pipeline_id}/trigger")
-async def trigger_run(pipeline_id: str, user=Depends(enforce_quota("pipeline_runs"))):
+async def trigger_run(
+    pipeline_id: str,
+    _perm=Depends(require_permission("pipelines.operate")),
+    user=Depends(enforce_quota("pipeline_runs")),
+):
     result = await DAGManager(user["tenant_id"]).trigger_run(
         pipeline_id, triggered_by=user["sub"]
     )
@@ -118,7 +121,7 @@ async def trigger_run(pipeline_id: str, user=Depends(enforce_quota("pipeline_run
 
 
 @router.post("/{pipeline_id}/pause")
-async def pause_pipeline(pipeline_id: str, user=Depends(get_current_user)):
+async def pause_pipeline(pipeline_id: str, user=Depends(require_permission("pipelines.operate"))):
     result = await DAGManager(user["tenant_id"]).pause_pipeline(pipeline_id)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
@@ -126,7 +129,7 @@ async def pause_pipeline(pipeline_id: str, user=Depends(get_current_user)):
 
 
 @router.post("/{pipeline_id}/activate")
-async def activate_pipeline(pipeline_id: str, user=Depends(get_current_user)):
+async def activate_pipeline(pipeline_id: str, user=Depends(require_permission("pipelines.operate"))):
     result = await DAGManager(user["tenant_id"]).activate_pipeline(pipeline_id)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
@@ -135,7 +138,7 @@ async def activate_pipeline(pipeline_id: str, user=Depends(get_current_user)):
 
 @router.put("/{pipeline_id}/schedule")
 async def set_schedule(pipeline_id: str, req: ScheduleUpdate,
-                       user=Depends(get_current_user)):
+                       user=Depends(require_permission("pipelines.create"))):
     result = await DAGManager(user["tenant_id"]).set_schedule(pipeline_id, req.cron)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
@@ -153,7 +156,7 @@ async def get_run_history(pipeline_id: str, limit: int = 20,
 
 @router.post("/{pipeline_id}/backfill")
 async def backfill(pipeline_id: str, req: BackfillRequest,
-                   user=Depends(get_current_user)):
+                   user=Depends(require_permission("pipelines.operate"))):
     result = await DAGManager(user["tenant_id"]).backfill(
         pipeline_id, req.start_date, req.end_date
     )

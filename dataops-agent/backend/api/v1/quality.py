@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from .auth import get_current_user, require_role
-from services.rbac import Role
+from .auth import get_current_user, require_permission
 from modules.quality.rule_engine import QualityRuleEngine
 
 router = APIRouter()
@@ -24,7 +23,7 @@ async def list_rules(pipeline_id: str = None, user=Depends(get_current_user)):
 
 
 @router.post("/")
-async def create_rule(req: RuleCreate, user=Depends(get_current_user)):
+async def create_rule(req: RuleCreate, user=Depends(require_permission("quality.manage"))):
     result = await QualityRuleEngine(user["tenant_id"]).create_rule(
         pipeline_id=req.pipeline_id, name=req.name,
         rule_type=req.rule_type, column_name=req.column_name,
@@ -37,12 +36,12 @@ async def create_rule(req: RuleCreate, user=Depends(get_current_user)):
 
 
 @router.post("/{pipeline_id}/run")
-async def run_checks(pipeline_id: str, user=Depends(get_current_user)):
+async def run_checks(pipeline_id: str, user=Depends(require_permission("quality.manage"))):
     return await QualityRuleEngine(user["tenant_id"]).run_checks(pipeline_id)
 
 
 @router.delete("/{rule_id}")
-async def delete_rule(rule_id: str, user=Depends(require_role(Role.OWNER, Role.ADMIN, Role.DATA_ENGINEER))):
+async def delete_rule(rule_id: str, user=Depends(require_permission("quality.delete"))):
     result = await QualityRuleEngine(user["tenant_id"]).delete_rule(rule_id)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])

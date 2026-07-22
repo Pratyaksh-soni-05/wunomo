@@ -78,12 +78,13 @@ async def test_agent_message_history_stays_bounded(monkeypatch):
     fake_llm = FakeToolCallLLM(_tool_call_then_final_responses())
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_echo_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_echo_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
     dataops_agent._cache.clear()
 
     result = await dataops_agent.run_agent(
         user_message="please echo hi",
-        tenant_id="t1", user_id="u1", session_id="s1",
+        tenant_id="t1", user_id="u1", session_id="s1", caller_role="owner",
     )
 
     messages = result["messages"]
@@ -104,6 +105,7 @@ async def test_agent_multi_turn_history_grows_linearly(monkeypatch):
     growth across turns must be linear in the number of real messages, not
     exponential."""
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_echo_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_echo_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
 
     from langchain_core.messages import HumanMessage, AIMessage as AIMsg
@@ -116,7 +118,7 @@ async def test_agent_multi_turn_history_grows_linearly(monkeypatch):
 
         result = await dataops_agent.run_agent(
             user_message=f"turn {turn}",
-            tenant_id="t1", user_id="u1", session_id="s1",
+            tenant_id="t1", user_id="u1", session_id="s1", caller_role="owner",
             history=history,
         )
         # Each turn's own internal run must stay at exactly
@@ -139,12 +141,13 @@ async def test_agent_forces_real_tenant_id_even_if_llm_guesses_wrong(monkeypatch
     fake_llm = FakeToolCallLLM(_identity_tool_call_responses("hallucinated-placeholder"))
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_identity_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_identity_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
     dataops_agent._cache.clear()
 
     result = await dataops_agent.run_agent(
         user_message="do the thing",
-        tenant_id="real-tenant-abc", user_id="u1", session_id="s1",
+        tenant_id="real-tenant-abc", user_id="u1", session_id="s1", caller_role="owner",
     )
 
     tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
@@ -161,12 +164,13 @@ async def test_client_supplied_context_tenant_id_override_is_ignored(monkeypatch
     fake_llm = FakeToolCallLLM(_identity_tool_call_responses("real-tenant-abc"))
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_identity_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_identity_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
     dataops_agent._cache.clear()
 
     result = await dataops_agent.run_agent(
         user_message="do the thing",
-        tenant_id="real-tenant-abc", user_id="u1", session_id="s1",
+        tenant_id="real-tenant-abc", user_id="u1", session_id="s1", caller_role="owner",
         context={"tenant_id": "malicious-other-tenant", "note": "kept"},
     )
 
@@ -204,11 +208,12 @@ async def test_blocked_tool_call_carries_its_real_risk_level_not_hardcoded_high(
     ])
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [rerun_pipeline])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"rerun_pipeline": "view"})
     dataops_agent._cache.clear()
 
     result = await dataops_agent.run_agent(
         user_message="rerun it",
-        tenant_id="t1", user_id="u1", session_id="s1",
+        tenant_id="t1", user_id="u1", session_id="s1", caller_role="owner",
         operation_mode="assisted",
     )
 
@@ -240,12 +245,13 @@ async def test_agent_forces_real_user_id_and_session_id_too(monkeypatch):
     ])
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_full_identity_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_full_identity_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
     dataops_agent._cache.clear()
 
     result = await dataops_agent.run_agent(
         user_message="do the thing",
-        tenant_id="real-tenant", user_id="real-user", session_id="real-session",
+        tenant_id="real-tenant", user_id="real-user", session_id="real-session", caller_role="owner",
     )
 
     tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
@@ -287,11 +293,12 @@ async def test_stringified_dict_arg_is_coerced_back_to_a_real_dict(monkeypatch):
     ])
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_object_arg_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_object_arg_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
     dataops_agent._cache.clear()
 
     result = await dataops_agent.run_agent(
-        user_message="register this", tenant_id="t1", user_id="u1", session_id="s1",
+        user_message="register this", tenant_id="t1", user_id="u1", session_id="s1", caller_role="owner",
     )
 
     tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
@@ -319,11 +326,12 @@ async def test_malformed_json_string_arg_is_left_for_the_tool_to_reject(monkeypa
     ])
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_object_arg_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_object_arg_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
     dataops_agent._cache.clear()
 
     result = await dataops_agent.run_agent(
-        user_message="register this", tenant_id="t1", user_id="u1", session_id="s1",
+        user_message="register this", tenant_id="t1", user_id="u1", session_id="s1", caller_role="owner",
     )
 
     tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
@@ -360,7 +368,7 @@ async def test_get_cicd_status_tool_uses_real_tenant_id(monkeypatch):
 
     result = await dataops_agent.run_agent(
         user_message="what's my CICD status?",
-        tenant_id="real-tenant-abc", user_id="u1", session_id="s1",
+        tenant_id="real-tenant-abc", user_id="u1", session_id="s1", caller_role="owner",
     )
 
     # The tool call's args must have been corrected to the real tenant_id
@@ -413,12 +421,13 @@ async def test_runaway_tool_calling_hits_graceful_cap_not_a_crash(monkeypatch):
     fake_llm = InfiniteToolCallLLM()
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_echo_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_echo_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
     dataops_agent._cache.clear()
 
     result = await dataops_agent.run_agent(
         user_message="please keep going forever",
-        tenant_id="t1", user_id="u1", session_id="s1",
+        tenant_id="t1", user_id="u1", session_id="s1", caller_role="owner",
     )
 
     assert result["response"] == "Max reasoning steps reached. Please clarify your request."

@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from .auth import get_current_user, require_role
-from services.rbac import Role
+from .auth import get_current_user, require_permission
 from services.billing_service import BillingService
 from services.quota_service import PLANS
 
@@ -37,7 +36,7 @@ async def get_current_plan(user=Depends(get_current_user)):
 @router.post("/change-plan")
 async def change_plan(
     body: PlanChange,
-    user=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    user=Depends(require_permission("billing.manage")),
 ):
     """Real today, immediate effect - no payment collection exists yet.
     See BillingService.change_plan()'s docstring: this is a deliberate
@@ -51,7 +50,7 @@ async def change_plan(
 
 
 @router.post("/checkout")
-async def create_checkout(user=Depends(require_role(Role.OWNER, Role.ADMIN))):
+async def create_checkout(user=Depends(require_permission("billing.manage"))):
     raise HTTPException(status_code=501, detail="Stripe checkout not yet implemented - use POST /billing/change-plan for now")
 
 

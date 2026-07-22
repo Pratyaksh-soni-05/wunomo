@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import select, desc
 from datetime import datetime, timezone
-from .auth import get_current_user
+from .auth import get_current_user, require_permission
 from database import AsyncSessionLocal
 from models.all_models import (
     Incident, IncidentSeverity, IncidentStatus
@@ -72,7 +72,7 @@ async def list_incidents(
 
 
 @router.post("/")
-async def create_incident(req: IncidentCreate, user=Depends(get_current_user)):
+async def create_incident(req: IncidentCreate, user=Depends(require_permission("incidents.log"))):
     async with AsyncSessionLocal() as db:
         incident = Incident(
             id=str(uuid.uuid4()),
@@ -118,7 +118,11 @@ async def get_incident(incident_id: str, user=Depends(get_current_user)):
 
 @router.put("/{incident_id}")
 async def update_incident(incident_id: str, req: IncidentUpdate,
-                          user=Depends(get_current_user)):
+                          user=Depends(require_permission("incidents.resolve"))):
+    # Gated at incidents.resolve, not incidents.log: this endpoint can set
+    # status to "resolved" (req.status), the same sensitive transition the
+    # dedicated /resolve endpoint gates - gating this one lower would let a
+    # role blocked from /resolve achieve the same effect through here.
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Incident).where(
             Incident.id == incident_id,
@@ -139,7 +143,7 @@ async def update_incident(incident_id: str, req: IncidentUpdate,
 
 @router.post("/{incident_id}/resolve")
 async def resolve_incident(incident_id: str, req: IncidentResolve,
-                           user=Depends(get_current_user)):
+                           user=Depends(require_permission("incidents.resolve"))):
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Incident).where(
             Incident.id == incident_id,

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 
-from .auth import get_current_user, require_role, enforce_quota
+from .auth import get_current_user, require_permission, enforce_quota
 from services.rbac import Role, ALL_ROLES
 from services.team_service import create_invite, send_invite_email, get_invite_by_token, accept_invite
 from database import AsyncSessionLocal
@@ -29,7 +29,7 @@ class InviteAccept(BaseModel):
 @router.post("/invites")
 async def create_team_invite(
     body: InviteCreate,
-    user=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    user=Depends(require_permission("team.manage")),
     _quota=Depends(enforce_quota("team_members")),
 ):
     result = await create_invite(
@@ -56,7 +56,7 @@ async def create_team_invite(
 
 
 @router.get("/invites")
-async def list_team_invites(user=Depends(require_role(Role.OWNER, Role.ADMIN))):
+async def list_team_invites(user=Depends(require_permission("team.manage"))):
     async with AsyncSessionLocal() as db:
         r = await db.execute(
             select(TeamInvite)
@@ -79,7 +79,7 @@ async def list_team_invites(user=Depends(require_role(Role.OWNER, Role.ADMIN))):
 @router.delete("/invites/{invite_id}")
 async def revoke_team_invite(
     invite_id: str,
-    user=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    user=Depends(require_permission("team.manage")),
 ):
     async with AsyncSessionLocal() as db:
         r = await db.execute(
@@ -151,7 +151,7 @@ async def _active_owner_count(db, tenant_id: str, exclude_user_id: str = None) -
 async def change_member_role(
     user_id: str,
     body: RoleChange,
-    caller=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    caller=Depends(require_permission("team.manage")),
 ):
     if body.role not in ALL_ROLES:
         raise HTTPException(status_code=400, detail=f"Invalid role '{body.role}'. Valid: {list(ALL_ROLES)}")
@@ -183,7 +183,7 @@ async def change_member_role(
 @router.delete("/members/{user_id}")
 async def remove_team_member(
     user_id: str,
-    caller=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    caller=Depends(require_permission("team.manage")),
 ):
     """Soft-removal (is_active=False), not a hard delete - User is
     referenced by real FKs with no cascade (OnboardingProfile.user_id,

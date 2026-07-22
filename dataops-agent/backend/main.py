@@ -176,6 +176,15 @@ async def websocket_chat(ws: WebSocket, tenant_id: str, session_id: str):
                     tenant_id=tenant_id,
                     user_id=data.get("user_id", "anon"),
                     session_id=session_id,
+                    # This endpoint has no JWT/auth at all (see CLAUDE.md's
+                    # "WebSocket chat auth" Known-broken row — unrelated,
+                    # pre-existing, unfixed here) — there is no real role to
+                    # read. Hardcoding the least-privileged role rather than
+                    # trusting a client-supplied one narrows what this
+                    # already-broken path can do via AXIOM tool calls in the
+                    # meantime, instead of also becoming a way to get
+                    # owner-level tool access with zero authentication.
+                    caller_role="viewer",
                     personality_mode=data.get("personality_mode", "engineer"),
                     operation_mode=data.get("operation_mode", "assisted"),
                 )

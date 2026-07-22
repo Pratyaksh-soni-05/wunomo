@@ -22,22 +22,50 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
+    """Decodes the JWT, then re-reads `is_active`/`role` fresh from the DB —
+    exactly once per request (FastAPI caches a dependency's return value per
+    request by default, and every other dependency in this file/every route
+    handler depends on this same callable, so the extra query below never
+    runs more than once regardless of how many permission/quota checks a
+    request triggers). Closes the "removed/demoted member keeps their old
+    JWT's access for up to the token's full TTL" gap (see CLAUDE.md
+    Known-broken) — is_active=False is rejected immediately, for every
+    authenticated request app-wide, not just role-gated ones; role is
+    refreshed so a demoted user loses their old capabilities on their very
+    next request instead of at token expiry."""
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-        return payload
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
+    from database import AsyncSessionLocal
+    from models.all_models import User
+    from sqlalchemy import select
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(User.is_active, User.role).where(User.id == payload.get("sub")))
+        row = r.first()
 
-def require_role(*allowed_roles: str):
-    """Dependency factory: Depends(require_role(Role.OWNER, Role.ADMIN))
-    rejects any caller whose JWT `role` claim isn't in the allowed set.
-    Layers on top of get_current_user, so it enforces normal auth too."""
+    if row is None or not row.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    payload["role"] = row.role
+    return payload
+
+
+def require_permission(capability: str):
+    """Dependency factory: Depends(require_permission("sources.delete"))
+    rejects any caller whose current role (freshly re-read by
+    get_current_user above, not trusted from the JWT alone) lacks this
+    capability under services/rbac.py's PERMISSIONS map — the same map
+    agent_node's tool-dispatch gate reads for AXIOM's tool calls, so REST
+    and chat can never silently drift onto two different rulebooks. Layers
+    on top of get_current_user, so it enforces normal auth too."""
     async def _check(current_user: dict = Depends(get_current_user)) -> dict:
-        if current_user.get("role") not in allowed_roles:
+        from services.rbac import has_permission
+        if not has_permission(current_user.get("role"), capability):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Requires role: {' or '.join(allowed_roles)}",
+                detail=f"You don't have permission to do this — requires a role with '{capability}' access.",
             )
         return current_user
     return _check

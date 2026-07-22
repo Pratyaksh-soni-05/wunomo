@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import select
-from .auth import get_current_user, require_role, enforce_quota
-from services.rbac import Role
+from .auth import get_current_user, require_permission, enforce_quota
 from database import AsyncSessionLocal
 from models.all_models import DataSource
 from modules.ingestion.connector_manager import ConnectorManager
@@ -34,7 +33,11 @@ async def list_sources(user=Depends(get_current_user)):
     return await ConnectorManager(user["tenant_id"]).list_sources()
 
 @router.post("/")
-async def create_source(req: SourceCreate, user=Depends(enforce_quota("data_sources"))):
+async def create_source(
+    req: SourceCreate,
+    _perm=Depends(require_permission("sources.create")),
+    user=Depends(enforce_quota("data_sources")),
+):
     return await ConnectorManager(user["tenant_id"]).register_source(
         req.name, req.source_type, req.connection_config)
 
@@ -52,7 +55,7 @@ async def get_source(source_id: str, user=Depends(get_current_user)):
                 "last_profiled_at": source.last_profiled_at, "created_at": source.created_at}
 
 @router.put("/{source_id}")
-async def update_source(source_id: str, req: SourceUpdate, user=Depends(get_current_user)):
+async def update_source(source_id: str, req: SourceUpdate, user=Depends(require_permission("sources.create"))):
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(DataSource).where(
             DataSource.id == source_id, DataSource.tenant_id == user["tenant_id"]))
@@ -69,7 +72,7 @@ async def update_source(source_id: str, req: SourceUpdate, user=Depends(get_curr
         return {"message": "Source updated", "id": source_id}
 
 @router.delete("/{source_id}")
-async def delete_source(source_id: str, user=Depends(require_role(Role.OWNER, Role.ADMIN, Role.DATA_ENGINEER))):
+async def delete_source(source_id: str, user=Depends(require_permission("sources.delete"))):
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(DataSource).where(
             DataSource.id == source_id, DataSource.tenant_id == user["tenant_id"]))
@@ -81,11 +84,11 @@ async def delete_source(source_id: str, user=Depends(require_role(Role.OWNER, Ro
         return {"message": "Source deleted", "id": source_id}
 
 @router.post("/{source_id}/profile")
-async def profile_source(source_id: str, user=Depends(get_current_user)):
+async def profile_source(source_id: str, user=Depends(require_permission("sources.profile"))):
     return await SchemaProfiler(user["tenant_id"], source_id).profile()
 
 @router.post("/{source_id}/sync")
-async def sync_source(source_id: str, mode: str = "incremental", user=Depends(get_current_user)):
+async def sync_source(source_id: str, mode: str = "incremental", user=Depends(require_permission("sources.profile"))):
     return await ConnectorManager(user["tenant_id"]).sync(source_id, mode)
 
 @router.get("/{source_id}/preview")
@@ -93,5 +96,5 @@ async def preview(source_id: str, table: str = "main", limit: int = 50, user=Dep
     return await ConnectorManager(user["tenant_id"]).preview(source_id, table, limit)
 
 @router.post("/{source_id}/drift")
-async def detect_drift(source_id: str, user=Depends(get_current_user)):
+async def detect_drift(source_id: str, user=Depends(require_permission("sources.profile"))):
     return await SchemaProfiler(user["tenant_id"], source_id).detect_drift()

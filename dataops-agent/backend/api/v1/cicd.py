@@ -13,8 +13,7 @@ from typing import Any
 
 
 from database import get_db
-from api.v1.auth import get_current_user, require_role
-from services.rbac import Role
+from api.v1.auth import get_current_user, require_permission
 from models.cicd import PipelineCommit, PipelineDeployment, CICDStatus, GateDecision, DeploymentStatus
 from schemas.cicd import WebhookResponse, PipelineCommitResponse, PipelineDeploymentResponse
 from config import settings
@@ -230,7 +229,7 @@ async def get_commit(
 async def approve_deployment(
     commit_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    current_user=Depends(require_permission("cicd.approve")),
 ):
     """Manually approve a high-risk pipeline deployment. Only owners/admins may approve."""
     result = await db.execute(
@@ -268,7 +267,7 @@ async def approve_deployment(
 async def reject_deployment(
     commit_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    current_user=Depends(require_permission("cicd.approve")),
 ):
     """Reject a pending deployment. Only owners/admins may reject."""
     result = await db.execute(
@@ -478,7 +477,7 @@ async def list_incidents(
 async def resolve_incident(
     incident_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    current_user=Depends(require_permission("cicd.incidents.resolve")),
 ):
     """Mark a CICD incident as resolved."""
     result = await db.execute(

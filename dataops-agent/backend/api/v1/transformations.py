@@ -4,8 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import select, desc
 
-from .auth import get_current_user, require_role
-from services.rbac import Role
+from .auth import get_current_user, require_permission
 from database import AsyncSessionLocal
 from models.all_models import TransformRun
 from modules.transformation.transform_generator import TransformGenerator
@@ -109,7 +108,7 @@ async def generate_pandas(body: GenerateRequest, user=Depends(get_current_user))
 
 
 @router.post("/run/sql")
-async def run_sql(body: RunSqlRequest, user=Depends(require_role(Role.OWNER, Role.ADMIN, Role.DATA_ENGINEER, Role.DATA_ANALYST))):
+async def run_sql(body: RunSqlRequest, user=Depends(require_permission("transforms.execute"))):
     """
     Executes SQL against a registered DataSource.
     Safety checks: SELECT-only, keyword blocklist, LIMIT injection.
@@ -143,7 +142,7 @@ async def dry_run_sql(body: RunSqlRequest, user=Depends(get_current_user)):
 
 
 @router.post("/run/pandas")
-async def run_pandas(body: RunPandasRequest, user=Depends(require_role(Role.OWNER, Role.ADMIN, Role.DATA_ENGINEER, Role.DATA_ANALYST))):
+async def run_pandas(body: RunPandasRequest, user=Depends(require_permission("transforms.execute"))):
     """
     Executes Pandas transformation code in a sandboxed environment.
     Input: df (loaded from source). Output must be assigned to result_df.

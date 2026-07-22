@@ -2,8 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from .auth import get_current_user, require_role
-from services.rbac import Role
+from .auth import get_current_user, require_permission
 from services.settings_service import get_tenant_settings, update_tenant_settings
 
 router = APIRouter()
@@ -28,7 +27,7 @@ async def get_settings(user=Depends(get_current_user)):
 @router.patch("/")
 async def patch_settings(
     body: SettingsUpdate,
-    user=Depends(require_role(Role.OWNER, Role.ADMIN)),
+    user=Depends(require_permission("settings.manage")),
 ):
     updates = body.model_dump(exclude_unset=True)
     if not updates:

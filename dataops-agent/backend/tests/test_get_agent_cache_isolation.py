@@ -103,10 +103,11 @@ async def test_run_agent_threads_the_resolved_override_through_to_the_llm_layer(
 
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", fake_get_llm_for_agent)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_echo_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_echo_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
 
     await dataops_agent.run_agent(
-        user_message="please echo hi", tenant_id=tenant_id, user_id="u1", session_id="s1",
+        user_message="please echo hi", tenant_id=tenant_id, user_id="u1", session_id="s1", caller_role="owner",
     )
 
     assert captured_calls == ["llama-3.3-70b-versatile"]
@@ -138,10 +139,11 @@ async def test_run_agent_two_tenants_different_overrides_do_not_cross_contaminat
 
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", fake_get_llm_for_agent)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_echo_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_echo_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
 
-    await dataops_agent.run_agent(user_message="hi", tenant_id=tenant_a, user_id="ua", session_id="sa")
-    await dataops_agent.run_agent(user_message="hi", tenant_id=tenant_b, user_id="ub", session_id="sb")
+    await dataops_agent.run_agent(user_message="hi", tenant_id=tenant_a, user_id="ua", session_id="sa", caller_role="owner")
+    await dataops_agent.run_agent(user_message="hi", tenant_id=tenant_b, user_id="ub", session_id="sb", caller_role="owner")
 
     assert captured_calls == ["gemini-3.5-flash", "llama-3.3-70b-versatile"]
 
