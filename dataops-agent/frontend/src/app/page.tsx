@@ -39,10 +39,25 @@ function useIsAuthed(): boolean {
   return authed;
 }
 
+// The landing page is the signed-off, light-tuned "public mode" and must
+// default to light for any visitor who hasn't made an explicit choice -
+// unlike the authenticated app, which falls through to the OS's
+// prefers-color-scheme when nothing is stored (tokens.css's
+// `:root:not([data-theme="light"])` dark rule under `@media
+// (prefers-color-scheme: dark)`). Runs synchronously, before paint, as the
+// first thing in <body> - same FOUC-prevention technique as the root
+// layout's own pre-paint script, just overriding its result specifically on
+// this route. Only an explicit prior "light"/"dark" choice (the toggle,
+// wherever set) is honored; anything else (nothing stored, or a stray
+// "system" value from the authenticated Settings tab) resolves to light here.
+const LANDING_THEME_PREPAINT_SCRIPT = `(function(){try{var t=localStorage.getItem('axiom_theme');document.documentElement.dataset.theme=(t==='light'||t==='dark')?t:'light';}catch(e){document.documentElement.dataset.theme='light';}})();`;
+
 export default function LandingPage() {
   const authed = useIsAuthed();
 
   return (
+    <>
+    <script dangerouslySetInnerHTML={{ __html: LANDING_THEME_PREPAINT_SCRIPT }} />
     <div className="landing-page">
       <nav className="landing-nav">
         <span className="landing-brand">Wunomo AI</span>
@@ -119,5 +134,6 @@ export default function LandingPage() {
         <span className="landing-footer-copyright">© 2026 Wunomo AI.</span>
       </footer>
     </div>
+    </>
   );
 }
