@@ -38,7 +38,7 @@ def _hash_token(token: str) -> str:
 
 def _invite_link(token: str) -> str:
     base = settings.APP_CORS_ORIGINS.split(",")[0].strip()
-    return f"{base}/accept-invite?token={token}"
+    return f"{base}/invite/accept?token={token}"
 
 
 async def create_invite(*, tenant_id: str, email: str, role: str, invited_by_user_id: str) -> dict:

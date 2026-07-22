@@ -2,6 +2,7 @@ import uuid
 import pytest
 
 import api.v1.team as team_api
+from services.team_service import _invite_link
 
 
 @pytest.fixture
@@ -39,6 +40,19 @@ async def _register(client, prefix="teaminvite"):
 
 def unique_email():
     return f"invitee-{uuid.uuid4().hex[:10]}@example.com"
+
+
+def test_invite_link_points_at_the_real_frontend_route():
+    """Phase 19 fix: _invite_link() built /accept-invite?token=..., but the
+    real frontend route is /invite/accept?token=... (app/invite/accept/
+    page.tsx). Every real invite email sent since this feature shipped
+    pointed at a 404. This never showed up in any pre-existing test because
+    send_invite_email() (which calls _invite_link() internally) is always
+    mocked in the integration tests below - a direct unit test on
+    _invite_link() itself is the only thing that would have caught this."""
+    link = _invite_link("some-real-token")
+    assert link == "http://localhost:3000/invite/accept?token=some-real-token"
+    assert "/accept-invite" not in link
 
 
 @pytest.mark.asyncio

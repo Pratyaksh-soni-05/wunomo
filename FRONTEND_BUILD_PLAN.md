@@ -634,9 +634,16 @@ they can't execute anything. Recorded here, not left implicit.
    immediately under the new permission model, not just an active/inactive
    user losing all access — **done, shipped with item 1 above, see
    `CLAUDE.md`**.
-4. Fix `_invite_link()`'s `/accept-invite` → `/invite/accept` (confirmed the
-   only backend-generated frontend link in the codebase — isolated fix, no
-   pattern to hunt elsewhere).
+4. **Done, fully live-verified (2026-07-22).** Fixed `_invite_link()`'s
+   `/accept-invite` → `/invite/accept` — re-confirmed via a fresh grep that
+   it's still the only backend-generated frontend link in the codebase, no
+   pattern to hunt elsewhere. New unit test asserting the function's exact
+   output (every existing integration test mocks the function that calls
+   it, so nothing had ever exercised this string before). Live-verified
+   with a real Resend-delivered invite email whose real body now contains
+   the corrected link, and that exact link loaded in a real browser
+   correctly resolved to the real tenant/role instead of a 404. See
+   `CLAUDE.md`'s "Invite email link pointed at a 404" Status Table row.
 5. Scheduled pipelines: fix the Celery beat argument mismatch (`args:
    [pipeline_id, tenant_id]` vs. `execute_pipeline_run(run_id, pipeline_id,
    tenant_id)` — confirmed guaranteed crash on every real firing, not a
