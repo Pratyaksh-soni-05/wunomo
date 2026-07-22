@@ -97,20 +97,24 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
-/* Dark mode — Noir page, Midnight-derived elevated panels.
-   Toggled by a `data-theme` attribute the theme switcher (Phase 7) stamps on
-   <html>; @media (prefers-color-scheme) is the unstyled default signal. */
+/* Dark mode — Phase 19 redesign: warm near-black neutral surfaces, blue
+   (Ocean) reserved strictly for accents/highlights, never a surface fill.
+   Replaces the original pure-black-page + Midnight-navy-card pairing, which
+   read as murky (see CLAUDE.md's Phase 19 dark-theme entry for the measured
+   contrast rationale and before/after table). Toggled by a `data-theme`
+   attribute the theme switcher (Phase 7) stamps on <html>;
+   @media (prefers-color-scheme) is the unstyled default signal. */
 :root[data-theme="dark"] {
-  --bg: #000000; /* Noir */
-  --surface: #0F2440; /* midnight-800 */
-  --surface-hover: #1B3A63; /* midnight-600 */
-  --border: #1B3A63;
-  --border-strong: #26507F; /* midnight-500 */
+  --bg: #101015; /* warm near-black, not pure Noir */
+  --surface: #1B1B21; /* elevated cards — a hair lighter than bg, near-neutral, not navy */
+  --surface-hover: #26262E;
+  --border: #303038;
+  --border-strong: #40404A;
 
-  --text-primary: #F5F3E6;
-  --text-secondary: #B8C2D1;
-  --text-muted: #7A8CA3;
-  --text-disabled: #4A5568;
+  --text-primary: #F1F0E1; /* warm off-white */
+  --text-secondary: #B4B4BE; /* desaturated neutral grey, was blue-tinted */
+  --text-muted: #9A9AA6; /* desaturated neutral grey */
+  --text-disabled: #5A5A66;
 
   --success-bg: rgba(22,163,74,.15);
   --success-border: rgba(22,163,74,.4);
@@ -124,9 +128,21 @@
   /* ocean-50/100 are light near-white tints in light mode (selected-row/
      hover backgrounds) — redefined here as translucent overlays instead of
      inheriting the light value, which rendered as a jarring white bar
-     against Noir/midnight surfaces. */
+     against the dark surfaces. */
   --ocean-50: rgba(91,136,178,0.12);
   --ocean-100: rgba(91,136,178,0.2);
+
+  /* ocean-600/700 are used as literal link/text color in a few places
+     (auth-link-btn, breadcrumb hover, notif footer link) — the light-mode
+     values fail AA as text against any dark surface (a pre-existing bug,
+     not introduced by this redesign — confirmed 3.27-4.41:1 against the
+     old navy surfaces too). Lightened here, dark-mode only; light mode's
+     --ocean-600/700 are untouched. Hover goes LIGHTER (--ocean-700), the
+     correct direction on a dark background — the light-mode value darkens
+     on hover, which is right for a light background but would reduce
+     contrast here. */
+  --ocean-600: #8FB0D0;
+  --ocean-700: #B8CFE3;
 
   --shadow-xs: 0 1px 2px rgba(0,0,0,0.3);
   --shadow-sm: 0 1px 4px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
@@ -137,16 +153,16 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #000000;
-    --surface: #0F2440;
-    --surface-hover: #1B3A63;
-    --border: #1B3A63;
-    --border-strong: #26507F;
+    --bg: #101015;
+    --surface: #1B1B21;
+    --surface-hover: #26262E;
+    --border: #303038;
+    --border-strong: #40404A;
 
-    --text-primary: #F5F3E6;
-    --text-secondary: #B8C2D1;
-    --text-muted: #7A8CA3;
-    --text-disabled: #4A5568;
+    --text-primary: #F1F0E1;
+    --text-secondary: #B4B4BE;
+    --text-muted: #9A9AA6;
+    --text-disabled: #5A5A66;
 
     --success-bg: rgba(22,163,74,.15);
     --success-border: rgba(22,163,74,.4);
@@ -159,5 +175,7 @@
 
     --ocean-50: rgba(91,136,178,0.12);
     --ocean-100: rgba(91,136,178,0.2);
+    --ocean-600: #8FB0D0;
+    --ocean-700: #B8CFE3;
   }
 }
