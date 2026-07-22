@@ -594,11 +594,36 @@ they can't execute anything. Recorded here, not left implicit.
    deactivated). Item 3(b) below (the `get_current_user()` per-request
    `is_active`/role re-check) shipped as part of this same work, not
    separately.
-2. File-upload UI for CSV/Excel in the Sources "Add Source" modal — zero
-   frontend callers of `POST /uploads/register` exist today; a first-time
-   user cannot add either of the two source types most likely to be tried
-   first. Real `<input type="file">` wired to `/uploads/register`, replacing
-   the raw JSON-textarea path for `csv`/`excel` only. **Not started.**
+2. **Done, fully live-verified (2026-07-22).** File-upload UI for CSV/Excel
+   in the Sources "Add Source" modal — `frontend/src/app/(app)/sources/page.tsx`
+   now shows a real `<input type="file">` (accept scoped to `.csv` or
+   `.xlsx,.xls` per selected type) instead of the raw JSON-textarea path
+   for `csv`/`excel` only; every other source type is unchanged. New
+   `uploadAndRegisterSource()` (`lib/api.ts`) posts real multipart
+   `FormData` to `/uploads/register` (a dedicated fetch call, not routed
+   through the shared `request()` helper, since that hardcodes
+   `Content-Type: application/json` which would strip the multipart
+   boundary). Selecting a file auto-fills the Name field from the
+   filename (editable, optional — the backend already defaults to
+   `file.filename` if omitted). **Found and fixed a real gap while
+   wiring this up**: `POST /uploads/register` creates a real
+   `DataSource` — the same action `POST /sources/` gates behind
+   `sources.create` — but was never migrated in the original Phase 19
+   permission-spec pass (`uploads.py` wasn't in that file list). Added
+   `Depends(require_permission("sources.create"))` +
+   `Depends(enforce_quota("data_sources"))` in the same order/pattern as
+   `sources.py`'s `create_source`. New regression test
+   (`test_upload_register_requires_sources_create_permission`,
+   `test_uploads.py`) plus live-verification against the real running
+   server: a real CSV upload as Owner succeeded (`200`, real
+   `source_id`, real 2-row ingest with real column names); the same
+   user demoted to Viewer via direct DB write (no new token) got a real
+   `403` on the identical upload. Live-verified in a real Playwright
+   browser too: CSV/Excel show the file input (not the JSON textarea);
+   switching to `postgres` reverts to the JSON config path with the
+   file input hidden; a real upload produces a real success toast and
+   the new source appears in the table. `npx tsc --noEmit` clean. Full
+   backend suite: 242 passed.
 3. `is_active`/role integrity: (a) `resolve_identity()` (email-code/Google
    login) gains the same `is_active` filter `resolve_password_login()`
    already has — **not started**; (b) `get_current_user()`'s per-request

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import shutil, os, uuid, math
-from .auth import get_current_user
+from .auth import get_current_user, require_permission, enforce_quota
 from modules.ingestion.connector_manager import ConnectorManager
 
 router = APIRouter()
@@ -36,7 +36,8 @@ async def upload_file(file: UploadFile = File(...), user=Depends(get_current_use
 async def upload_and_register(
     file: UploadFile = File(...),
     name: Optional[str] = Form(None),
-    user=Depends(get_current_user)
+    _perm=Depends(require_permission("sources.create")),
+    user=Depends(enforce_quota("data_sources")),
 ):
     ext = file.filename.rsplit(".", 1)[-1].lower()
     if ext not in ALLOWED_EXTS:

@@ -377,6 +377,30 @@ export function profileSource(token: string, id: string): Promise<unknown> {
   });
 }
 
+// Multipart upload can't go through request() — it hardcodes
+// "Content-Type: application/json", which would strip the multipart
+// boundary fetch sets automatically for a FormData body.
+export async function uploadAndRegisterSource(
+  token: string,
+  file: File,
+  name?: string
+): Promise<{ filename: string; source_id: string; ingest: unknown }> {
+  const form = new FormData();
+  form.append("file", file);
+  if (name) form.append("name", name);
+  const res = await fetch(`${API_URL}/api/v1/uploads/register`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    if (res.status === 401) handleSessionExpired();
+    throw new ApiError(res.status, body?.detail ?? body);
+  }
+  return body;
+}
+
 // ---------- Pipelines (Phase 12) ----------
 
 export interface PipelineItem {

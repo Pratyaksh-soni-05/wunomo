@@ -8,16 +8,16 @@ import {
 } from "@/components/ui";
 import {
   getToken, getSources, createSource, deleteSource, syncSource, profileSource,
-  type DataSourceItem,
+  uploadAndRegisterSource, type DataSourceItem,
 } from "@/lib/api";
 
 const SOURCE_TYPES = [
-  { value: "csv", label: "CSV file", placeholder: '{"file_path": "sales.csv"}' },
-  { value: "excel", label: "Excel file", placeholder: '{"file_path": "report.xlsx"}' },
-  { value: "postgres", label: "Postgres", placeholder: '{"host": "db.example.com", "port": 5432, "database": "app", "user": "reader", "password": "***"}' },
-  { value: "mysql", label: "MySQL", placeholder: '{"host": "db.example.com", "port": 3306, "database": "app", "user": "reader", "password": "***"}' },
-  { value: "api_rest", label: "REST API", placeholder: '{"url": "https://api.example.com/data"}' },
-  { value: "google_sheets", label: "Google Sheets", placeholder: '{"sheet_id": "..."}' },
+  { value: "csv", label: "CSV file", placeholder: '{"file_path": "sales.csv"}', upload: true, accept: ".csv" },
+  { value: "excel", label: "Excel file", placeholder: '{"file_path": "report.xlsx"}', upload: true, accept: ".xlsx,.xls" },
+  { value: "postgres", label: "Postgres", placeholder: '{"host": "db.example.com", "port": 5432, "database": "app", "user": "reader", "password": "***"}', upload: false },
+  { value: "mysql", label: "MySQL", placeholder: '{"host": "db.example.com", "port": 3306, "database": "app", "user": "reader", "password": "***"}', upload: false },
+  { value: "api_rest", label: "REST API", placeholder: '{"url": "https://api.example.com/data"}', upload: false },
+  { value: "google_sheets", label: "Google Sheets", placeholder: '{"sheet_id": "..."}', upload: false },
 ];
 
 function statusBadge(active: boolean) {
@@ -32,10 +32,20 @@ export default function SourcesPage() {
   const [name, setName] = useState("");
   const [sourceType, setSourceType] = useState("csv");
   const [config, setConfig] = useState(SOURCE_TYPES[0].placeholder);
+  const [file, setFile] = useState<File | null>(null);
+
+  const activeType = SOURCE_TYPES.find((t) => t.value === sourceType) ?? SOURCE_TYPES[0];
+  const isUploadType = activeType.upload;
 
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => getSources(token) });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["sources"] });
+
+  const resetModal = () => {
+    setModalOpen(false);
+    setName("");
+    setFile(null);
+  };
 
   const createMut = useMutation({
     mutationFn: () => {
@@ -49,11 +59,23 @@ export default function SourcesPage() {
     },
     onSuccess: () => {
       toast.push(`Source "${name}" created.`, "success");
-      setModalOpen(false);
-      setName("");
+      resetModal();
       invalidate();
     },
     onError: (e: Error) => toast.push(e.message || "Failed to create source.", "danger"),
+  });
+
+  const uploadMut = useMutation({
+    mutationFn: () => {
+      if (!file) throw new Error("Choose a file to upload.");
+      return uploadAndRegisterSource(token, file, name || undefined);
+    },
+    onSuccess: (result) => {
+      toast.push(`Uploaded and registered "${result.filename}".`, "success");
+      resetModal();
+      invalidate();
+    },
+    onError: (e: Error) => toast.push(e.message || "Upload failed.", "danger"),
   });
 
   const deleteMut = useMutation({
@@ -134,19 +156,24 @@ export default function SourcesPage() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={resetModal}
         title="Add Data Source"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button disabled={!name || createMut.isPending} onClick={() => createMut.mutate()}>
-              {createMut.isPending ? "Creating..." : "Create"}
-            </Button>
+            <Button variant="secondary" onClick={resetModal}>Cancel</Button>
+            {isUploadType ? (
+              <Button disabled={!file || uploadMut.isPending} onClick={() => uploadMut.mutate()}>
+                {uploadMut.isPending ? "Uploading..." : "Upload & Create"}
+              </Button>
+            ) : (
+              <Button disabled={!name || createMut.isPending} onClick={() => createMut.mutate()}>
+                {createMut.isPending ? "Creating..." : "Create"}
+              </Button>
+            )}
           </>
         }
       >
         <div className="flex flex-col gap-3">
-          <Input id="source-name" label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
           <Select
             id="source-type"
             label="Type"
@@ -155,23 +182,57 @@ export default function SourcesPage() {
               const t = e.target.value;
               setSourceType(t);
               setConfig(SOURCE_TYPES.find((s) => s.value === t)?.placeholder || "{}");
+              setFile(null);
             }}
           >
             {SOURCE_TYPES.map((t) => (
               <option key={t.value} value={t.value}>{t.label}</option>
             ))}
           </Select>
-          <div className="input-group">
-            <label className="input-label" htmlFor="source-config">Connection config (JSON)</label>
-            <textarea
-              id="source-config"
-              className="input"
-              rows={4}
-              value={config}
-              onChange={(e) => setConfig(e.target.value)}
-              style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
-            />
-          </div>
+
+          {isUploadType ? (
+            <>
+              <div className="input-group">
+                <label className="input-label" htmlFor="source-file">File</label>
+                <input
+                  id="source-file"
+                  type="file"
+                  className="input"
+                  accept={activeType.accept}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setFile(f);
+                    if (f && !name) setName(f.name);
+                  }}
+                />
+                <p className="text-muted text-xs" style={{ marginTop: 4 }}>
+                  {activeType.value === "csv" ? "CSV file" : "Excel file (.xlsx or .xls)"} — uploaded to the server and
+                  registered as a data source in one step.
+                </p>
+              </div>
+              <Input
+                id="source-name"
+                label="Name (optional — defaults to the filename)"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </>
+          ) : (
+            <>
+              <Input id="source-name" label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+              <div className="input-group">
+                <label className="input-label" htmlFor="source-config">Connection config (JSON)</label>
+                <textarea
+                  id="source-config"
+                  className="input"
+                  rows={4}
+                  value={config}
+                  onChange={(e) => setConfig(e.target.value)}
+                  style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+                />
+              </div>
+            </>
+          )}
         </div>
       </Modal>
     </div>

@@ -2,6 +2,11 @@ import io
 import uuid
 import pytest
 
+from database import AsyncSessionLocal
+from models.all_models import User
+from services.auth_service import issue_token_for_user
+from sqlalchemy import select
+
 
 def _csv_bytes():
     return b"a,b\n1,2\n"
@@ -64,3 +69,38 @@ async def test_upload_register_name_collision_returns_409_not_crash(client):
     )
     assert second.status_code == 409, second.text
     assert "already exists" in second.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_upload_register_requires_sources_create_permission(client):
+    """Phase 19 gap found while building the upload UI: /uploads/register
+    creates a real DataSource (the same action POST /sources/ gates behind
+    sources.create) but was never migrated onto require_permission() in the
+    original permission-spec pass. A Viewer must be denied with a real 403,
+    not silently allowed to register a source via the upload path while
+    blocked on the JSON path."""
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": f"uploadviewer-{uuid.uuid4().hex[:8]}@example.com",
+        "password": "test1234",
+        "full_name": "Upload Viewer Test",
+        "tenant_name": "Upload Viewer Corp",
+    })
+    user_id = reg.json()["user_id"]
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(User).where(User.id == user_id))
+        user = r.scalar_one()
+        user.role = "viewer"
+        await db.commit()
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(User).where(User.id == user_id))
+        user = r.scalar_one()
+        viewer_token = issue_token_for_user(user, "password")
+
+    r = await client.post(
+        "/api/v1/uploads/register",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+        files={"file": ("blocked.csv", io.BytesIO(_csv_bytes()), "text/csv")},
+        data={"name": "Should Not Be Created"},
+    )
+    assert r.status_code == 403, r.text
