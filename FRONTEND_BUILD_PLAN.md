@@ -720,13 +720,16 @@ copy mismatch only); Sidebar's self-disclosing "Production" workspace
 selector (lower severity — already admits "coming in Phase 15" via its own
 toast).
 
-**Chat findings, diagnosed as missing-feedback, not defects** (own
-sub-items, small, can ride with P1's shared-component work): "+ New Chat"
-correctly clears state but gives no visible confirmation on an
-already-empty thread; "Attach a source…" works correctly with real sources
-but gives no empty-state message on a zero-source tenant; "+ Save current
-draft" 's full save→recall→remove cycle works correctly, the disabled state
-just has no tooltip explaining why.
+**Chat findings** — "+ New Chat" **[RESOLVED: Phase 19 polish session]**:
+this was originally diagnosed as missing-feedback only, but a deeper live
+investigation found a real race condition, not just a UX gap — see
+`CLAUDE.md`'s "New Chat button race condition" Status Table row for the
+full fix and live-verification detail. Remaining, still-real
+missing-feedback items (own sub-items, small, can ride with P1's
+shared-component work): "Attach a source…" works correctly with real
+sources but gives no empty-state message on a zero-source tenant; "+ Save
+current draft"'s full save→recall→remove cycle works correctly, the
+disabled state just has no tooltip explaining why.
 
 **Dropped from the list**: "invited members skip onboarding" — the profile
 is per-tenant and the inviting tenant has already completed it; skipping is
