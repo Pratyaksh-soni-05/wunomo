@@ -467,6 +467,246 @@ consciously accept each of them, not let them ride through undecided.
 
 ---
 
+## Phase 19 plan (locked, 2026-07-22)
+
+Produced from a full code-derived audit of the product (`dataops-agent/USER_MANUAL.md`,
+built screen-by-screen against the actual frontend + backend code, not memory
+of intent) plus the user's own live walkthrough of the seeded "Phase19
+Walkthrough Co" tenant. Proposed, revised twice, and approved before any code
+— see the manual's own findings for full detail per screen; this section is
+the execution plan derived from them.
+
+### Headline finding
+
+The 5-role model (`services/rbac.py`'s `Role` enum) was real only for
+approvals, team, settings, and billing — everywhere else (sources, pipelines,
+quality rules, incidents, contracts, transform generation) any authenticated
+role, including Viewer, could mutate freely. Root cause: each endpoint
+hand-picked its own `require_role(...)` tuple ad hoc, with most endpoints
+picking none at all. AXIOM's tool-calling path had **zero** role enforcement
+of any kind — only `operation_mode` + a hardcoded risk tier gated it,
+independent of the REST layer entirely, so a Viewer chatting with AXIOM could
+have it execute actions the same Viewer would be 403'd on through the UI.
+
+### Architecture (approved)
+
+One capability map, two consumers — not a second rulebook in the agent:
+
+- `services/rbac.py` gains `PERMISSIONS: dict[str, frozenset[Role]]`, keyed
+  by `"<resource>.<action>"` (e.g. `"pipelines.trigger"`), and
+  `has_permission(role, capability) -> bool`.
+- `require_permission(capability)` (`api/v1/auth.py`, alongside the existing
+  `require_role`/`enforce_quota` factories) replaces the ad hoc per-endpoint
+  role tuples. **Dependency order matters**: `require_permission(...)` is
+  declared before `enforce_quota(...)` on every endpoint carrying both, since
+  FastAPI resolves dependencies in declared order and stops at the first
+  failure — a blocked-by-role request never reaches the quota check, so a
+  Viewer never sees "out of AI credits" when the real answer is "not
+  allowed."
+- `get_current_user()` gains exactly **one** additional DB query (`SELECT
+  is_active, role FROM users WHERE id = :sub`), merged into the returned
+  dict, `401` raised immediately if `is_active` is `False`. This applies to
+  every authenticated request app-wide (not just permission-gated ones) and
+  closes the JWT-persistence-after-removal gap. It stays a single query per
+  request via FastAPI's default per-request dependency caching —
+  `require_permission`/`enforce_quota`/every route handler all depend on the
+  same `get_current_user` call, invoked once and reused; `has_permission()`
+  itself is a pure in-memory dict lookup, no I/O.
+- Every one of the 38 real AXIOM tools (`agent/tools/*.py`) gets a
+  `TOOL_CAPABILITIES: dict[tool_name, capability]` entry. `agent_node`'s
+  existing tool-call loop gets one new check — `has_permission(caller_role,
+  TOOL_CAPABILITIES[tool.name])` — evaluated **before and independently of**
+  the `operation_mode`/risk-tier approval gate. Role-blocked stays
+  role-blocked regardless of Advisory/Assisted/Autonomous.
+- **Fail-closed**: an unmapped tool is denied for every role. Enforced by a
+  startup assertion (`assert set(ALL_TOOLS) <= set(TOOL_CAPABILITIES)`,
+  fails boot) plus a test enumerating every registered tool.
+- Read-only AXIOM tools (`list_data_sources`, `get_lineage`,
+  `get_quality_report`, `list_open_incidents`, `get_system_health`,
+  `get_audit_trail`, `get_pipeline_run_history`, `get_kpi_summary`,
+  `get_cicd_status`, `preview_source_data`, `list_business_rules`,
+  `detect_schema_drift`) map to a `view` capability granted to every role, so
+  Viewer chat stays useful rather than refusing everything.
+
+### Capability table (locked)
+
+| Capability | Owner | Admin | Data Eng | Data Analyst | Viewer |
+|---|---|---|---|---|---|
+| View everything (read-only screens + `view`-mapped AXIOM tools) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Sources: create / edit | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Sources: sync / profile (incl. Catalog's Sync Metadata) | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Sources: delete | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Pipelines: create / edit / schedule | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Pipelines: trigger / pause / activate | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Pipelines: delete | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Quality rules: create / edit / run | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Quality rules: delete | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Transforms: generate / dry-run / preview / explain | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Transforms: execute (real run/sql, run/pandas) | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Incidents: log | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Incidents: resolve | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Contracts: validate | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Contracts: create | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Chat with AXIOM (send a message) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Approvals, CI/CD incident resolve | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Team invite / role-change / remove | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Settings / API keys / plan change | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+Transforms:execute confirmed safe for Data Analyst before locking this table
+— both `SqlRunner` (keyword-blocklist + first-token SELECT/WITH/EXPLAIN
+check) and `PythonRunner` (AST-sandboxed, no DB connection object ever
+exposed to the exec namespace, no write-back code path exists at all) are
+structurally read-only; neither can perform arbitrary DDL/DML. Caveat kept on
+record: `SqlRunner`'s check is a keyword blocklist, not a formal SQL parser,
+and runs under the same stored credentials as ordinary sync, not a separate
+read-only DB role.
+
+Explicit, accepted tradeoff: Viewer keeps `view` + chat, so a Viewer can
+still spend real tenant AI credits via transform-generation/chat even though
+they can't execute anything. Recorded here, not left implicit.
+
+### Verification (required before this is considered done)
+
+1. Role×capability matrix test — 5 roles × every capability row above,
+   scripted against real endpoints, asserting allow/deny. No LLM.
+2. **Cross-consumer regression guard** (the actual proof both consumers
+   share one map, not two hardcoded copies that happen to agree today):
+   `test_viewer_blocked_from_pipeline_trigger_both_consumers` — asserts a
+   Viewer's `POST /pipelines/{id}/trigger` returns `403`, **and** a direct
+   call to the `run_pipeline` tool-dispatch function (synthetic Viewer role)
+   is also denied, both checked against the same `PERMISSIONS["pipelines.trigger"]`
+   entry.
+3. Agent-side gate tested at the tool-dispatch function level with a
+   synthetic role passed directly — not through real AXIOM conversations
+   (avoids burning Gemini's daily cap on routine gate checks).
+4. Fail-closed enumeration test (above).
+
+### P0 (launch-blocking, this phase)
+
+1. Unified permission spec + AXIOM tool-call bypass (above).
+2. File-upload UI for CSV/Excel in the Sources "Add Source" modal — zero
+   frontend callers of `POST /uploads/register` exist today; a first-time
+   user cannot add either of the two source types most likely to be tried
+   first. Real `<input type="file">` wired to `/uploads/register`, replacing
+   the raw JSON-textarea path for `csv`/`excel` only.
+3. `is_active`/role integrity: (a) `resolve_identity()` (email-code/Google
+   login) gains the same `is_active` filter `resolve_password_login()`
+   already has; (b) `get_current_user()`'s per-request re-check (above),
+   now re-reading both `is_active` and `role`, not just `is_active`, since a
+   demoted user must lose their old capabilities immediately under the new
+   permission model, not just an active/inactive user losing all access.
+4. Fix `_invite_link()`'s `/accept-invite` → `/invite/accept` (confirmed the
+   only backend-generated frontend link in the codebase — isolated fix, no
+   pattern to hunt elsewhere).
+5. Scheduled pipelines: fix the Celery beat argument mismatch (`args:
+   [pipeline_id, tenant_id]` vs. `execute_pipeline_run(run_id, pipeline_id,
+   tenant_id)` — confirmed guaranteed crash on every real firing, not a
+   suspicion), add save-time cron validation (the real parser,
+   `scheduler.py`'s `_parse_cron()`, already exists but is never called from
+   the save path), add next-run/last-run visibility to the Pipelines screen.
+   Verify live with a real `* * * * *` schedule (cheap, no LLM quota — watch
+   a real run land within ~60–90s). Hide the Schedule field only if this
+   verification fails.
+
+### P1
+
+6. Centralized 402/403 handling in `lib/api.ts`'s shared mutation error
+   path — 403 → real permission message, 402 → quota message linking
+   `/billing`.
+7. Shared role-aware control component reading the same `PERMISSIONS` map
+   (mirrored client-side), replacing the copy-pasted `canManage` pattern —
+   covers Sources, Pipelines, Quality, Incidents, Governance, CI/CD,
+   Approvals, and Catalog's Sync Metadata (a fan-out of `sources.profile`).
+8. Shared delete-confirmation dialog (sources, pipelines, quality rules, API
+   key revoke, member removal).
+9. Promote Governance's real Audit Log tab to a top-level `/audit` page;
+   remove the "Analytics" nav item entirely (no plan behind it, Dashboard
+   already covers the ground).
+10. Catalog's "Sync Metadata": real per-source pass/fail reporting instead
+    of always claiming "complete."
+11. Rename Quality's "Run Checks" to reflect it re-runs every rule on the
+    whole pipeline, not just the clicked row.
+12. Transforms' "Auto" language selector: implement real detection or
+    remove the option (currently identical to picking "SQL").
+13. Approval outcomes never returning to the chat thread — cheap-version fix
+    approved: resolve each blocked tool call's *current* approval status at
+    session-history read time (a join against `ApprovalRequest` inside
+    `GET /chat/sessions/{id}/history`, no push infrastructure) so a
+    reopened conversation shows approved/rejected instead of a frozen
+    "Needs approval."
+14. Remove the notifications bell entirely this phase — confirmed hardcoded
+    placeholder data with an unconditionally-rendered unread dot (a real
+    "nothing faked" violation in the global topbar). A real notification
+    system is its own feature; not half-wiring it here.
+15. Remove the "Production" environment dropdown — confirmed decorative
+    (toast-only, no real effect), implies staging/prod environments that
+    don't exist.
+16. Wire "AXIOM Online" to the real `GET /health/db` (checks actual Postgres
+    connectivity, unlike the trivial `GET /health`), polled every 30–60s,
+    dot + label reflect the real result (including a real "AXIOM Offline").
+17. Fix role display: both Sidebar footer and Topbar account dropdown apply
+    `text-transform: capitalize` directly to the raw role string, producing
+    "Data_engineer" for any underscored role (CSS `capitalize` doesn't treat
+    `_` as a word boundary) — confirmed live with a real `data_engineer`
+    JWT. Extract Team screen's existing `roleLabel()` lookup into a shared
+    helper, use it everywhere a role is displayed.
+
+### P2 (fix if room, else explicit accept)
+
+Dashboard secondary-query empty-state flash; no redirect for authed users
+hitting `/login`/`/signup`; label saved prompts as device-local; label the
+three different "Pending Approvals" counts (Dashboard/CI-CD/Approvals count
+different things); orphan `PATCH /cicd/incidents/{id}/resolve` (no frontend
+caller anywhere — recommend deleting the dead endpoint); missing SQL-tab
+Explain button; Command Palette's placeholder text overpromising "actions,
+pages, sources" when it only searches page names (real navigation, cosmetic
+copy mismatch only); Sidebar's self-disclosing "Production" workspace
+selector (lower severity — already admits "coming in Phase 15" via its own
+toast).
+
+**Chat findings, diagnosed as missing-feedback, not defects** (own
+sub-items, small, can ride with P1's shared-component work): "+ New Chat"
+correctly clears state but gives no visible confirmation on an
+already-empty thread; "Attach a source…" works correctly with real sources
+but gives no empty-state message on a zero-source tenant; "+ Save current
+draft" 's full save→recall→remove cycle works correctly, the disabled state
+just has no tooltip explaining why.
+
+**Dropped from the list**: "invited members skip onboarding" — the profile
+is per-tenant and the inviting tenant has already completed it; skipping is
+correct, not a gap. Documented as intended behavior in
+`dataops-agent/USER_MANUAL.md`, not tracked as a fix item.
+
+### Product decisions (decided)
+
+- **Duplicate-email signup**: change it. `register()` will look up the
+  email before creating a tenant; if one or more accounts already exist,
+  present an explicit choice (log into an existing workspace, or
+  deliberately create a new one) requiring confirmation, instead of silently
+  creating a second orphan tenant and informing after the fact.
+- **Onboarding enforcement**: leave unenforced. Documented as intended,
+  per-tenant, first-responder-wins behavior.
+
+### Dark theme legibility (own task, own commits — sequenced AFTER the permission work lands and is fully verified, never in parallel with it)
+
+Measured WCAG contrast (script, not visual judgment) found the current
+bg/surface relationship (`--bg` black page, `--surface` `#0F2440` elevated
+cards) is already sound — 13.99:1 primary text, 8.67:1 secondary text
+against `--surface`, both excellent. **No swap of that relationship is
+planned.** The one real, isolated, measured failure is `--text-muted`:
+
+| Token | Before | After | Contrast before (surface / surface-hover) | Contrast after |
+|---|---|---|---|---|
+| `--text-muted` (dark mode) | `#7A8CA3` | `#9FB4CB` | 4.54:1 / **3.33:1 (fails AA)** | 7.33:1 / 5.38:1 (passes with margin) |
+
+One token, two locations in `tokens.css` (`:root[data-theme="dark"]` and the
+mirrored `@media (prefers-color-scheme: dark)` block). Verification: measured
+contrast ratios (not visual judgment) for the new value plus fresh
+dark-mode screenshots of all 24 screens — this explicitly invalidates every
+dark-mode screenshot taken during Phases 1–18.
+
+---
+
 ## Outstanding items (user's side)
 
 - ~~**Google OAuth client id/secret**~~ — resolved. Real credentials configured and

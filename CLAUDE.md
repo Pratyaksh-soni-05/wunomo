@@ -369,14 +369,29 @@ purchase (see Outstanding items), and a new Not-yet-built entry now also flags
 Privacy Policy/Terms of Service pages as required before any real production
 signup traffic, grouped with that same domain-purchase cluster.
 
-**Next action:** Phase 18 is done. Per `FRONTEND_BUILD_PLAN.md`'s phase table,
-Phase 19 (Polish) is the only phase left. It now has an explicit requirement
-(see `FRONTEND_BUILD_PLAN.md`'s "Phase 19 note") to partition every open
-Known-broken row into fix-in-Phase-19 vs. accepted-for-launch-with-rationale,
-not let the backlog ride through undecided — real candidates already waiting:
-the removed-member JWT-persistence gap, `change_plan()`'s unconditional-
-downgrade gap, the root-layout hydration-mismatch warning, and the
-Privacy/Terms + domain-purchase cluster.
+**Next action:** Phase 18 is done. Phase 19 (Polish) is the only phase left,
+and its full execution plan is now locked — see `FRONTEND_BUILD_PLAN.md`'s
+"Phase 19 plan (locked, 2026-07-22)" section for the complete, approved
+spec: a code-derived screen-by-screen product audit
+(`dataops-agent/USER_MANUAL.md`, built and reviewed this session) plus the
+user's own live walkthrough surfaced that the 5-role model was real only for
+approvals/team/settings/billing — everywhere else (sources, pipelines,
+quality, incidents, contracts, transform generation) any role including
+Viewer could mutate freely, and AXIOM's tool-calling path had **zero** role
+enforcement at all, gated only by operation_mode + a hardcoded risk tier.
+The approved fix is one shared `PERMISSIONS` capability map in
+`services/rbac.py`, consulted by both a new `require_permission()` REST
+dependency and a new tool-dispatch gate in `agent_node` — not two rulebooks.
+**Execution order, locked**: the permission work (P0 items 1–5) lands first,
+fully verified and committed, before the separately-scoped dark-theme
+contrast fix begins — never in parallel, since a concurrent contrast change
+would make both harder to verify. See `FRONTEND_BUILD_PLAN.md` for the full
+capability table, the P0/P1/P2 partition, the verification plan (including a
+cross-consumer regression test proving REST and chat share one map, not two
+copies that happen to agree today), and the dark-theme token mapping with
+measured contrast ratios. `dataops-agent/USER_MANUAL.md` itself is the
+authoritative, code-derived reference for what every screen actually does
+today — read it alongside this file for any Phase 19 work.
 
 ---
 
