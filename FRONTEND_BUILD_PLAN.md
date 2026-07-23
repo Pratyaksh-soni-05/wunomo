@@ -583,8 +583,9 @@ first-responder-wins (explicit product decision, Phase 19 plan); invited
 members skipping onboarding (correct behavior, not a gap); `ENABLE_
 AUTONOMOUS_MODE`/`ENABLE_DESTRUCTIVE_ACTIONS`/`SYNC_DATABASE_URL` dead
 config (harmless, no call sites); the freshness-checker duplicate-incident
-issue and the CSV connector's cosmetic `rows_processed: 0` display bug
-(both flagged, both low-severity, neither blocks anything real); the
+issue (flagged, low-severity, doesn't block anything real — the CSV
+connector's `rows_processed: 0` cosmetic bug that used to ride alongside
+this one was fixed ahead of YC demo prep, see `CLAUDE.md`); the
 Settings AI Model tab's hardcoded allowlist (explicit adjustment in the
 original Phase 17 spec).
 

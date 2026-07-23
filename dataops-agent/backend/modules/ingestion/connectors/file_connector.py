@@ -56,7 +56,7 @@ class FileConnector:
             return {
                 "status": "synced", "mode": mode,
                 "file": self.file_path,
-                "rows": len(df),
+                "total_rows": len(df),
                 "columns": list(df.columns)
             }
         except Exception as e:
