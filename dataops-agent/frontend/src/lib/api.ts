@@ -1,5 +1,17 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+// Real DB connectivity check (unauthenticated, no tenant context) for the
+// topbar's "AXIOM Online"/"AXIOM Offline" indicator - previously pure
+// decoration that never checked anything real.
+export async function checkDbHealth(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_URL}/health/db`);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   detail: unknown;
