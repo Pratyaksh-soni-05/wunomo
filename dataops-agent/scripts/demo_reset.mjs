@@ -23,13 +23,14 @@
 // chat messages, approvals, lineage, audit log).
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", ".."); // ai workforce/
 const DATAOPS_ROOT = path.resolve(__dirname, ".."); // dataops-agent/
+const STATE_FILE = path.join(__dirname, ".demo_state.json");
 
 const BASE = "http://localhost:8000/api/v1";
 const EMAIL = "demo@axiom-yc.ai";
@@ -264,6 +265,13 @@ async function main() {
     },
   });
   console.log(`Logged incident: ${incident.id} (status=${incident.status})`);
+
+  // Save the pre-break good config so demo_unbreak.mjs can restore exactly
+  // this path (not guess it) when it's time to show a real corrected re-run.
+  writeFileSync(STATE_FILE, JSON.stringify({
+    tenantId, hrSourceId: hrSource.source_id, hrPipelineId,
+    goodConnectionConfig: hrSourceFull.connection_config,
+  }, null, 2));
 
   console.log("\n== Demo state ready ==");
   console.log(`Tenant:        ${TENANT_NAME}  (${tenantId})`);

@@ -242,3 +242,9 @@ next-env.d.ts
 # like this one — re-include it explicitly.
 !frontend/src/lib/
 !frontend/src/lib/**
+
+# Demo scripts' runtime state (real tenant/pipeline/source IDs from whatever
+# machine last ran demo_reset.mjs) and Playwright screenshot output — not
+# durable artifacts, regenerated on every run.
+scripts/.demo_state.json
+frontend/scripts/walkthrough_shots/
