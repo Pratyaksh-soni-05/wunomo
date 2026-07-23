@@ -11,6 +11,21 @@
 > what's done/remaining/undecided/accepted-for-launch/domain-gated is in
 > `FRONTEND_BUILD_PLAN.md`'s "Phase 19 partition status" section — read
 > that section before picking up any Phase 19 work.
+>
+> **Interleaved YC-demo-prep session (2026-07-23/24, not a Phase 19
+> session — the above recommendation still stands for the next real build
+> session).** Produced a one-command demo tenant reset
+> (`dataops-agent/scripts/demo_reset.mjs` + `demo_unbreak.mjs`), a demo
+> runsheet artifact, and `docs/PRODUCT_STATUS.md`. Found and fixed 2 real
+> bugs (file connector `rows_processed: 0`; an empty-list tool result
+> crashing `POST /chat/` on Groq) and documented 1 critical, unfixed one:
+> **`PolicyEngine.execute_approved_action()`'s dispatch is broken for all
+> 8 registered actions** — approving a blocked AXIOM action does not
+> execute it (see the new Known-broken row). Also removed the topbar's
+> decorative notification bell/env dropdown and wired "AXIOM Online" to a
+> real `GET /health/db` poll, per explicit user approval. `PRIMARY_LLM_MODEL`
+> was temporarily switched to Groq for testing and confirmed restored to
+> `gemini-3.5-flash` before ending — see the Gotcha on this pattern.
 
 **Read this file in full before doing any work in this repo.** It is the living contract for how Claude Code operates here. Update it (Status Table + Known Gotchas, at minimum) in the same commit as any fix, feature, or discovery that changes what's true below.
 
