@@ -279,22 +279,45 @@ Legend: 🎬 = press record starts/resumes here · ✂️ = stop recording here
    screen — it has faint grey placeholder text reading "Ask AXIOM
    anything about your data...".
 2. **WHAT I TYPE** (into that text box, then press Enter or click the
-   **Send** button just to the right of the box):
+   **Send** button just to the right of the box) — type this exact
+   sentence, don't shorten it:
    ```
    Check the open incidents. For any incident you find, use its real incident ID to triage the root cause and summarize what happened.
    ```
+   **Do not** click the small grey **"List open incidents"** button that
+   sits under the text box (it's one of five shortcut buttons — you'll
+   also see "List my data sources," "Show failed pipeline runs," etc.).
+   That button only fills the box with the words "List open incidents"
+   — a much shorter request that's never been tested for this demo and
+   would only do half the job (it finds the incident but doesn't
+   necessarily dig into *why* it happened). Those quick buttons are a
+   real product feature, just not the one to use here — type the full
+   sentence above instead.
 3. **WHAT I SAY** (say this while it's thinking — it takes a real 10–50
    seconds, this isn't scripted or sped up):
    > "It's pulling up the incident, then running root-cause analysis
    > against the actual failed run — this is a real AI call, not a
    > canned response, so it does take a few seconds."
-4. **WHAT I SHOULD SEE:** Your message appears in the thread, then after
-   a delay, a reply from AXIOM appears naming the exact broken file path
-   (something like `employee_data_MISSING.csv`) and explaining that's
-   the root cause. Above or below the reply text, you'll see one or two
-   small pill-shaped rows with tool names on them (like
-   `list_open_incidents` and `triage_incident`) with a green
-   "Completed" label — that's AXIOM showing its work.
+4. **WHAT I SHOULD SEE** (in this order, top to bottom):
+   1. Your own message appears first, right-aligned, in a solid dark
+      bubble.
+   2. Below it, on the left, a small pulsing dot with the words
+      **"AXIOM is thinking…"** — this is normal, just wait. After 5
+      seconds it changes to "AXIOM is still thinking… (Ns)" and keeps
+      counting up. This is expected and can run anywhere from 10 to 50+
+      seconds — don't refresh the page or click anything while it's
+      counting.
+   3. When it finishes, the thinking indicator is replaced by AXIOM's
+      written reply, in a lighter card/box on the left. Read for it to
+      name the exact broken file path (something like
+      `employee_data_MISSING.csv`) and explain that's the root cause.
+   4. **Below that reply text** (always below, never above it), one or
+      two small rows appear, each showing a tool name — you should see
+      `list_open_incidents` and `triage_incident` — with a green
+      **"Completed"** badge on the right side of each row. These are
+      collapsed by default (you'd have to click one to expand it); you
+      don't need to click into them on camera, just knowing they're
+      there and green is enough to confirm it worked.
 5. **IF IT GOES WRONG:**
    - **You see two `triage_incident` rows, both green "Completed"**
      (not one): this is fine and expected sometimes — AXIOM tried a
