@@ -139,6 +139,30 @@ async function main() {
     }
   }
 
+  // 1a. Complete onboarding every reset -- a fresh/API-registered tenant
+  // has no OnboardingProfile, so the real app correctly redirects login to
+  // /onboarding instead of /dashboard. The demo must land on /dashboard.
+  await j("POST", "/onboarding/", {
+    token,
+    body: {
+      role: "Data Engineering Lead", industry: "SaaS", company_size: "11-50",
+      use_cases: ["Pipeline monitoring", "Data quality"], data_stack: ["Postgres", "CSV/Excel"],
+    },
+  });
+
+  // 1b. Force the plan to "scale" every reset. A single multi-tool-call
+  // AXIOM conversation costs ~25k-30k AI credits (every LLM call in a
+  // tool-calling turn resends the full system prompt + all 38 tool schemas
+  // as input tokens, and the credit formula weights output tokens 3x) --
+  // Starter's 25,000/mo default limit was found live to be exhausted by
+  // just 2 chat turns during demo-script verification. "scale" (500,000/mo)
+  // gives real headroom for repeated rehearsals plus the final recording.
+  // This is a real, supported product action (POST /billing/change-plan),
+  // not a workaround -- see CLAUDE.md's Known-broken row on unconditional
+  // plan changes (harmless here, this is an upgrade with real spare quota).
+  await j("POST", "/billing/change-plan", { token, body: { plan: "scale" } });
+  console.log("Set plan to scale (500,000 AI credits/mo) so rehearsals don't hit a quota wall.");
+
   // 2. Wipe this tenant's product data via the real endpoints first (handles
   // FK cleanup correctly, same as a real user deleting things), then a raw
   // SQL sweep for the tables with no REST delete-all endpoint.
