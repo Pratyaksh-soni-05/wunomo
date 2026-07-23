@@ -278,6 +278,11 @@ Legend: 🎬 = press record starts/resumes here · ✂️ = stop recording here
    it). Then click inside the text box at the very bottom of the
    screen — it has faint grey placeholder text reading "Ask AXIOM
    anything about your data...".
+   **Ignore the "Attach a source..." dropdown on the right side of the
+   screen — leave it on "no source attached."** It's only there to hint
+   which spreadsheet you mean when a question is ambiguous about that;
+   this beat is about incidents, not a specific source, so it isn't
+   needed and doesn't change how the tools run.
 2. **WHAT I TYPE** (into that text box, then press Enter or click the
    **Send** button just to the right of the box) — type this exact
    sentence, don't shorten it:
