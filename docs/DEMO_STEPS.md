@@ -415,10 +415,17 @@ in step 2b.
    pending, click Approve again. This is a simple, reliable button —
    real problems here are unlikely.
 
+**⚠️ Always continue to Beat 5 next — never skip it, no matter how Beat 4
+went.** Approving the request does not actually fix anything by itself
+(see "Known issues" below) — the source's file path is still broken
+either way. Beat 5 is the only step that repairs it. If you jump straight
+to Beat 6 without running Beat 5, the pipeline will fail again with the
+exact same error.
+
 ---
 
 ### ✂️ Beat 5 — CUT. Apply the fix off camera.
-**Not counted in your 3-minute total.**
+**Not counted in your 3-minute total. Do this every time, unconditionally.**
 
 1. **WHAT I DO:** Stop the recording (press your recorder's stop
    hotkey, e.g. **Win + Alt + R**). Switch to your terminal (the second
