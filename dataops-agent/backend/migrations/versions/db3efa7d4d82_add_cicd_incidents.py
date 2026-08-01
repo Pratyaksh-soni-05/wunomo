@@ -10,16 +10,31 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = 'db3efa7d4d82'
-down_revision: Union[str, None] = '7e3773979374'
+down_revision: Union[str, None] = '609092d6978f'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 
 def upgrade() -> None:
-    # Create ENUMs only if they don't already exist
+    # Both types are already created by 7e3773979374 (the `incidents` table's
+    # `severity`/`status` columns use plain sa.Enum(...), which auto-creates
+    # the Postgres type). These two statements are a defensive no-op on any
+    # chain that actually starts from 7e3773979374 -- confirmed live during
+    # the Phase 19 migration-drift session (a scratch, empty-DB
+    # `alembic upgrade head` run): the `duplicate_object` exception handler
+    # silently swallows both, and the real, already-existing type (correct,
+    # uppercase 4-value for incidentstatus) is left untouched.
+    #
+    # The `incidentstatus` value list below was previously lowercase/3-value
+    # ('open','investigating','resolved'), which never took effect (it hit
+    # the exact same duplicate_object no-op path) but was misleading to read
+    # -- corrected here to match the real type's actual, already-existing
+    # shape (models/cicd.py's `IncidentStatus`/models/all_models.py's
+    # `IncidentStatus`: OPEN/INVESTIGATING/RESOLVED/SUPPRESSED) rather than
+    # leaving a value list that looks live but silently isn't.
     op.execute("DO $$ BEGIN CREATE TYPE incidentseverity AS ENUM ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
-    op.execute("DO $$ BEGIN CREATE TYPE incidentstatus AS ENUM ('open', 'investigating', 'resolved'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
+    op.execute("DO $$ BEGIN CREATE TYPE incidentstatus AS ENUM ('OPEN', 'INVESTIGATING', 'RESOLVED', 'SUPPRESSED'); EXCEPTION WHEN duplicate_object THEN null; END $$;")
 
     op.create_table('cicd_incidents',
     sa.Column('id', sa.String(), nullable=False),
