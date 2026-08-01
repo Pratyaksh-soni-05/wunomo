@@ -512,23 +512,32 @@ CSS custom properties in either theme; a pre-existing
 screen. **This is the most likely next-session starting point** — see
 the note at the top of this section.
 
-**Migration-drift dedicated session — REMAINING, own highest-risk slot,
-not started.** `CLAUDE.md`'s Known-broken table carries two real,
-related gaps that have never been addressed: the `incidentstatus`
-Postgres enum migration doesn't match the Python-side enum (lowercase
-3-value vs. uppercase 4-value); `pipeline_commits`/`pipeline_deployments`
-have no Alembic migration creating them at all. Both trace back to the
-same root cause documented in `CLAUDE.md`'s Gotchas: this dev DB's schema
-was never actually created by Alembic — `alembic_version` doesn't exist,
-`Base.metadata.create_all()` on backend startup is the real source of
-truth here, and running `alembic upgrade head` against this DB fails
-immediately (`DuplicateObject`). This is deliberately called out as its
-own dedicated session, not a quick fix folded into something else —
-reconciling the migration chain against the real live schema (likely via
-`alembic stamp` at the right revision, per the Gotcha's own worked
-example for the one migration that's already needed this) touches
-every table in the app and deserves undivided attention, not a
-tail-end-of-session pass.
+**Migration-drift dedicated session — DONE (2026-08-02).** Verified
+`alembic upgrade head` against a genuinely empty, isolated scratch
+Postgres 16 container (never the dev DB) and found 2 real gaps in the
+migration files: `pipeline_commits`/`pipeline_deployments` had no
+migration creating them at all (fixed with a new migration,
+`609092d6978f_add_cicd_pipeline_tables.py`); `team_invites` was missing
+its `ix_team_invites_created_at` index (fixed in `a4f7c92b1d05`). The
+long-suspected `incidentstatus` enum drift (lowercase 3-value vs.
+uppercase 4-value) turned out to be dead code, not live drift — migration
+ordering means the correct type is always created first and the
+wrong-looking later attempt is silently swallowed by Postgres; corrected
+for clarity anyway. **Proof**: an alembic-built schema and a
+`create_all()`-built "known-good" schema, each built on a separate empty
+scratch DB, diffed via `information_schema` (tables/columns/indexes/
+foreign keys/primary keys/enum labels) — byte-identical across all 24
+tables. A related, deeper finding surfaced along the way: `create_all()`
+itself (this project's actual real running source of truth) also cannot
+bootstrap a genuinely empty database, for the same reason (`models/cicd.py`'s
+3 CI/CD enum types are declared `create_type=False`, so nothing creates
+them from nothing) — no `create_enums.sql` or equivalent exists anywhere
+in the repo. See `CLAUDE.md`'s "Migration-drift verification" Status
+Table row and the rewritten Alembic Gotcha for full detail. **The dev DB
+itself was not touched** — it still has no `alembic_version` table and
+still relies on `create_all()`; reconciling *it* specifically (via
+`alembic stamp` at the right revision) remains a separate, not-yet-done
+action for whenever a real migration-driven deploy is needed.
 
 **P1 (10 items) — all REMAINING, none started.** Centralized 402/403
 handling in `lib/api.ts`; shared role-aware control component (replacing
@@ -592,7 +601,13 @@ original Phase 17 spec).
 **DOMAIN-GATED (blocked on the user's side — see Outstanding items,
 `CLAUDE.md`)**: real production deployment; Privacy Policy/Terms of
 Service pages; Resend domain verification (blocks real invite/email-code
-delivery to anyone but the account owner).
+delivery to anyone but the account owner). **Domain itself is no longer
+the blocker as of 2026-08-02 — `wunomo.in` (frontend) and `api.wunomo.in`
+(API) are purchased and recorded, see Outstanding items below** — nothing
+is configured yet (DNS, hosting, TLS, Resend domain verification, env
+vars pointing at the real hostnames), so these items stay gated until
+that configuration work happens, just no longer on a domain purchase
+specifically.
 
 ---
 
@@ -897,6 +912,16 @@ dark-mode screenshot taken during Phases 1–18.
 
 ## Outstanding items (user's side)
 
+- **Production domain purchased (2026-08-02): `wunomo.in`.** Frontend at
+  `wunomo.in`, API at `api.wunomo.in` — recorded here as the real values
+  for whenever deployment configuration actually happens (DNS records,
+  hosting, TLS certs, `GOOGLE_OAUTH_REDIRECT_URI`, `APP_CORS_ORIGINS`,
+  `EMAIL_FROM`/Resend domain verification, the frontend's API base URL,
+  etc. all currently point at `localhost`/dev values and none of them
+  have been changed yet). This is a value-recording entry only, per
+  explicit instruction — nothing is configured. Real production
+  deployment stays gated on the separate configuration work itself, not
+  on the domain purchase anymore.
 - ~~**Google OAuth client id/secret**~~ — resolved. Real credentials configured and
   fully live-verified through both Phase 5 (backend) and Phase 6 (UI click-through),
   including a real fix for a clock-skew bug found during the Phase 6 UI test — see
