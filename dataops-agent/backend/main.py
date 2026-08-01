@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import structlog
@@ -149,59 +149,6 @@ async def health_db():
             status_code=503,
             content={"status": "error", "db": "unreachable", "detail": str(exc)},
         )
-
-
-
-@app.websocket("/ws/chat/{tenant_id}/{session_id}")
-async def websocket_chat(ws: WebSocket, tenant_id: str, session_id: str):
-    await ws.accept()
-    log.info("ws.connect", tenant_id=tenant_id, session_id=session_id)
-    from agent.dataops_agent import run_agent
-    try:
-        while True:
-            try:
-                data = await ws.receive_json()
-            except Exception:
-                await ws.send_json({"type": "error", "detail": "Invalid JSON payload"})
-                continue
-
-            message = data.get("message", "").strip()
-            if not message:
-                await ws.send_json({"type": "error", "detail": "Empty message"})
-                continue
-
-            try:
-                result = await run_agent(
-                    user_message=message,
-                    tenant_id=tenant_id,
-                    user_id=data.get("user_id", "anon"),
-                    session_id=session_id,
-                    # This endpoint has no JWT/auth at all (see CLAUDE.md's
-                    # "WebSocket chat auth" Known-broken row — unrelated,
-                    # pre-existing, unfixed here) — there is no real role to
-                    # read. Hardcoding the least-privileged role rather than
-                    # trusting a client-supplied one narrows what this
-                    # already-broken path can do via AXIOM tool calls in the
-                    # meantime, instead of also becoming a way to get
-                    # owner-level tool access with zero authentication.
-                    caller_role="viewer",
-                    personality_mode=data.get("personality_mode", "engineer"),
-                    operation_mode=data.get("operation_mode", "assisted"),
-                )
-                await ws.send_json({
-                    "type":              "response",
-                    "content":           result["response"],
-                    "pending_approvals": result.get("pending_approvals", []),
-                    "timestamp":         result.get("timestamp", ""),
-                })
-            except Exception as exc:
-                log.error("ws.agent_error", tenant_id=tenant_id, error=str(exc))
-                await ws.send_json({"type": "error", "detail": f"Agent error: {str(exc)}"})
-
-    except WebSocketDisconnect:
-        log.info("ws.disconnect", tenant_id=tenant_id, session_id=session_id)
-    except Exception as exc:
-        log.error("ws.fatal_error", tenant_id=tenant_id, error=str(exc))
 
 
 
