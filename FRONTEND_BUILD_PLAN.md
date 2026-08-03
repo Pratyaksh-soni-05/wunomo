@@ -318,6 +318,13 @@ recomputation. Checkout/invoices section explicitly labeled "Coming soon" with n
 fabricated invoice rows — matches the backend's honest-501 pattern
 (`POST /checkout`).
 
+**Superseded (public-launch risk cluster, 2026-08-02)**: the upgrade
+`<Select>`/confirm control described above was removed entirely (not
+just disabled) once `POST /change-plan` itself was disabled
+server-side — see `CLAUDE.md`'s "(b) change-plan free-upgrade hole"
+Status Table row. This paragraph is kept for history; the plan card and
+usage bars are otherwise unchanged.
+
 **Settings screen (`/settings`)**, tabs (reusing `<Tabs>`, same pattern as
 Governance/Transforms):
 1. **Workspace** — name/timezone/description form → `PATCH /settings/`

@@ -38,20 +38,24 @@ async def change_plan(
     body: PlanChange,
     user=Depends(require_permission("billing.manage")),
 ):
-    """Real today, immediate effect - no payment collection exists yet.
-    See BillingService.change_plan()'s docstring: this is a deliberate
-    dev-mode stand-in, not the final design - once Stripe checkout is
-    real, plan changes should only happen via a confirmed webhook, and
-    this endpoint (or its role) will need to change."""
-    result = await BillingService(user["tenant_id"]).change_plan(body.plan)
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+    """Disabled until Stripe billing is real (public-launch risk cluster,
+    item (b)): self-serve upgrade against real paid LLM keys would let any
+    Owner/Admin grant their own tenant unlimited AI-credit budget for free.
+    require_permission still gates this first, so a non-Owner/Admin gets
+    403 same as before - an Owner/Admin now gets an honest 501 instead of
+    a real plan change, matching the checkout/webhook pattern below.
+    BillingService.change_plan() itself is untouched and still real -
+    see its docstring for the sanctioned manual-provisioning path this
+    endpoint no longer exposes."""
+    raise HTTPException(
+        status_code=501,
+        detail="Self-serve plan changes are disabled until Stripe billing is live. Contact the AXIOM team to change your plan.",
+    )
 
 
 @router.post("/checkout")
 async def create_checkout(user=Depends(require_permission("billing.manage"))):
-    raise HTTPException(status_code=501, detail="Stripe checkout not yet implemented - use POST /billing/change-plan for now")
+    raise HTTPException(status_code=501, detail="Stripe checkout not yet implemented - contact the AXIOM team for a manual plan change")
 
 
 @router.post("/webhook")

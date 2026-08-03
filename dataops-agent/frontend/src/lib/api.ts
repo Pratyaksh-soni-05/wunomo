@@ -1003,17 +1003,11 @@ export function getCurrentPlan(token: string): Promise<CurrentPlan> {
   return authedRequest("/api/v1/billing/plan", token);
 }
 
-// Public - no auth. Real tier definitions, not hardcoded client-side (unlike
-// the Settings AI Model list, which has no equivalent endpoint to fetch from).
-export function getPlans(): Promise<{ plans: Record<string, PlanLimits> }> {
-  return request("/api/v1/billing/plans");
-}
-
-export function changePlan(token: string, plan: string): Promise<CurrentPlan> {
-  return request("/api/v1/billing/change-plan", {
-    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ plan }),
-  });
-}
+// getPlans()/changePlan() removed (public-launch risk cluster, item b):
+// self-serve plan changes are disabled server-side (POST /change-plan now
+// always 501s) until Stripe billing is real, so nothing in the frontend
+// calls either anymore. GET /billing/plans still exists on the backend if
+// a future read-only plan-comparison view needs it.
 
 // ---------- Local session storage ----------
 

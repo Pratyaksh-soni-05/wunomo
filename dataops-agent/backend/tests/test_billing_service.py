@@ -56,19 +56,22 @@ async def test_change_plan_rejects_unknown_plan(client):
 
 
 @pytest.mark.asyncio
-async def test_owner_can_change_plan_via_endpoint_and_it_affects_quota(client):
+async def test_change_plan_endpoint_is_an_honest_stub_for_an_owner(client):
+    """POST /change-plan is disabled for everyone, including an Owner who
+    passes the role gate - self-serve upgrade against real paid LLM keys
+    is exactly the hole this closes (public-launch risk cluster, item b).
+    BillingService.change_plan() itself stays real - see
+    test_change_plan_updates_tenant_and_is_reflected_in_get_plan - this
+    only closes the client-reachable endpoint."""
     token, tenant_id, _ = await _register(client)
     headers = {"Authorization": f"Bearer {token}"}
 
     r = await client.post("/api/v1/billing/change-plan", json={"plan": "scale"}, headers=headers)
-    assert r.status_code == 200
-    assert r.json()["plan"] == "scale"
+    assert r.status_code == 501
 
+    # Confirm it's a true no-op, not a silent partial success.
     plan_check = await client.get("/api/v1/billing/plan", headers=headers)
-    assert plan_check.json()["plan"] == "scale"
-
-    usage = await client.get("/api/v1/billing/usage", headers=headers)
-    assert usage.json()["usage"]["data_sources"]["limit"] is None  # scale = unlimited
+    assert plan_check.json()["plan"] == "starter"
 
 
 @pytest.mark.asyncio
@@ -92,13 +95,16 @@ async def test_viewer_cannot_change_plan(client):
 
 
 @pytest.mark.asyncio
-async def test_change_plan_endpoint_rejects_unknown_plan(client):
+async def test_change_plan_endpoint_ignores_body_and_still_501s(client):
+    """The endpoint is disabled outright - even a garbage plan name gets
+    the same honest 501, not a 400 from validation logic that no longer
+    runs (the old behavior, before this endpoint was disabled)."""
     token, tenant_id, _ = await _register(client)
     r = await client.post(
         "/api/v1/billing/change-plan", json={"plan": "not-a-real-plan"},
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert r.status_code == 400
+    assert r.status_code == 501
 
 
 @pytest.mark.asyncio

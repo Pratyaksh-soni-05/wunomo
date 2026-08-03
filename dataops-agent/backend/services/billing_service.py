@@ -6,14 +6,22 @@ rationale). Payment-provider methods are stubbed - Stripe drops in behind
 this same interface later without changing what callers (API routes,
 future frontend) see.
 
-change_plan() is the one exception: it's real today (a direct Tenant.plan
-write), not stubbed, because there's no real payment to gate it on yet -
-it's a deliberate, documented stand-in so the Billing screen (Phase 17)
-has something real to call before Stripe exists. Once
-create_checkout_session()/handle_webhook() are real, change_plan() should
-only ever be called as a result of a confirmed payment event, not
-directly from a client request - flagged here so that transition isn't
-missed.
+change_plan() is real today (a direct Tenant.plan write), not stubbed -
+but as of the public-launch risk cluster session (2026-08-02), it is no
+longer reachable from a client request at all: POST /change-plan
+(api/v1/billing.py) now unconditionally returns a 501, since a real
+paid LLM key behind an unmetered self-serve upgrade let any Owner/Admin
+grant their own tenant unlimited AI-credit budget for free. This method
+itself is the sanctioned way to provision a real customer's plan
+manually before Stripe exists - call it directly (e.g. `docker exec
+dataops_backend python -c "..."`, the same technique already used
+throughout this project for direct-DB-write verification) or write
+`Tenant.plan` via SQL; either way bypasses the disabled endpoint
+entirely and is the intended path until Stripe webhooks call this
+instead. Once create_checkout_session()/handle_webhook() are real,
+change_plan() should only ever be invoked as a result of a confirmed
+payment event, not directly from a client request or manually - flagged
+here so that transition isn't missed.
 """
 from typing import Optional
 
