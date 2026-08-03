@@ -1,0 +1,181 @@
+/* ==========================================
+   WUNOMO AI — Design Tokens
+   Midnight × Pearl Perfect × Noir × Ocean
+   Locked Phase 0 values — see /dataops-agent/DESIGN_TOKENS.md
+   ========================================== */
+
+:root {
+  /* Midnight scale (sidebar, primary actions, headings) */
+  --midnight-900: #0A1B30;
+  --midnight-800: #0F2440;
+  --midnight-700: #122C4F; /* base — Midnight itself */
+  --midnight-600: #1B3A63;
+  --midnight-500: #26507F;
+  --midnight-400: #3D6B9E;
+  --midnight-300: #6A8FB8;
+  --midnight-200: #A3BFDA;
+  --midnight-100: #D6E3EF;
+  --midnight-50:  #EFF4F9;
+
+  /* Ocean scale (links, active states, focus rings) */
+  --ocean-700: #35526E;
+  --ocean-650: #416487;
+  --ocean-600: #4C76A0;
+  --ocean-500: #5B88B2; /* base — Ocean itself */
+  --ocean-400: #7EA0C2;
+  --ocean-300: #9FB9D3;
+  --ocean-200: #C3D6E5;
+  --ocean-100: #E1EBF3;
+  --ocean-50:  #F1F6FA;
+
+  /* Surfaces & borders (warm, from Pearl Perfect) */
+  --surface: #FFFEF5;
+  --bg: #FBF9E4; /* Pearl Perfect itself */
+  --surface-hover: #F3F0DC;
+  --border: #E6E1C8;
+  --border-strong: #D3CBA8;
+
+  /* Text / ink (cool, from Midnight) */
+  --text-primary: #16233A;
+  --text-secondary: #3A4A63;
+  --text-muted: #6B7C94;
+  --text-disabled: #A7B4C4;
+
+  /* Text painted on a permanently-dark surface (Midnight buttons, toasts,
+     tooltips) — the sidebar/primary-action Midnight color never lightens in
+     dark mode, so this must stay a constant near-white in both themes.
+     Deliberately NOT the same token as --surface, which flips from
+     near-white (light mode) to dark navy (dark mode) for card backgrounds —
+     conflating the two caused primary buttons to render dark-text-on-dark
+     in dark mode. */
+  --on-dark: #FFFEF5;
+
+  /* Semantic (unchanged hues in both themes) */
+  --success: #16a34a;
+  --success-bg: #EAF7EE;
+  --success-border: #BFE5C9;
+  --warning: #d97706;
+  --warning-bg: #FBF1E1;
+  --warning-border: #F0D9AE;
+  --danger: #dc2626;
+  --danger-bg: #FBEAEA;
+  --danger-border: #F3C6C6;
+  --info: #0891b2;
+  --info-bg: #ecfeff;
+  --info-border: #a5f3fc;
+
+  /* Sidebar stays Midnight in both themes — constant "spine" */
+  --sidebar-bg: var(--midnight-700);
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(22,35,58,0.05);
+  --shadow-sm: 0 1px 4px rgba(22,35,58,0.08), 0 1px 2px rgba(22,35,58,0.04);
+  --shadow-md: 0 4px 12px rgba(22,35,58,0.1), 0 2px 4px rgba(22,35,58,0.06);
+  --shadow-lg: 0 8px 24px rgba(22,35,58,0.12), 0 4px 8px rgba(22,35,58,0.06);
+  --shadow-xl: 0 16px 48px rgba(22,35,58,0.16), 0 8px 16px rgba(22,35,58,0.08);
+
+  /* Layout */
+  --sidebar-w: 220px;
+  --sidebar-w-collapsed: 60px;
+  --topbar-h: 52px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --t-fast: 100ms ease;
+  --t-normal: 180ms ease;
+  --t-slow: 280ms ease;
+
+  /* Typography */
+  --font-display: 'Fraunces', Georgia, serif;
+  --font: 'General Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* Dark mode — Phase 19 redesign: warm near-black neutral surfaces, blue
+   (Ocean) reserved strictly for accents/highlights, never a surface fill.
+   Replaces the original pure-black-page + Midnight-navy-card pairing, which
+   read as murky (see CLAUDE.md's Phase 19 dark-theme entry for the measured
+   contrast rationale and before/after table). Toggled by a `data-theme`
+   attribute the theme switcher (Phase 7) stamps on <html>;
+   @media (prefers-color-scheme) is the unstyled default signal. */
+:root[data-theme="dark"] {
+  --bg: #101015; /* warm near-black, not pure Noir */
+  --surface: #1B1B21; /* elevated cards — a hair lighter than bg, near-neutral, not navy */
+  --surface-hover: #26262E;
+  --border: #303038;
+  --border-strong: #40404A;
+
+  --text-primary: #F1F0E1; /* warm off-white */
+  --text-secondary: #B4B4BE; /* desaturated neutral grey, was blue-tinted */
+  --text-muted: #9A9AA6; /* desaturated neutral grey */
+  --text-disabled: #5A5A66;
+
+  --success-bg: rgba(22,163,74,.15);
+  --success-border: rgba(22,163,74,.4);
+  --warning-bg: rgba(217,119,6,.15);
+  --warning-border: rgba(217,119,6,.4);
+  --danger-bg: rgba(220,38,38,.15);
+  --danger-border: rgba(220,38,38,.4);
+  --info-bg: rgba(8,145,178,.15);
+  --info-border: rgba(8,145,178,.4);
+
+  /* ocean-50/100 are light near-white tints in light mode (selected-row/
+     hover backgrounds) — redefined here as translucent overlays instead of
+     inheriting the light value, which rendered as a jarring white bar
+     against the dark surfaces. */
+  --ocean-50: rgba(91,136,178,0.12);
+  --ocean-100: rgba(91,136,178,0.2);
+
+  /* ocean-600/700 are used as literal link/text color in a few places
+     (auth-link-btn, breadcrumb hover, notif footer link) — the light-mode
+     values fail AA as text against any dark surface (a pre-existing bug,
+     not introduced by this redesign — confirmed 3.27-4.41:1 against the
+     old navy surfaces too). Lightened here, dark-mode only; light mode's
+     --ocean-600/700 are untouched. Hover goes LIGHTER (--ocean-700), the
+     correct direction on a dark background — the light-mode value darkens
+     on hover, which is right for a light background but would reduce
+     contrast here. */
+  --ocean-600: #8FB0D0;
+  --ocean-700: #B8CFE3;
+
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-sm: 0 1px 4px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.5), 0 2px 4px rgba(0,0,0,0.3);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,0.55), 0 4px 8px rgba(0,0,0,0.3);
+  --shadow-xl: 0 16px 48px rgba(0,0,0,0.6), 0 8px 16px rgba(0,0,0,0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101015;
+    --surface: #1B1B21;
+    --surface-hover: #26262E;
+    --border: #303038;
+    --border-strong: #40404A;
+
+    --text-primary: #F1F0E1;
+    --text-secondary: #B4B4BE;
+    --text-muted: #9A9AA6;
+    --text-disabled: #5A5A66;
+
+    --success-bg: rgba(22,163,74,.15);
+    --success-border: rgba(22,163,74,.4);
+    --warning-bg: rgba(217,119,6,.15);
+    --warning-border: rgba(217,119,6,.4);
+    --danger-bg: rgba(220,38,38,.15);
+    --danger-border: rgba(220,38,38,.4);
+    --info-bg: rgba(8,145,178,.15);
+    --info-border: rgba(8,145,178,.4);
+
+    --ocean-50: rgba(91,136,178,0.12);
+    --ocean-100: rgba(91,136,178,0.2);
+    --ocean-600: #8FB0D0;
+    --ocean-700: #B8CFE3;
+  }
+}
