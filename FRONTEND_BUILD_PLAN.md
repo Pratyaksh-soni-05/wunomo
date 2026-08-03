@@ -835,12 +835,13 @@ they can't execute anything. Recorded here, not left implicit.
     whole pipeline, not just the clicked row.
 12. Transforms' "Auto" language selector: implement real detection or
     remove the option (currently identical to picking "SQL").
-13. Approval outcomes never returning to the chat thread — cheap-version fix
-    approved: resolve each blocked tool call's *current* approval status at
-    session-history read time (a join against `ApprovalRequest` inside
-    `GET /chat/sessions/{id}/history`, no push infrastructure) so a
-    reopened conversation shows approved/rejected instead of a frozen
-    "Needs approval."
+13. ~~Approval outcomes never returning to the chat thread~~ — **DONE**
+    (agency-work follow-up session, 2026-08-04). Built exactly the
+    cheap-version fix approved here: `GET /chat/sessions/{id}/history`
+    now resolves each blocked tool call's *current* approval status
+    against the real `ApprovalRequest` at read time, no push
+    infrastructure. See `CLAUDE.md`'s Status Table row for the fix and
+    live-verification detail.
 14. Remove the notifications bell entirely this phase — confirmed hardcoded
     placeholder data with an unconditionally-rendered unread dot (a real
     "nothing faked" violation in the global topbar). A real notification

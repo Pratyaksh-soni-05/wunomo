@@ -14,6 +14,21 @@ function prettyResult(result: unknown): string {
   }
 }
 
+// A blocked call's status is resolved against the real ApprovalRequest at
+// session-history read time (see api/v1/chat.py's _resolve_blocked_call_
+// statuses) -- these outcomes must render distinctly from each other and
+// from "Completed" (a real direct tool execution), since a rejected or
+// failed action showing as "Completed" would say the opposite of what
+// actually happened.
+const STATUS_BADGE: Record<string, { label: string; variant: "success" | "warning" | "danger" }> = {
+  blocked_pending_approval: { label: "Needs approval", variant: "warning" },
+  approval_approved: { label: "Approved — pending execution", variant: "warning" },
+  approval_rejected: { label: "Rejected", variant: "danger" },
+  approval_executed: { label: "Approved & executed", variant: "success" },
+  approval_failed: { label: "Approved — execution failed", variant: "danger" },
+  denied_insufficient_role: { label: "Denied (role)", variant: "danger" },
+};
+
 export function ToolCallBlock({
   call,
   approval,
@@ -27,13 +42,14 @@ export function ToolCallBlock({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const blocked = call.status === "blocked_pending_approval";
+  const badge = STATUS_BADGE[call.status] ?? { label: "Completed", variant: "success" as const };
 
   return (
     <div className="chat-tool-block">
       <div className="chat-tool-block-header" onClick={() => setOpen((v) => !v)}>
         <span className="chat-tool-name">{call.tool}</span>
         <div className="flex items-center gap-2">
-          <Badge variant={blocked ? "warning" : "success"}>{blocked ? "Needs approval" : "Completed"}</Badge>
+          <Badge variant={badge.variant}>{badge.label}</Badge>
           <span className="text-muted" style={{ fontSize: 10 }}>{open ? "▲" : "▼"}</span>
         </div>
       </div>

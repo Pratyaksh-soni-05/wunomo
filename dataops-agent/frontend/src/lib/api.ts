@@ -297,7 +297,21 @@ export interface ChatToolCall {
   tool: string;
   args: Record<string, unknown>;
   result: unknown;
-  status: "completed" | "blocked_pending_approval";
+  // approval_approved/rejected/executed/failed are resolved from the real
+  // ApprovalRequest at session-history read time (GET /chat/sessions/{id}/
+  // history) -- a blocked call no longer stays frozen on
+  // "blocked_pending_approval" forever once it's actually been resolved on
+  // the Approvals screen. denied_insufficient_role comes from the
+  // role-permission gate, separate from the risk-based approval gate.
+  status:
+    | "completed"
+    | "blocked_pending_approval"
+    | "approval_approved"
+    | "approval_rejected"
+    | "approval_executed"
+    | "approval_failed"
+    | "denied_insufficient_role";
+  approval_id?: string;
 }
 
 export interface ChatMessageItem {

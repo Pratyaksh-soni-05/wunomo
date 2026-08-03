@@ -8,7 +8,7 @@ from models.all_models import ChatMessage
 from sqlalchemy import select, func
 from datetime import datetime
 import uuid
-from models.approval_model import ApprovalRequest
+from models.approval_model import ApprovalRequest, ApprovalStatus
 from schemas.chat_schema import ChatRequest
 from datetime import datetime
 from langchain_core.messages import AIMessage as LCAIMessage, ToolMessage as LCToolMessage
@@ -169,6 +169,66 @@ async def list_sessions(user=Depends(get_current_user)):
     ]}
 
 
+# Maps the real ApprovalStatus enum to a trace-status string the frontend
+# can render distinctly from the still-pending "blocked_pending_approval"
+# it's replacing. See _resolve_blocked_call_statuses' docstring for why
+# this exists at all.
+_APPROVAL_STATUS_TO_TRACE_STATUS = {
+    ApprovalStatus.PENDING: "blocked_pending_approval",
+    ApprovalStatus.APPROVED: "approval_approved",
+    ApprovalStatus.REJECTED: "approval_rejected",
+    ApprovalStatus.EXECUTED: "approval_executed",
+    ApprovalStatus.FAILED: "approval_failed",
+}
+
+
+async def _resolve_blocked_call_statuses(db, tenant_id: str, session_id: str, msgs) -> list[dict]:
+    """A blocked tool call is persisted with status "blocked_pending_approval"
+    at write time and, until now, stayed frozen at that value forever in
+    chat history — even after the real ApprovalRequest was later approved,
+    rejected, or executed on the Approvals screen. This resolves each
+    blocked call's *current* status at read time instead (a real, if
+    coarse, join against ApprovalRequest — no push infrastructure, per the
+    locked cheap-fix design in FRONTEND_BUILD_PLAN.md's P1 list).
+
+    ApprovalRequest doesn't store the LangChain tool_call_id, so it can't
+    be joined on exactly — correlated instead by (tenant_id, session_id,
+    action_name) in chronological order, consuming one ApprovalRequest per
+    matching blocked call as they're encountered. Correct in the common
+    case (no more than one concurrently-blocked call per action_name per
+    session); a real tool_call_id column would be needed for a fully
+    precise join, out of scope for this cheap version.
+    """
+    ar = await db.execute(
+        select(ApprovalRequest)
+        .where(ApprovalRequest.tenant_id == tenant_id, ApprovalRequest.session_id == session_id)
+        .order_by(ApprovalRequest.created_at.asc())
+    )
+    pending_by_action: dict[str, list[ApprovalRequest]] = {}
+    for approval in ar.scalars().all():
+        pending_by_action.setdefault(approval.action_name, []).append(approval)
+
+    resolved_messages = []
+    for m in msgs:
+        calls = [dict(c) for c in (m.tool_calls or [])]
+        for call in calls:
+            if call.get("status") != "blocked_pending_approval":
+                continue
+            queue = pending_by_action.get(call.get("tool"))
+            if not queue:
+                continue
+            approval = queue.pop(0)
+            call["status"] = _APPROVAL_STATUS_TO_TRACE_STATUS.get(approval.status, call["status"])
+            call["approval_id"] = approval.id
+            if approval.execution_result is not None:
+                call["result"] = approval.execution_result
+        resolved_messages.append({
+            "role": m.role, "content": m.content, "tool_calls": calls,
+            "timestamp": str(m.created_at),
+        })
+    return resolved_messages
+
+
 @router.get("/sessions/{session_id}/history")
 async def get_history(session_id: str, user=Depends(get_current_user)):
     async with AsyncSessionLocal() as db:
@@ -178,10 +238,5 @@ async def get_history(session_id: str, user=Depends(get_current_user)):
             ChatMessage.user_id == user["sub"],
         ).order_by(ChatMessage.created_at.asc()))
         msgs = r.scalars().all()
-        return {"session_id": session_id, "messages": [
-            {
-                "role": m.role, "content": m.content, "tool_calls": m.tool_calls or [],
-                "timestamp": str(m.created_at),
-            }
-            for m in msgs
-        ]}
+        messages = await _resolve_blocked_call_statuses(db, user["tenant_id"], session_id, msgs)
+        return {"session_id": session_id, "messages": messages}
