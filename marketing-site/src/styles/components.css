@@ -670,7 +670,8 @@ tr.selected td { background: var(--ocean-50) !important; }
 .landing-about p { font-size: 16px; line-height: 1.75; color: var(--text-secondary); }
 
 /* Contact */
-.landing-contact-cards { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+.landing-contact-cards { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; }
+.landing-contact-person { display: flex; flex-direction: column; gap: 10px; }
 .landing-contact-card {
   padding: 20px 26px; border: 1px solid var(--border); border-radius: var(--radius-lg);
   background: var(--surface); font-size: 14px; font-weight: 500; color: var(--text-primary);

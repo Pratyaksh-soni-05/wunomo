@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { FORMSPREE_ENDPOINT, CONTACT_EMAILS } from "@/lib/config";
+import { FORMSPREE_ENDPOINT, PRIMARY_CONTACT_EMAIL } from "@/lib/config";
 
 type Status = "idle" | "sending" | "success" | "error";
 
@@ -69,7 +69,7 @@ export function InterestForm() {
       {status === "error" && (
         <p className="input-hint text-danger" style={{ marginBottom: 4 }}>
           Something went wrong sending that — please email us directly at{" "}
-          <a href={`mailto:${CONTACT_EMAILS[0]}`}>{CONTACT_EMAILS[0]}</a> instead.
+          <a href={`mailto:${PRIMARY_CONTACT_EMAIL}`}>{PRIMARY_CONTACT_EMAIL}</a> instead.
         </p>
       )}
 

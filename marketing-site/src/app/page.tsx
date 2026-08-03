@@ -4,7 +4,7 @@ import { ScreenshotCarousel } from "@/components/ScreenshotCarousel";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { InterestForm } from "@/components/InterestForm";
 import { EMPLOYEES } from "@/lib/employees";
-import { CAL_LINK, WHATSAPP_LINK, CONTACT_EMAILS } from "@/lib/config";
+import { CAL_LINK, CONTACTS } from "@/lib/config";
 
 const FEATURES = [
   {
@@ -142,26 +142,23 @@ export default function LandingPage() {
           <h2 className="font-display">Questions? Reach us directly.</h2>
         </div>
         <div className="landing-contact-cards">
-          <a className="landing-contact-card" href={`mailto:${CONTACT_EMAILS[0]}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 6 12 13 2 6" />
-              <path d="M2 6h20v12H2z" />
-            </svg>
-            {CONTACT_EMAILS[0]}
-          </a>
-          <a className="landing-contact-card" href={`mailto:${CONTACT_EMAILS[1]}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M22 6 12 13 2 6" />
-              <path d="M2 6h20v12H2z" />
-            </svg>
-            {CONTACT_EMAILS[1]}
-          </a>
-          <a className="landing-contact-card" href={WHATSAPP_LINK} target="_blank" rel="noopener noreferrer">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-            </svg>
-            WhatsApp
-          </a>
+          {CONTACTS.map((c) => (
+            <span key={c.email} className="landing-contact-person">
+              <a className="landing-contact-card" href={`mailto:${c.email}`}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M22 6 12 13 2 6" />
+                  <path d="M2 6h20v12H2z" />
+                </svg>
+                {c.name} — {c.email}
+              </a>
+              <a className="landing-contact-card" href={c.whatsappLink} target="_blank" rel="noopener noreferrer">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                </svg>
+                WhatsApp {c.name.split(" ")[0]}
+              </a>
+            </span>
+          ))}
         </div>
         <InterestForm />
       </section>
