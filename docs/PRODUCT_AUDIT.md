@@ -31,8 +31,7 @@ User message
   → [if not blocked] real tool side effect already happened, response returned to user
   → [if blocked] user must separately visit /approvals and click Approve
        → PolicyEngine.approve() → execute_approved_action() → TOOL_REGISTRY dispatch
-       → BROKEN (see 1.2) — nothing real happens for 10 of 11 registered actions,
-         a silent no-op for the 11th
+       → BROKEN (see 1.2) — nothing real happens for any of the 11 registered actions
   → chat thread is NEVER updated with the outcome (see 1.3) — it stays frozen on
     "Needs approval" forever, regardless of what happens on the Approvals screen
 ```
@@ -48,9 +47,11 @@ module = importlib.import_module(module_path)
 fn = getattr(module, fn_name, None)   # MODULE-LEVEL lookup
 ```
 
-Every real target (`DAGManager.trigger_run`, `DAGManager.backfill`, `DAGManager.pause`, `QualityRuleEngine.run_checks`, `BusinessRules.update_rule`, `IncidentManager.resolve_incident`, `IncidentManager.triage_incident`, `SchemaProfiler.profile`, `ConnectorManager.sync`, `ReportGenerator.generate_status_report`) is an **instance method**, not a module-level function. `getattr()` returns `None` for all ten. The eleventh, `update_contract`, is mapped to `policy_engine._noop()` — a real module-level function that exists specifically as a stub, returning `{"status": "noop", "kwargs": kwargs}`.
-
-The consequence for the eleventh entry is worse than the other ten, not better: because `_noop()`'s return dict has no `"error"` key, `PolicyEngine.approve()`'s own logic (`final_status = EXECUTED if "error" not in execution_result else FAILED`, line 226) marks that approval **`EXECUTED`** — a clean, successful-looking status, for an action that did *nothing at all*. The other ten at least surface a visible `FAILED` status with `"Function '<name>' not found in module '<path>'"` as the error. **One out of eleven approval types doesn't just fail to act — it actively reports success while acting on nothing.**
+**Correction (verified live after this document's first draft, and after this exact wrong claim was already relayed to the user — flagging the correction explicitly rather than quietly editing it away):** the paragraph originally here claimed `update_contract` silently reports a successful `EXECUTED` status while doing nothing. That was wrong, and was never verified live before being written — it rested on an unchecked assumption that `_noop()` was awaitable. It isn't: `_noop()` is a plain `def`, not `async def`. `execute_approved_action()` unconditionally does `result = await fn(...)`, and `await`-ing a plain function's already-returned `dict` raises `TypeError: object dict can't be used in 'await' expression` — caught by the same outer exception handler as every other entry, producing the identical `FAILED` status with a different error string. **Confirmed live**: `python -c "..."` reproducing the exact call shape raised exactly that `TypeError`. **All 11 registered actions fail with `FAILED` today — none report false success.** Of the 11:
+- **8 target real, existing instance methods** (`DAGManager.trigger_run`/`.backfill`, `QualityRuleEngine.run_checks`, `IncidentManager.resolve_incident`/`.triage_incident`, `SchemaProfiler.profile`, `ConnectorManager.sync`, `ReportGenerator.generate_status_report`) — the module-level `getattr()` fails for the documented instance-vs-module reason, `FAILED` with `"Function '<name>' not found"`.
+- **1 (`pause_pipeline`) has a compounding second error**: the registry's own `fn_name` is `"pause"`, but the real method is `DAGManager.pause_pipeline` — even fixing the module/instance dispatch bug alone wouldn't fix this one; the name itself is also wrong.
+- **1 (`modify_business_rule`) targets a method that doesn't exist under any name**: `BusinessRules` has no `update_rule` (or equivalent) method at all — only `create_rule`/`list_rules`/`run_all`. There is no real "modify a business rule" capability anywhere in this codebase to dispatch this to.
+- **1 (`update_contract`) targets a real, callable, but synchronous stub** (`_noop`), crashed by the unconditional `await`, as corrected above.
 
 No test anywhere in the suite asserts that `execute_approved_action()` successfully executes a real registered action. That absence is itself confirmation: this has never worked, and nothing was verifying it.
 
@@ -135,7 +136,7 @@ Status key: **Fully working** (real, wired, verified by reading the actual imple
 
 ## 3. Known bugs, gaps, and shortcuts — ranked by how much they hurt a real user
 
-1. **`execute_approved_action()` dispatch broken for all 11 registered actions** (Section 1.2) — the core "approve → it happens" promise is entirely false today, and one variant of it actively lies about success.
+1. **`execute_approved_action()` dispatch broken for all 11 registered actions** (Section 1.2) — the core "approve → it happens" promise is entirely false today. All 11 fail with a visible `FAILED` status (see Section 1.2's correction) — none silently report success, which is at least a smaller problem than it could have been.
 2. **Approval outcomes never reflected in chat** (Section 1.3) — compounds #1 into a permanently misleading conversation transcript.
 3. **`custom_sql` quality rule executes arbitrary, unsandboxed SQL** against a tenant's real connected database, reachable from both the REST API and the chat agent — a genuine, live security hole, not hypothetical.
 4. **No CI pipeline of any kind** — zero automated test execution on push/PR, for either backend (270+ tests) or frontend (zero tests exist to run). Every "verified" claim in this project's history happened because a person remembered to run something manually. This is the structural root cause of nearly every "shipped but silently broken" finding in this document.
@@ -207,7 +208,7 @@ Status key: **Fully working** (real, wired, verified by reading the actual imple
 
 ## 7. What would embarrass this in a technical due-diligence review
 
-1. **The approval workflow — the product's own trust mechanism — doesn't work**, and one of its eleven registered action types actively reports success while doing nothing. This is the single fact most likely to end a serious technical review early if discovered live rather than disclosed.
+1. **The approval workflow — the product's own trust mechanism — doesn't work.** All 11 registered action types fail visibly (`FAILED` status) when approved — not silently, but still completely non-functional for the one thing this mechanism exists to do. This is the single fact most likely to end a serious technical review early if discovered live rather than disclosed.
 2. **A live, reachable, unsandboxed arbitrary-SQL-execution path** (`custom_sql` quality rules) exists in a product whose entire value proposition is trustworthy automation over a company's real data infrastructure.
 3. **No CI pipeline**, for a codebase this size, with this much historical evidence that things silently broke and stayed broken for months.
 4. **Plaintext credential storage** for every connected data source's password/token/service-account key.
