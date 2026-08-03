@@ -19,25 +19,75 @@ RISK_DESCRIPTIONS = {
     "high": "High-risk destructive or schema-altering operation",
 }
 
-# Tool registry: maps action_name → (module_path, function_name)
-TOOL_REGISTRY: dict[str, tuple[str, str]] = {
+# Tool registry: maps action_name -> the real target to dispatch to.
+#
+# Every target below is an instance method (tenant_id always goes to the
+# constructor, never the method call) except "update_contract", whose
+# target (_noop) is a real module-level function ("class": None). Any
+# name in "constructor_args" is pulled out of the approval's action_args
+# and passed to the constructor instead of the method call — needed
+# because SchemaProfiler.__init__ requires source_id up front, unlike
+# every other target class here.
+#
+# This replaced a (module_path, function_name) shape that resolved via a
+# bare module-level getattr() — which can never find an instance method,
+# so every entry failed dispatch regardless of role/approval state. See
+# CLAUDE.md's "PolicyEngine.execute_approved_action()" Known-broken row
+# for the full history, including two entries that had a second,
+# independent bug even after the module/instance issue: "pause_pipeline"
+# named a method ("pause") that doesn't exist even as an instance method
+# (the real one is pause_pipeline), and "modify_business_rule" targeted
+# a method (BusinessRules.update_rule) that doesn't exist under any name
+# — there is no real "modify a business rule" capability anywhere in
+# this codebase, so that entry is removed rather than papered over; a
+# request for it now correctly surfaces "not registered".
+TOOL_REGISTRY: dict[str, dict] = {
     # Ingestion
-    "profile_schema": ("modules.ingestion.schema_profiler", "profile"),
-    "sync_source": ("modules.ingestion.connector_manager", "sync"),
+    "profile_schema": {
+        "module": "modules.ingestion.schema_profiler", "class": "SchemaProfiler",
+        "method": "profile", "constructor_args": ["source_id"],
+    },
+    "sync_source": {
+        "module": "modules.ingestion.connector_manager", "class": "ConnectorManager",
+        "method": "sync", "constructor_args": [],
+    },
     # Orchestration
-    "rerun_pipeline": ("modules.orchestration.dag_manager", "trigger_run"),
-    "backfill_pipeline": ("modules.orchestration.dag_manager", "backfill"),
-    "pause_pipeline": ("modules.orchestration.dag_manager", "pause"),
+    "rerun_pipeline": {
+        "module": "modules.orchestration.dag_manager", "class": "DAGManager",
+        "method": "trigger_run", "constructor_args": [],
+    },
+    "backfill_pipeline": {
+        "module": "modules.orchestration.dag_manager", "class": "DAGManager",
+        "method": "backfill", "constructor_args": [],
+    },
+    "pause_pipeline": {
+        "module": "modules.orchestration.dag_manager", "class": "DAGManager",
+        "method": "pause_pipeline", "constructor_args": [],
+    },
     # Quality
-    "run_quality_check": ("modules.quality.rule_engine", "run_checks"),
-    "modify_business_rule": ("modules.quality.business_rules", "update_rule"),
+    "run_quality_check": {
+        "module": "modules.quality.rule_engine", "class": "QualityRuleEngine",
+        "method": "run_checks", "constructor_args": [],
+    },
     # Observability
-    "resolve_incident": ("modules.observability.incident_manager", "resolve_incident"),
-    "triage_incident": ("modules.observability.incident_manager", "triage_incident"),
+    "resolve_incident": {
+        "module": "modules.observability.incident_manager", "class": "IncidentManager",
+        "method": "resolve_incident", "constructor_args": [],
+    },
+    "triage_incident": {
+        "module": "modules.observability.incident_manager", "class": "IncidentManager",
+        "method": "triage_incident", "constructor_args": [],
+    },
     # Governance
-    "update_contract": ("modules.governance.policy_engine", "_noop"),
+    "update_contract": {
+        "module": "modules.governance.policy_engine", "class": None,
+        "method": "_noop", "constructor_args": [],
+    },
     # Reporting
-    "generate_report": ("modules.reporting.report_generator", "generate_status_report"),
+    "generate_report": {
+        "module": "modules.reporting.report_generator", "class": "ReportGenerator",
+        "method": "generate_status_report", "constructor_args": [],
+    },
 }
 
 
@@ -318,11 +368,13 @@ class PolicyEngine:
 
     async def execute_approved_action(self, approval: ApprovalRequest) -> dict:
         """
-        Dynamically resolves and calls the tool function for an approved action.
-        Never raises — always returns a dict.
+        Resolves and calls the real target for an approved action — either
+        an instance method (constructed with tenant_id, plus anything in
+        "constructor_args" pulled out of action_args) or a plain module-level
+        function ("class": None). Never raises — always returns a dict.
         """
         action_name = approval.action_name
-        action_args = approval.action_args or {}
+        action_args = dict(approval.action_args or {})
 
         log.info(
             "policy.execute_approved_action",
@@ -330,32 +382,44 @@ class PolicyEngine:
             approval_id=str(approval.id),
         )
 
+        if action_name not in TOOL_REGISTRY:
+            return {
+                "error": f"Action '{action_name}' is not registered in TOOL_REGISTRY",
+                "available_actions": list(TOOL_REGISTRY.keys()),
+            }
+
+        spec = TOOL_REGISTRY[action_name]
+
         try:
-            if action_name not in TOOL_REGISTRY:
-                return {
-                    "error": f"Action '{action_name}' is not registered in TOOL_REGISTRY",
-                    "available_actions": list(TOOL_REGISTRY.keys()),
-                }
+            module = importlib.import_module(spec["module"])
+        except ImportError as e:
+            return {"error": f"Could not import module '{spec['module']}': {str(e)}"}
 
-            module_path, fn_name = TOOL_REGISTRY[action_name]
+        class_name = spec.get("class")
+        fn_name = spec["method"]
 
-            try:
-                module = importlib.import_module(module_path)
-            except ImportError as e:
-                return {"error": f"Could not import module '{module_path}': {str(e)}"}
-
-            fn = getattr(module, fn_name, None)
-            if fn is None:
-                return {"error": f"Function '{fn_name}' not found in module '{module_path}'"}
-
-            import inspect
-            sig = inspect.signature(fn)
-            params = list(sig.parameters.keys())
-
-            if "tenant_id" in params:
-                result = await fn(tenant_id=self.tenant_id, **action_args)
-            else:
+        try:
+            if class_name is None:
+                fn = getattr(module, fn_name, None)
+                if fn is None:
+                    return {"error": f"Function '{fn_name}' not found in module '{spec['module']}'"}
                 result = await fn(**action_args)
+            else:
+                cls = getattr(module, class_name, None)
+                if cls is None:
+                    return {"error": f"Class '{class_name}' not found in module '{spec['module']}'"}
+
+                constructor_kwargs = {"tenant_id": self.tenant_id}
+                method_kwargs = dict(action_args)
+                for arg_name in spec.get("constructor_args", []):
+                    if arg_name in method_kwargs:
+                        constructor_kwargs[arg_name] = method_kwargs.pop(arg_name)
+
+                instance = cls(**constructor_kwargs)
+                method = getattr(instance, fn_name, None)
+                if method is None:
+                    return {"error": f"Method '{fn_name}' not found on {class_name}"}
+                result = await method(**method_kwargs)
 
             log.info(
                 "policy.execute_approved_action.done",
@@ -395,6 +459,11 @@ class PolicyEngine:
         }
 
 
-def _noop(**kwargs) -> dict:
-    """Placeholder for actions not yet fully wired."""
+async def _noop(**kwargs) -> dict:
+    """Placeholder for actions not yet fully wired. Must be async: this is
+    called via `await fn(**kwargs)` like every other TOOL_REGISTRY target
+    -- it was a plain `def` before, which made `update_contract` raise
+    `TypeError: object dict can't be used in 'await' expression` on every
+    approval, not silently succeed (see CLAUDE.md's Known-broken row for
+    the corrected account of this)."""
     return {"status": "noop", "kwargs": kwargs}
