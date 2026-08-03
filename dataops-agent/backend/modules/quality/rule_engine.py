@@ -243,12 +243,32 @@ class QualityRuleEngine:
 
         if rt == "custom_sql":
             sql = cfg.get("sql", "")
-            if sql and hasattr(connector, "execute_sql"):
-                result = await connector.execute_sql(sql)
-                count  = result.get("count", 0)
-                passed = count == 0   # convention: SQL returns violations
-                return {"passed": passed,
-                        "message": f"Custom SQL returned {count} violations"}
-            return {"passed": True, "message": "custom_sql skipped — no SQL or connector"}
+            if not sql:
+                return {"passed": True, "message": "custom_sql skipped — no SQL configured"}
+            source_type_val = (
+                source.source_type.value if hasattr(source.source_type, "value")
+                else str(source.source_type)
+            )
+            if source_type_val not in ("postgres", "mysql"):
+                return {"passed": True, "message": "custom_sql skipped — not a SQL source"}
+            # Routed through SqlRunner's safety layer (keyword blocklist +
+            # SELECT/WITH-only + row cap + audit log) instead of calling the
+            # connector's raw execute_sql() directly — that call had zero
+            # sandboxing, letting anyone with quality.manage configure a
+            # "quality rule" that ran arbitrary DDL/DML against the tenant's
+            # real connected database, re-executed automatically on every
+            # pipeline run. custom_sql rules are meant to return a count of
+            # violation rows, which is exactly a SELECT — SqlRunner's
+            # SELECT-only restriction doesn't lose any real capability here.
+            from modules.transformation.sql_runner import SqlRunner
+            result = await SqlRunner(self.tenant_id).run_on_source(
+                source.id, sql, actor="quality_rule"
+            )
+            if "error" in result:
+                return {"passed": False, "message": f"Custom SQL rejected: {result['error']}"}
+            count  = result.get("row_count", 0)
+            passed = count == 0   # convention: SQL returns violation rows
+            return {"passed": passed,
+                    "message": f"Custom SQL returned {count} violation row(s)"}
 
         return {"passed": True, "message": f"Rule type '{rt}' not yet implemented"}
