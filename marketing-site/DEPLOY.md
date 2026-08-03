@@ -1,9 +1,16 @@
 # Deploying marketing-site to wunomo.in
 
-**Do not run any of this until `PLACEHOLDERS.md` is fully checked off.**
-Deploying with `TODO_REPLACE_ME` still in `src/lib/config.ts` means "Book a
-demo" links nowhere real, WhatsApp opens a dead chat, and the interest form
-fails on submit.
+`PLACEHOLDERS.md` is fully checked off as of this writing — Cal.com,
+Formspree, and both WhatsApp contacts are real values, verified live (see
+that file and this session's deploy-readiness verdict for the detail).
+
+**Two stages, do them in order:**
+- **Stage 1 (sections 1-2 below): deploy to the free `*.vercel.app` URL
+  and test everything live there first.** This is the recommended starting
+  point — confirms the real Vercel build/runtime behaves like the local one
+  before any DNS is touched.
+- **Stage 2 (sections 3-4): point `wunomo.in` at it via Cloudflare DNS.**
+  Only do this once Stage 1 is confirmed working on the `.vercel.app` URL.
 
 ## 1. Push the branch
 
