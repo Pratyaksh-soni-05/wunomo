@@ -191,24 +191,27 @@ async def test_blocked_tool_call_carries_its_real_risk_level_not_hardcoded_high(
     showed up as "high" risk end-to-end, in both the DB row and the UI.
 
     Uses the real (non-monkeypatched) `requires_approval`/`get_risk_level`
-    from `agent.personality` — "rerun_pipeline" is a real `medium`-risk
-    action name, blocked under `assisted` mode (which only gates
-    medium/high), to prove the fix threads the *real* tier through, not
-    just that some non-"high" value happens to appear.
+    from `agent.personality` — "run_pipeline" is a real `medium`-risk
+    action name (RISK_ACTIONS was fixed to reference real
+    agent/tools/*.py tool names instead of phantom ones — see CLAUDE.md's
+    "Phantom high-risk tools" Known-broken row), blocked under `assisted`
+    mode (which only gates medium/high), to prove the fix threads the
+    *real* tier through, not just that some non-"high" value happens to
+    appear.
     """
     @tool
-    async def rerun_pipeline(pipeline_id: str) -> str:
+    async def run_pipeline(pipeline_id: str) -> str:
         """Test-only fake tool sharing a real RISK_ACTIONS["medium"] name."""
-        return "reran"
+        return "ran"
 
     fake_llm = FakeToolCallLLM([
         AIMessage(content="", tool_calls=[
-            {"name": "rerun_pipeline", "args": {"pipeline_id": "p1"}, "id": "call_1"},
+            {"name": "run_pipeline", "args": {"pipeline_id": "p1"}, "id": "call_1"},
         ]),
     ])
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
-    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [rerun_pipeline])
-    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"rerun_pipeline": "view"})
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [run_pipeline])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"run_pipeline": "view"})
     dataops_agent._cache.clear()
 
     result = await dataops_agent.run_agent(
@@ -219,7 +222,7 @@ async def test_blocked_tool_call_carries_its_real_risk_level_not_hardcoded_high(
 
     assert len(result["pending_approvals"]) == 1
     blocked = result["pending_approvals"][0]
-    assert blocked["name"] == "rerun_pipeline"
+    assert blocked["name"] == "run_pipeline"
     assert blocked["risk_level"] == "medium", blocked
     assert blocked["reason"], "blocked call must carry a non-empty reason"
 
