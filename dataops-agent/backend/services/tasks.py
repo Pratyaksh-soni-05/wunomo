@@ -101,6 +101,21 @@ async def _execute_run(run_id: str, pipeline_id: str, tenant_id: str):
             log_entry={"event": "run_failed", "error": str(e)}
         )
         log.error("pipeline_run_error", run_id=run_id, error=str(e))
+        # notify_pipeline_failure() itself never raises (see
+        # NotificationService's own docstring), but this is wrapped
+        # defensively anyway -- a notification-code bug must never swallow
+        # the `raise` below, which is what drives this task's real Celery
+        # retry behavior. Was previously dead code: this is a real, one-shot
+        # trigger per failed run (no spam risk, unlike the freshness
+        # checker's known duplicate-incident gap -- see CLAUDE.md).
+        try:
+            from modules.reporting.notification_service import NotificationService
+            await NotificationService(tenant_id).notify_pipeline_failure(
+                pipeline_name=pipeline.name if pipeline else "unknown",
+                run_id=run_id, error_message=str(e),
+            )
+        except Exception as notify_exc:
+            log.warning("pipeline_failure_notification_error", run_id=run_id, error=str(notify_exc))
         raise
 
 
@@ -245,12 +260,33 @@ def check_all_freshness():
 async def _check_freshness():
     from database import AsyncSessionLocal
     from sqlalchemy import select
-    from models.all_models import Tenant, DataSource, Incident, IncidentSeverity
+    from models.all_models import Tenant, DataSource, Incident, IncidentSeverity, IncidentStatus
     import uuid
 
     async with AsyncSessionLocal() as db:
         tenants = await db.execute(select(Tenant).where(Tenant.is_active == True))
         for tenant in tenants.scalars().all():
+            # Existing open staleness incidents for this tenant, so the new
+            # notification wire-up below only fires when a source *newly*
+            # becomes stale, not on every 15-minute tick for a source
+            # that's been stale for hours - this does NOT fix the known,
+            # accepted "creates duplicate Incident rows" gap (see CLAUDE.md's
+            # Known-broken row) - that behavior is untouched. It only
+            # prevents that pre-existing gap from also spamming a real
+            # Slack/email notification every 15 minutes once wired.
+            already_notified_source_ids: set[str] = set()
+            existing_open = await db.execute(
+                select(Incident).where(
+                    Incident.tenant_id == tenant.id,
+                    Incident.status == IncidentStatus.OPEN,
+                    Incident.title.like("Stale data:%"),
+                )
+            )
+            for existing in existing_open.scalars().all():
+                for asset_id in (existing.affected_assets or []):
+                    already_notified_source_ids.add(asset_id)
+
+            newly_stale = []
             sources = await db.execute(
                 select(DataSource).where(
                     DataSource.tenant_id == tenant.id,
@@ -273,6 +309,18 @@ async def _check_freshness():
                         detected_at=utcnow()
                     )
                     db.add(incident)
+                    if src.id not in already_notified_source_ids:
+                        newly_stale.append({
+                            "source_id": src.id, "source_name": src.name,
+                            "hours_overdue": round(hours_since, 1),
+                        })
+
+            if newly_stale:
+                try:
+                    from modules.reporting.notification_service import NotificationService
+                    await NotificationService(tenant.id).notify_stale_sources(newly_stale)
+                except Exception as notify_exc:
+                    log.warning("stale_source_notification_error", tenant_id=tenant.id, error=str(notify_exc))
         await db.commit()
     log.info("freshness_check_complete")
 

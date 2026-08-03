@@ -89,6 +89,34 @@ async def create_incident(req: IncidentCreate, user=Depends(require_permission("
         db.add(incident)
         await db.commit()
         await db.refresh(incident)
+
+        # NotificationService.notify_incident() existed but was never
+        # called from anywhere real -- see CLAUDE.md's "notification
+        # presets never fire automatically" Known-broken row. This is a
+        # genuinely one-shot trigger (a real incident being logged, not a
+        # recurring poll), so no spam risk the way the freshness checker's
+        # known duplicate-incident gap would create if wired the same way.
+        # Never raises (see NotificationService's own docstring) but
+        # wrapped defensively anyway -- a notification failure must never
+        # break incident creation itself.
+        try:
+            from modules.reporting.notification_service import NotificationService
+            pipeline_name = None
+            if incident.pipeline_id:
+                from models.all_models import Pipeline
+                p = await db.execute(select(Pipeline).where(Pipeline.id == incident.pipeline_id))
+                pipeline_row = p.scalars().first()
+                pipeline_name = pipeline_row.name if pipeline_row else None
+            await NotificationService(user["tenant_id"]).notify_incident(
+                incident_id=incident.id, title=incident.title,
+                severity=incident.severity, pipeline_name=pipeline_name,
+            )
+        except Exception as notify_exc:
+            import structlog
+            structlog.get_logger().warning(
+                "incident_notification_error", incident_id=incident.id, error=str(notify_exc)
+            )
+
         return {"id": incident.id, "title": incident.title,
                 "severity": incident.severity, "status": incident.status}
 
