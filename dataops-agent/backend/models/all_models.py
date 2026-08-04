@@ -403,3 +403,103 @@ class ApiKey(Base):
     last_used_at = Column(DateTime, nullable=True)
     revoked_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TaskShape(str, enum.Enum):
+    """Deliberately narrow for v1 (see CLAUDE.md's item-6 design decisions)
+    - a fixed, pre-vetted set of goal->plan-shape pairings, not open-ended
+    planning. Task.task_shape must be one of these; anything else is
+    rejected at creation."""
+    DIAGNOSE_PIPELINE_FAILURE = "diagnose_pipeline_failure"
+    INVESTIGATE_INCIDENT = "investigate_incident"
+    SYNC_PROFILE_QUALITY = "sync_profile_quality"
+
+
+class TaskStatus(str, enum.Enum):
+    DRAFT_PLAN = "draft_plan"  # plan generated, awaiting human approval/edit/reject - nothing has executed yet
+    PLAN_REJECTED = "plan_rejected"
+    RUNNING = "running"
+    PAUSED_NEEDS_APPROVAL = "paused_needs_approval"  # a step hit a risk-gated tool call
+    PAUSED_FAILED_STEP = "paused_failed_step"  # a step exhausted its attempt budget, or the initiating user was demoted/deactivated
+    PAUSED_PLAN_INVALID = "paused_plan_invalid"  # a completed step's result shows the remaining plan won't reach the goal
+    PAUSED_QUOTA_EXCEEDED = "paused_quota_exceeded"  # tenant AI-credit quota exhausted mid-run; resumable once quota resets
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"  # sat paused past the pause-timeout with no resolution
+
+
+class TaskStepStatus(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    VERIFYING = "verifying"  # structural post-dispatch polling state (Q2) - distinct from RUNNING so the UI/logic can tell "dispatched" from "confirmed"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    BLOCKED_APPROVAL = "blocked_approval"
+
+
+class TaskStepSource(str, enum.Enum):
+    """Provenance of a step, so the timeline never mistakes a
+    system-appended verify step (Q2) for something AXIOM chose to do, and
+    so a human-edited step is visibly distinct from the original plan."""
+    LLM_PLANNED = "llm_planned"
+    HUMAN_EDITED = "human_edited"
+    SYSTEM_INSERTED = "system_inserted"
+
+
+class Task(Base):
+    """A long-running, multi-step AXIOM task (item 6 - see CLAUDE.md's
+    design decisions section). Deliberately does NOT store the initiating
+    user's role anywhere on this row: role/is_active are re-read fresh from
+    the DB immediately before every step executes (same per-request re-read
+    Phase 19 built for get_current_user()), never snapshotted here - a
+    snapshotted role would be a privilege-escalation hole with a built-in
+    time window for any task that outlives a demotion or deactivation."""
+    __tablename__ = "tasks"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)  # initiator - see class docstring re: role
+    originating_session_id = Column(String, nullable=True)  # the chat session this task was spawned from, if any
+    goal = Column(Text, nullable=False)
+    task_shape = Column(SAEnum(TaskShape), nullable=False)
+    status = Column(SAEnum(TaskStatus), nullable=False, default=TaskStatus.DRAFT_PLAN)
+    # Plan provenance - did this task run the plan AXIOM proposed, or one a
+    # human edited? Cheap to capture now, impossible to reconstruct later.
+    plan_approved_by = Column(String, ForeignKey("users.id"), nullable=True)
+    plan_approved_at = Column(DateTime, nullable=True)
+    plan_edited = Column(Boolean, default=False)
+    step_budget_max = Column(Integer, nullable=False)
+    step_budget_used = Column(Integer, default=0)
+    # None = no separate task-level ceiling, draw against the tenant's
+    # plan-level AI-credit quota only (quota_service.py's existing formula).
+    credit_budget_max = Column(Integer, nullable=True)
+    credit_budget_used = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    paused_at = Column(DateTime, nullable=True)  # drives the pause-timeout expiry check
+    completed_at = Column(DateTime, nullable=True)
+
+
+class TaskStep(Base):
+    __tablename__ = "task_steps"
+    id = Column(String, primary_key=True, default=gen_uuid)
+    task_id = Column(String, ForeignKey("tasks.id"), nullable=False, index=True)
+    step_index = Column(Integer, nullable=False)
+    description = Column(Text, nullable=False)  # human-readable, shown in plan review + timeline UI
+    source = Column(SAEnum(TaskStepSource), nullable=False)
+    tool_name = Column(String(100), nullable=True)  # null for a verify-only step with no direct tool call
+    tool_args = Column(JSON, nullable=True)
+    depends_on_step_index = Column(Integer, nullable=True)  # feeds the failure/verification dependency logic (Q1/Q2)
+    status = Column(SAEnum(TaskStepStatus), nullable=False, default=TaskStepStatus.PENDING)
+    attempt_count = Column(Integer, default=0)  # the bounded retry/adapt budget from Q1
+    # Capped summary of what happened - this, not raw_result, is what a
+    # resumed step replays as context (see CLAUDE.md's resume-context
+    # design: goal + step list + capped summaries, never the full raw
+    # tool-result blob or intermediate reasoning chatter).
+    outcome_summary = Column(Text, nullable=True)
+    raw_result = Column(JSON, nullable=True)  # capped like cap_tool_result() elsewhere - UI detail view only
+    error_message = Column(Text, nullable=True)
+    approval_request_id = Column(String, ForeignKey("approval_requests.id"), nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)

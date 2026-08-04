@@ -73,6 +73,14 @@ PERMISSIONS: dict[str, frozenset[Role]] = {
     "cicd.approve": _MANAGERS,  # approve/reject CI/CD deployment commits
     "cicd.incidents.resolve": _MANAGERS,
 
+    # Item-6 long-running tasks: creating/viewing/cancelling your OWN task
+    # needs no capability check here at all (same as starting a chat — any
+    # authenticated tenant member may; per-step enforcement is what actually
+    # gates each tool call, via the same role re-read every step). This
+    # entry only covers seeing/cancelling OTHER tenant members' tasks,
+    # mirroring team.manage's Owner/Admin-only cross-member visibility.
+    "tasks.manage_all": _MANAGERS,
+
     "team.manage": _MANAGERS,  # invite/role-change/remove
     "settings.manage": _MANAGERS,
     "api_keys.manage": _MANAGERS,

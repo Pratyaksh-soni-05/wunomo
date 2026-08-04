@@ -110,7 +110,13 @@ def test_every_capability_has_a_matrix_row_or_is_explicitly_exempt():
     """Guards against the matrix silently going stale if a new capability is
     added to PERMISSIONS without a corresponding representative endpoint
     (or a deliberate exemption) here."""
-    exempt = {"view", "transforms.generate"}  # no REST call site by design
+    exempt = {
+        "view", "transforms.generate",  # no REST call site by design
+        # tasks.manage_all: schema-only as of item 6's stage 1 (see
+        # CLAUDE.md) — no endpoint exists yet to gate. Move this into
+        # REPRESENTATIVE_ENDPOINTS once the Tasks REST surface ships.
+        "tasks.manage_all",
+    }
     covered = {cap for cap, _, _, _ in REPRESENTATIVE_ENDPOINTS}
     missing = set(PERMISSIONS) - covered - exempt
     assert not missing, f"Capabilities with no matrix row and no exemption: {missing}"

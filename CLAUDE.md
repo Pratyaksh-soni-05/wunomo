@@ -1,6 +1,20 @@
 # CLAUDE.md — AXIOM DataOps Agent
 
-> **NEXT SESSION STARTS HERE (as of 2026-08-02).** All 5 Phase 19 P0 items
+> **NEXT SESSION STARTS HERE (as of 2026-08-05).** Item 6 (long-running
+> AXIOM tasks — see `docs/PRODUCT_AUDIT.md` section 1.8/1.9 for the full
+> design) is now the active thread, superseding the banner below until
+> it's done. Design fully locked in section 1.9 (5 core questions + 4
+> amendments — failure semantics, structural verification, visibility,
+> termination, mid-task approvals, plan provenance, role re-read at
+> execution time, 3 narrow v1 task shapes) — read that section before
+> touching any of this. **Stage 1 (schema + migration + the
+> `tasks.manage_all` capability, no behavior) is done and live-verified**
+> — see the Status Table row below. **Stage 2 (planning phase: goal+shape
+> → a real persisted, human-reviewable plan) is next.** Everything below
+> this paragraph is the pre-item-6 state of the project, kept for history
+> — start with item 6 stage 2, not with anything in the old banner.
+>
+> **NEXT SESSION STARTS HERE (as of 2026-08-02, superseded above).** All 5 Phase 19 P0 items
 > are done, and the **migration-drift session is now also done** (see
 > below) — the **dark-theme screenshot verification pass** (token redesign
 > already landed in `tokens.css`, the visual pass across every
@@ -629,6 +643,7 @@ Table row.
 ### ✅ Done and verified (real implementation, exercised or clearly wired end-to-end)
 | Area | What | How verified |
 |---|---|---|
+| **Item 6 stage 1: `Task`/`TaskStep` schema + migration + `tasks.manage_all`** | New `Task`/`TaskStep` models (`models/all_models.py`) and migration `509a9b8715f2_add_tasks_and_task_steps.py` (down_revision `c8f3a7d52e19`, the real current head) — see `docs/PRODUCT_AUDIT.md` section 1.9 for the full design this schema implements. Schema only, zero behavior yet (no execution loop, no endpoints, no UI). Key invariants baked in per the design review: `Task` carries **no** role/is_active column anywhere (role is re-read fresh per step at execution time, never snapshotted — amendment 3); `Task` has real plan-provenance fields (`plan_approved_by`/`plan_approved_at`/`plan_edited`); `TaskStep.source` distinguishes `llm_planned`/`human_edited`/`system_inserted` so a Q2 verify step can never render as something AXIOM chose to do; `TaskStep.approval_request_id` reuses the existing, already-tested `ApprovalRequest` rather than a parallel mechanism; `task_shape` is a 3-value enum, rejecting anything outside the narrow v1 set (amendment 4). Both `Task.tenant_id`/`Task.user_id` are real FKs (matching the `TeamInvite`/`ApiKey` precedent, not the majority bare-String convention — a first-class tenant-owned entity, not a log table). New `PERMISSIONS["tasks.manage_all"]` (Owner/Admin) in `services/rbac.py`, exempted in `test_permission_matrix.py`'s matrix-completeness guard (no endpoint exists yet to gate — move it into `REPRESENTATIVE_ENDPOINTS` when stage 7 ships one). | **Migration verified against a genuinely empty scratch Postgres DB, not the dev DB**: `test_schema_drift.py` (Alembic's own `compare_metadata()` against a throwaway sibling database, never `dataops` itself) passed clean — the migration builds a schema byte-identical to what the models declare, from empty. Confirmed the real dev `dataops` DB was untouched by that test (`\dt` before/after). Separately, `docker compose restart backend` (triggering `create_all()`, this project's actual real schema source per the documented Alembic gotcha) confirmed both tables land cleanly with the right columns/enums/FKs (captured directly from the container's own SQL echo). New `test_task_models.py` (5 tests): sane defaults (`draft_plan`, no provenance set); a structural guard that `Task.__table__.columns` genuinely has no `role`/`is_active`/`user_role` column (guards the amendment-3 invariant against regression); real tenant scoping (two tenants' tasks don't cross-contaminate a scoped query); `TaskStep` provenance + FK integrity (an `llm_planned` step and a `system_inserted` verify step both correctly attached to the same real `Task` row); the 3-value `task_shape` enum. Full backend suite: 277 tests, 276 passed — the one failure (`test_notification_wiring.py`'s freshness test) is pre-existing cross-tenant test-isolation leakage from other tests' leftover data in the same run (unrelated to this change), confirmed by re-running that file in isolation: 4/4 passed clean. |
 | Auth | Register/login/JWT (`api/v1/auth.py`) | bcrypt hashing w/ 72-byte truncation, HS256 JWT with `sub`/`tenant_id`/`email`/`role`/`exp`; `test_register_and_login` exercises register→login round trip |
 | Core CRUD API | sources, pipelines, quality, incidents, governance, analytics, approvals, transformations, cicd | 40+ endpoints read directly in `api/v1/*.py`, all tenant-scoped via JWT except cicd webhook |
 | Agent chat loop | LangGraph graph in `agent/dataops_agent.py` | read in full; graph wiring (inject_system→agent→approval_gate→tools) confirmed |
