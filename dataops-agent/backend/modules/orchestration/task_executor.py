@@ -61,9 +61,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import select, func
 
 from database import AsyncSessionLocal
+from agent.personality import get_risk_level
+from modules.governance.policy_engine import PolicyEngine
 from modules.orchestration.task_planner import tool_by_name, tool_schema_for_prompt
 from models.all_models import (
-    RunStatus, Task, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus, User,
+    ApprovalRequest, ApprovalStatus, RunStatus, Task, TaskStatus, TaskStep,
+    TaskStepSource, TaskStepStatus, User,
 )
 from services.llm_service import invoke_llm
 from services.quota_service import get_quota_status
@@ -72,6 +75,7 @@ from services.rbac import TOOL_CAPABILITIES, has_permission
 MAX_ATTEMPTS_PER_STEP = 3  # 1 initial + up to 2 recovery attempts
 TRANSIENT_RETRY_BACKOFF_SECONDS = 2
 VERIFY_TIMEOUT_SECONDS = 300  # real wall-clock budget for a dispatched step to reach a terminal state
+APPROVAL_PAUSE_TIMEOUT_HOURS = 48  # Q5 amendment: a paused-for-approval task doesn't wait forever
 
 TIER_PERMISSION = "permission"
 TIER_TRANSIENT = "transient"
@@ -312,6 +316,50 @@ async def execute_next_step(task_id: str) -> dict:
                 "attempt_count": step.attempt_count, "reason": denial_reason,
             }
 
+        # Mid-task approval gate (Q5): risk tier is read from the same
+        # RISK_ACTIONS map chat's own approval gate uses (agent/
+        # personality.py) -- one source of truth, not a parallel
+        # classification a task could silently drift from. Tasks have no
+        # operation_mode concept (there's no human present each turn to
+        # have granted one), so gating is unconditional on tier: medium
+        # or high always requires approval, low never does.
+        if get_risk_level(step.tool_name) in ("medium", "high") and step.approval_request_id is None:
+            approval = await PolicyEngine(task.tenant_id).create_request(
+                user_id=task.user_id, session_id=task.id, action_name=step.tool_name,
+                action_args=step.tool_args or {}, risk_level=get_risk_level(step.tool_name),
+                reason=f'Task step "{step.description}" requires approval before it can run.',
+            )
+            step.approval_request_id = approval["approval_id"]
+            step.status = TaskStepStatus.BLOCKED_APPROVAL
+            task.status = TaskStatus.PAUSED_NEEDS_APPROVAL
+            task.paused_at = datetime.utcnow()
+            await db.commit()
+            return {
+                "outcome": "blocked_needs_approval", "step_id": step.id,
+                "approval_request_id": approval["approval_id"], "risk_level": approval["risk_level"],
+            }
+
+        if step.approval_request_id is not None:
+            r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == step.approval_request_id))
+            approval_req = r.scalar_one_or_none()
+            if approval_req is None or approval_req.status == ApprovalStatus.PENDING:
+                task.status = TaskStatus.PAUSED_NEEDS_APPROVAL
+                await db.commit()
+                return {"outcome": "still_blocked_needs_approval", "step_id": step.id}
+            if approval_req.status == ApprovalStatus.REJECTED:
+                step.status = TaskStepStatus.FAILED
+                step.error_message = f"Step rejected: {approval_req.resolution_note or 'no reason given'}."
+                step.completed_at = datetime.utcnow()
+                task.status = TaskStatus.PAUSED_FAILED_STEP
+                await db.commit()
+                return {"outcome": "step_rejected", "step_id": step.id, "reason": step.error_message}
+            # APPROVED (or, defensively, any other resolved state) -- fall
+            # through to real execution below. This is the resume path:
+            # the tool call that follows is a genuine, fresh call -- not a
+            # cached replay -- so it re-validates its own preconditions
+            # and, one line above, _caller_still_authorized() already
+            # re-validated the initiating user's authority for real.
+
         step.status = TaskStepStatus.RUNNING
         step.started_at = step.started_at or datetime.utcnow()
         tenant_id, task_user_id = task.tenant_id, task.user_id
@@ -405,3 +453,101 @@ async def execute_next_step(task_id: str) -> dict:
         "outcome": "step_failed", "step_id": step_id,
         "attempt_count": MAX_ATTEMPTS_PER_STEP, "reason": last_error,
     }
+
+
+def _is_approval_expired(task: Task) -> bool:
+    if task.paused_at is None:
+        return False
+    elapsed_hours = (datetime.utcnow() - task.paused_at).total_seconds() / 3600
+    return elapsed_hours > APPROVAL_PAUSE_TIMEOUT_HOURS
+
+
+async def resume_task(task_id: str, resolved_by: str, notes: str = "") -> dict:
+    """Approves the blocked step's ApprovalRequest, then re-enters the
+    normal execution pipeline for real -- this is deliberately NOT a
+    special "continue" code path with its own logic. Everything that
+    makes resume safe falls out of execute_next_step()'s existing,
+    already-proven behavior: _caller_still_authorized() re-validates the
+    initiating user's role/is_active fresh (Q5's authority requirement),
+    and the tool call that follows is a genuine new call, not a cached
+    replay, so it re-validates its own real-world preconditions (Q5's
+    precondition requirement). Nothing here holds any in-memory state --
+    a worker/backend restart between pause and resume changes nothing,
+    since every fact this function reads comes from the DB."""
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id))
+        task = r.scalar_one_or_none()
+        if task is None:
+            return {"outcome": "task_not_found"}
+        if task.status != TaskStatus.PAUSED_NEEDS_APPROVAL:
+            return {"outcome": "not_resumable", "status": task.status.value}
+
+        if _is_approval_expired(task):
+            task.status = TaskStatus.EXPIRED
+            await db.commit()
+            return {"outcome": "expired"}
+
+        r = await db.execute(
+            select(TaskStep).where(
+                TaskStep.task_id == task_id, TaskStep.status == TaskStepStatus.BLOCKED_APPROVAL,
+            )
+        )
+        step = r.scalar_one_or_none()
+        if step is None or step.approval_request_id is None:
+            return {"outcome": "no_blocked_step"}
+
+        r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == step.approval_request_id))
+        approval_req = r.scalar_one()
+        approval_req.status = ApprovalStatus.APPROVED
+        approval_req.resolved_by = resolved_by
+        approval_req.resolved_at = datetime.utcnow()
+        approval_req.resolution_note = notes
+
+        step.status = TaskStepStatus.PENDING
+        task.status = TaskStatus.RUNNING
+        await db.commit()
+
+    return await execute_next_step(task_id)
+
+
+async def reject_task_step(task_id: str, resolved_by: str, notes: str = "") -> dict:
+    """Declines the blocked step outright -- no re-entry into execution,
+    since there's nothing to re-attempt. Reuses the existing
+    PAUSED_FAILED_STEP pause/pause_reason machinery rather than inventing
+    a parallel one for "rejected" specifically."""
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id))
+        task = r.scalar_one_or_none()
+        if task is None:
+            return {"outcome": "task_not_found"}
+        if task.status != TaskStatus.PAUSED_NEEDS_APPROVAL:
+            return {"outcome": "not_resumable", "status": task.status.value}
+
+        if _is_approval_expired(task):
+            task.status = TaskStatus.EXPIRED
+            await db.commit()
+            return {"outcome": "expired"}
+
+        r = await db.execute(
+            select(TaskStep).where(
+                TaskStep.task_id == task_id, TaskStep.status == TaskStepStatus.BLOCKED_APPROVAL,
+            )
+        )
+        step = r.scalar_one_or_none()
+        if step is None or step.approval_request_id is None:
+            return {"outcome": "no_blocked_step"}
+
+        r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == step.approval_request_id))
+        approval_req = r.scalar_one()
+        approval_req.status = ApprovalStatus.REJECTED
+        approval_req.resolved_by = resolved_by
+        approval_req.resolved_at = datetime.utcnow()
+        approval_req.resolution_note = notes
+
+        step.status = TaskStepStatus.FAILED
+        step.error_message = f"Step rejected: {notes or 'no reason given'}."
+        step.completed_at = datetime.utcnow()
+        task.status = TaskStatus.PAUSED_FAILED_STEP
+        await db.commit()
+
+    return {"outcome": "step_rejected", "step_id": step.id}

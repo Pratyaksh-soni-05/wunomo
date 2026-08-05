@@ -23,7 +23,7 @@ from modules.orchestration.task_planner import (
 )
 from services.rbac import has_permission
 
-from .auth import enforce_quota, get_current_user
+from .auth import enforce_quota, get_current_user, require_permission
 
 router = APIRouter()
 
@@ -62,6 +62,7 @@ def _serialize_step(step: TaskStep) -> dict:
         "attempt_count": step.attempt_count,
         "error_message": step.error_message,
         "outcome_summary": step.outcome_summary,
+        "approval_request_id": step.approval_request_id,
     }
 
 
@@ -99,6 +100,32 @@ def _completion_note(task: Task, steps: list[TaskStep]) -> str | None:
     )
 
 
+def _approval_pending_reason(task: Task, steps: list[TaskStep]) -> str | None:
+    """Same principle again, for the mid-task approval gate (Q5) -- names
+    the blocked step and its risk level, not just 'needs approval'."""
+    if task.status != TaskStatus.PAUSED_NEEDS_APPROVAL:
+        return None
+    blocked = next(
+        (s for s in sorted(steps, key=lambda s: s.step_index) if s.status == TaskStepStatus.BLOCKED_APPROVAL), None,
+    )
+    if blocked is None:
+        return None
+    return f'Step {blocked.step_index} ("{blocked.description}") is waiting for approval to run "{blocked.tool_name}".'
+
+
+def _expiry_reason(task: Task) -> str | None:
+    """A task that sat paused for approval past the timeout with no
+    decision -- distinct from a generic failure, per explicit
+    requirement: honest about *why* it stopped, not a bare status code."""
+    if task.status != TaskStatus.EXPIRED:
+        return None
+    paused_at = task.paused_at.isoformat() if task.paused_at else "an unknown time"
+    return (
+        f"Expired waiting for approval — paused at {paused_at}, no decision was made "
+        f"within the approval window. Start a new task to try again."
+    )
+
+
 def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
     return {
         "id": task.id,
@@ -109,6 +136,9 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         "status": task.status.value,
         "pause_reason": _pause_reason(task, steps),
         "completion_note": _completion_note(task, steps),
+        "approval_pending_reason": _approval_pending_reason(task, steps),
+        "expiry_reason": _expiry_reason(task),
+        "paused_at": task.paused_at.isoformat() if task.paused_at else None,
         "plan_approved_by": task.plan_approved_by,
         "plan_approved_at": task.plan_approved_at.isoformat() if task.plan_approved_at else None,
         "plan_edited": bool(task.plan_edited),
@@ -443,3 +473,74 @@ async def advance_task(task_id: str, current_user: dict = Depends(get_current_us
         steps = r.scalars().all()
 
     return {**_serialize_task(task, steps), "advance_outcome": step_outcome}
+
+
+class ResolveStepRequest(BaseModel):
+    notes: str = ""
+
+
+@router.post("/{task_id}/resume")
+async def resume_task_endpoint(
+    task_id: str, body: ResolveStepRequest, current_user: dict = Depends(require_permission("approvals.manage")),
+):
+    """Approves the blocked step and continues execution -- gated by
+    approvals.manage (Owner/Admin), the same capability that already
+    reviews every other risk-gated action in this product, deliberately
+    NOT creator-only (unlike edit/approve-plan/advance): a task's own
+    creator approving their own risky step would defeat the point of
+    requiring a second set of eyes. Tenant-scoped independently of the
+    executor's own logic, since that layer has no HTTP-level identity."""
+    from modules.orchestration.task_executor import resume_task
+
+    tenant_id = current_user["tenant_id"]
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id, Task.tenant_id == tenant_id))
+        if r.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+
+    result = await resume_task(task_id, resolved_by=current_user["sub"], notes=body.notes)
+    if result["outcome"] == "not_resumable":
+        raise HTTPException(
+            status_code=409, detail=f"Task is not awaiting approval (current status: {result['status']}).",
+        )
+    if result["outcome"] == "expired":
+        raise HTTPException(status_code=409, detail="This approval has expired. Start a new task to try again.")
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id))
+        task = r.scalar_one()
+        r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
+        steps = r.scalars().all()
+
+    return {**_serialize_task(task, steps), "resume_outcome": result}
+
+
+@router.post("/{task_id}/reject-step")
+async def reject_task_step_endpoint(
+    task_id: str, body: ResolveStepRequest, current_user: dict = Depends(require_permission("approvals.manage")),
+):
+    """Declines the blocked step outright -- same gate as resume, same
+    reasoning (not creator-only)."""
+    from modules.orchestration.task_executor import reject_task_step
+
+    tenant_id = current_user["tenant_id"]
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id, Task.tenant_id == tenant_id))
+        if r.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+
+    result = await reject_task_step(task_id, resolved_by=current_user["sub"], notes=body.notes)
+    if result["outcome"] == "not_resumable":
+        raise HTTPException(
+            status_code=409, detail=f"Task is not awaiting approval (current status: {result['status']}).",
+        )
+    if result["outcome"] == "expired":
+        raise HTTPException(status_code=409, detail="This approval has expired. Start a new task to try again.")
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id))
+        task = r.scalar_one()
+        r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
+        steps = r.scalars().all()
+
+    return {**_serialize_task(task, steps), "reject_outcome": result}

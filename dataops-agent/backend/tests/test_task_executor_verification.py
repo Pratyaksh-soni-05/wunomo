@@ -14,7 +14,8 @@ import modules.orchestration.task_executor as executor_module
 from database import AsyncSessionLocal
 from modules.orchestration.task_executor import execute_next_step
 from models.all_models import (
-    RunStatus, Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus, User,
+    ApprovalRequest, ApprovalStatus, RunStatus, Task, TaskShape, TaskStatus, TaskStep,
+    TaskStepSource, TaskStepStatus, User,
 )
 
 
@@ -64,11 +65,31 @@ async def _all_steps(task_id):
 
 @pytest.mark.asyncio
 async def test_async_dispatch_result_inserts_a_system_inserted_verify_step(client, monkeypatch):
+    """run_pipeline is medium-risk (RISK_ACTIONS), so it goes through
+    stage 5's approval gate before it can ever dispatch -- a real, correct
+    interaction between the two stages, not a coincidence. Pre-seeding an
+    already-APPROVED ApprovalRequest isolates this test to what it's
+    actually checking: dispatch detection and verify-step insertion, not
+    the approval gate itself (that's test_task_executor_approvals.py's
+    job)."""
     tenant_id, user_id = await _register(client, "verifyinsert")
     task_id, (step_id,) = await _seed_task(tenant_id, user_id, [{
         "step_index": 0, "description": "trigger the pipeline", "source": TaskStepSource.LLM_PLANNED,
         "tool_name": "run_pipeline", "tool_args": {"pipeline_id": "pl-1"}, "status": TaskStepStatus.PENDING,
     }])
+
+    async with AsyncSessionLocal() as db:
+        approval = ApprovalRequest(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, session_id=task_id,
+            action_name="run_pipeline", action_args={"pipeline_id": "pl-1"}, risk_level="medium",
+            status=ApprovalStatus.APPROVED, resolved_by="test-approver",
+        )
+        db.add(approval)
+        await db.flush()
+        r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
+        step = r.scalar_one()
+        step.approval_request_id = approval.id
+        await db.commit()
 
     async def _dispatch(tenant_id, tool_name, tool_args):
         return {"run_id": "run-abc", "pipeline_id": "pl-1", "status": RunStatus.PENDING, "dispatch": "queued"}
