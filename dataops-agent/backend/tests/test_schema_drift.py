@@ -98,3 +98,54 @@ def test_migrations_match_the_models(drift_db):
         "a model changed without a matching migration, or vice versa:\n"
         + "\n".join(repr(d) for d in diffs)
     )
+
+
+def test_migrated_task_enum_labels_match_the_python_enum_member_names(drift_db):
+    """compare_metadata() (the test above) doesn't diff enum LABEL content
+    -- only table/column/index/FK existence -- so a migration that lists
+    the wrong Postgres enum labels for a real Python enum column passes
+    that check cleanly while being genuinely broken: SQLAlchemy's default
+    Enum(PythonEnumClass) behavior stores the member .name (e.g.
+    'DRAFT_PLAN'), not .value ('draft_plan'), and every enum in this
+    codebase already relies on that (confirmed live against pg_enum for
+    personalitymode/runstatus/etc. before this test was written). An
+    earlier draft of 509a9b8715f2 got this backwards for all 4 new Task
+    enum types -- caught by directly querying pg_enum, not by
+    compare_metadata(), which is exactly why this check exists now."""
+    from models.all_models import TaskShape, TaskStatus, TaskStepStatus, TaskStepSource
+
+    original = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = drift_db
+    try:
+        cfg = Config()
+        cfg.set_main_option("script_location", MIGRATIONS_DIR)
+        command.upgrade(cfg, "head")
+    finally:
+        if original is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = original
+
+    conn = psycopg2.connect(drift_db)
+    try:
+        with conn.cursor() as cur:
+            for pg_type_name, enum_class in [
+                ("taskshape", TaskShape),
+                ("taskstatus", TaskStatus),
+                ("taskstepstatus", TaskStepStatus),
+                ("taskstepsource", TaskStepSource),
+            ]:
+                cur.execute(
+                    "SELECT enumlabel FROM pg_enum e JOIN pg_type t "
+                    "ON e.enumtypid = t.oid WHERE t.typname = %s",
+                    (pg_type_name,),
+                )
+                migrated_labels = {row[0] for row in cur.fetchall()}
+                expected_labels = {member.name for member in enum_class}
+                assert migrated_labels == expected_labels, (
+                    f"{pg_type_name}: migration produced {migrated_labels}, "
+                    f"but {enum_class.__name__}'s real member names are "
+                    f"{expected_labels}"
+                )
+    finally:
+        conn.close()

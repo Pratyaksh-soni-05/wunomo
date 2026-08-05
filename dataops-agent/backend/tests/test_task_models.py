@@ -140,3 +140,24 @@ async def test_task_shape_is_constrained_to_the_three_narrow_v1_values():
     assert real_values == {
         "diagnose_pipeline_failure", "investigate_incident", "sync_profile_quality",
     }
+
+
+@pytest.mark.asyncio
+async def test_task_status_has_a_distinct_queued_state(client):
+    """queued is genuinely distinct from running -- 'approved but not yet
+    picked up' and 'running but stuck' must be tellable apart, not
+    collapsed into one status."""
+    assert TaskStatus.QUEUED.value == "queued"
+    assert TaskStatus.QUEUED != TaskStatus.RUNNING
+
+    tenant_id, user_id = await _register(client, "taskqueued")
+    async with AsyncSessionLocal() as db:
+        task = Task(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
+            goal="Sync a source", task_shape=TaskShape.SYNC_PROFILE_QUALITY,
+            step_budget_max=10, status=TaskStatus.QUEUED,
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+        assert task.status == TaskStatus.QUEUED

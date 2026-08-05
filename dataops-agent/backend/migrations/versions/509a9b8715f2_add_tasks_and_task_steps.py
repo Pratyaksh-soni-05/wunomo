@@ -17,6 +17,16 @@ tables like transform_runs). `tasks.user_id` is the task's initiator only
 -- role/is_active are deliberately NOT stored anywhere on this table and
 are re-read fresh from the DB before every step executes (see the model
 docstring); there is nothing here to keep in sync with a role change.
+
+Enum labels are the Python member NAMES (uppercase: 'DRAFT_PLAN', not the
+member .value 'draft_plan') -- SQLAlchemy's default Enum(PythonEnumClass)
+behavior stores .name, not .value, and every other enum in this codebase
+(confirmed live against the dev DB: personalitymode/runstatus/etc. all
+store uppercase labels) already relies on this. An earlier draft of this
+migration got this backwards (lowercase values) -- caught before it was
+ever applied to anything but a throwaway scratch DB, by directly querying
+pg_enum rather than trusting compare_metadata() alone, which doesn't diff
+enum label content (a known, documented blind spot of that check).
 """
 from typing import Sequence, Union
 from alembic import op
@@ -37,12 +47,12 @@ def upgrade() -> None:
         sa.Column('originating_session_id', sa.String(), nullable=True),
         sa.Column('goal', sa.Text(), nullable=False),
         sa.Column('task_shape', sa.Enum(
-            'diagnose_pipeline_failure', 'investigate_incident', 'sync_profile_quality',
+            'DIAGNOSE_PIPELINE_FAILURE', 'INVESTIGATE_INCIDENT', 'SYNC_PROFILE_QUALITY',
             name='taskshape'), nullable=False),
         sa.Column('status', sa.Enum(
-            'draft_plan', 'plan_rejected', 'running', 'paused_needs_approval',
-            'paused_failed_step', 'paused_plan_invalid', 'paused_quota_exceeded',
-            'completed', 'failed', 'cancelled', 'expired',
+            'DRAFT_PLAN', 'PLAN_REJECTED', 'RUNNING', 'PAUSED_NEEDS_APPROVAL',
+            'PAUSED_FAILED_STEP', 'PAUSED_PLAN_INVALID', 'PAUSED_QUOTA_EXCEEDED',
+            'COMPLETED', 'FAILED', 'CANCELLED', 'EXPIRED',
             name='taskstatus'), nullable=False),
         sa.Column('plan_approved_by', sa.String(), nullable=True),
         sa.Column('plan_approved_at', sa.DateTime(), nullable=True),
@@ -67,13 +77,13 @@ def upgrade() -> None:
         sa.Column('step_index', sa.Integer(), nullable=False),
         sa.Column('description', sa.Text(), nullable=False),
         sa.Column('source', sa.Enum(
-            'llm_planned', 'human_edited', 'system_inserted',
+            'LLM_PLANNED', 'HUMAN_EDITED', 'SYSTEM_INSERTED',
             name='taskstepsource'), nullable=False),
         sa.Column('tool_name', sa.String(length=100), nullable=True),
         sa.Column('tool_args', sa.JSON(), nullable=True),
         sa.Column('depends_on_step_index', sa.Integer(), nullable=True),
         sa.Column('status', sa.Enum(
-            'pending', 'running', 'verifying', 'succeeded', 'failed', 'skipped', 'blocked_approval',
+            'PENDING', 'RUNNING', 'VERIFYING', 'SUCCEEDED', 'FAILED', 'SKIPPED', 'BLOCKED_APPROVAL',
             name='taskstepstatus'), nullable=False),
         sa.Column('attempt_count', sa.Integer(), nullable=True),
         sa.Column('outcome_summary', sa.Text(), nullable=True),

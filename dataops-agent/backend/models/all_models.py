@@ -418,6 +418,7 @@ class TaskShape(str, enum.Enum):
 class TaskStatus(str, enum.Enum):
     DRAFT_PLAN = "draft_plan"  # plan generated, awaiting human approval/edit/reject - nothing has executed yet
     PLAN_REJECTED = "plan_rejected"
+    QUEUED = "queued"  # plan approved, not yet picked up by the stage-3 executor - a distinct, permanent state (queue depth/worker restarts/credit checks), not just a stage-2-vs-3 build-window artifact
     RUNNING = "running"
     PAUSED_NEEDS_APPROVAL = "paused_needs_approval"  # a step hit a risk-gated tool call
     PAUSED_FAILED_STEP = "paused_failed_step"  # a step exhausted its attempt budget, or the initiating user was demoted/deactivated
