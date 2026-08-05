@@ -1,15 +1,13 @@
-"""Item 6 (long-running AXIOM tasks) -- stage 3, the execution core. See
-docs/PRODUCT_AUDIT.md section 1.9 for the design this implements (Q1's
-failure-tier policy, amendment 3's per-step fresh role re-check).
+"""Item 6 (long-running AXIOM tasks) -- stage 3 (execution core) + stage 4
+(verification, Q2). See docs/PRODUCT_AUDIT.md section 1.9 for the design.
 
 execute_next_step(task_id) advances a QUEUED/RUNNING task by exactly one
-step, resolving that step to a terminal state (SUCCEEDED or FAILED)
-internally -- including whatever retries/adaptation its failure tier
-calls for -- before returning. It is directly callable (tests, live
-verification, manual driving via POST /tasks/{id}/advance) and is the
-whole of what "let a step run" means in this codebase; no automatic
-Celery scheduling is wired yet (deliberately out of stage 3's scope --
-see CLAUDE.md).
+unit of work per call -- either resolving a step to a terminal state
+(SUCCEEDED or FAILED, including whatever retries/adaptation its failure
+tier calls for), or re-polling a step that's still VERIFYING. Directly
+callable (tests, live verification, manual driving via
+POST /tasks/{id}/advance); no automatic Celery scheduling is wired yet
+(deliberately out of scope -- see CLAUDE.md).
 
 Failure tiers (Q1), in the order a step's attempts are classified:
   - PERMISSION: the fresh per-step role/is_active re-check (amendment 3)
@@ -31,27 +29,66 @@ one LLM-adapt call is ever made per step, regardless of how many
 attempts it takes. Once budget is exhausted, the step is marked FAILED
 with the real underlying error message and the task pauses
 (PAUSED_FAILED_STEP) -- never abandoned, never silently continued.
+
+Verification (Q2): if a dispatching step's tool call succeeds
+*structurally* but its result looks like an async dispatch (a real,
+recognized shape -- currently only run_pipeline's
+{"status": RunStatus.PENDING, "run_id": ...}), the dispatching step is
+marked SUCCEEDED (it genuinely did dispatch) and a NEW, separate
+TaskStep is appended with source=SYSTEM_INSERTED, depending on the
+dispatching step's index -- never a status recycled onto the same step,
+so a plan review can always tell what AXIOM planned from what the system
+added (amendment 3's sibling requirement for stage 4). That new step is
+polled on each subsequent call, purely against real elapsed wall-clock
+time (VERIFY_TIMEOUT_SECONDS, measured from the step's own started_at,
+which shares Task.started_at's clock -- no separate timer for stage 6's
+eventual wall-clock cap to forget about), never against step_budget_used
+or the 3-attempt tier budget -- those govern retrying a tool call, not
+watching one that already succeeded at dispatch time.
+
+Completion is honest by construction: the "no pending steps left, mark
+COMPLETED" branch is only reachable when zero steps are still
+VERIFYING. If the only thing left unresolved is a timed-out verify step,
+the task goes to COMPLETED_WITH_UNCONFIRMED_STEPS instead -- never a
+clean COMPLETED that silently ignores it.
 """
 import asyncio
 import json
+import uuid
 from datetime import datetime
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from database import AsyncSessionLocal
 from modules.orchestration.task_planner import tool_by_name, tool_schema_for_prompt
-from models.all_models import Task, TaskStatus, TaskStep, TaskStepStatus, User
+from models.all_models import (
+    RunStatus, Task, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus, User,
+)
 from services.llm_service import invoke_llm
 from services.quota_service import get_quota_status
 from services.rbac import TOOL_CAPABILITIES, has_permission
 
 MAX_ATTEMPTS_PER_STEP = 3  # 1 initial + up to 2 recovery attempts
 TRANSIENT_RETRY_BACKOFF_SECONDS = 2
+VERIFY_TIMEOUT_SECONDS = 300  # real wall-clock budget for a dispatched step to reach a terminal state
 
 TIER_PERMISSION = "permission"
 TIER_TRANSIENT = "transient"
 TIER_DOMAIN = "domain"
+
+# Tools this codebase can genuinely verify the async result of.
+# run_pipeline (DAGManager.trigger_run()) is the only real async-dispatching
+# tool in the whole registry today -- confirmed by reading every tool in
+# agent/tools/*.py, not assumed. It is deliberately NOT in any
+# TASK_SHAPE_ALLOWED_TOOLS entry yet: exposing a real, mutating,
+# fire-and-forget tool to the planner with no per-step approval gate
+# (that's stage 5) would be a real safety regression against the whole
+# reason item 6 was built before item 7. This mechanism is real and
+# tested against the real run_pipeline/Celery/PipelineRun infrastructure
+# (see CLAUDE.md's live-verification note), just not reachable through
+# the locked planner allowlists until stage 5 exists.
+_VERIFIABLE_TOOLS = {"run_pipeline"}
 
 
 async def _caller_still_authorized(db, task: Task, tool_name: str) -> tuple[bool, str | None]:
@@ -136,6 +173,34 @@ def _outcome_summary(tool_name: str, result: dict) -> str:
     return f"{tool_name} succeeded: {text}"
 
 
+def _looks_like_async_dispatch(tool_name: str, result: dict) -> bool:
+    """True only for a real, recognized dispatch shape -- never a guess
+    based on generic keys, since a false positive here would insert a
+    verify step that can never resolve."""
+    if tool_name == "run_pipeline" and isinstance(result, dict):
+        return result.get("status") == RunStatus.PENDING and bool(result.get("run_id"))
+    return False
+
+
+async def _poll_dispatch_status(tool_name: str, dispatch_result: dict) -> dict:
+    """Checks the REAL current state of a previously-dispatched operation.
+    Returns {"terminal": bool, "success": bool | None, "detail": str}."""
+    if tool_name == "run_pipeline":
+        from models.all_models import PipelineRun
+        run_id = dispatch_result.get("run_id")
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(select(PipelineRun).where(PipelineRun.id == run_id))
+            run = r.scalar_one_or_none()
+        if run is None:
+            return {"terminal": True, "success": False, "detail": f"Run {run_id} record no longer exists."}
+        if run.status == RunStatus.SUCCESS:
+            return {"terminal": True, "success": True, "detail": f"Run {run_id} completed successfully."}
+        if run.status == RunStatus.FAILED:
+            return {"terminal": True, "success": False, "detail": f"Run {run_id} failed: {run.error_message}"}
+        return {"terminal": False, "success": None, "detail": f"Run {run_id} is still {run.status}."}
+    return {"terminal": True, "success": True, "detail": "Unrecognized dispatch type; treated as resolved."}
+
+
 async def execute_next_step(task_id: str) -> dict:
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
@@ -145,13 +210,54 @@ async def execute_next_step(task_id: str) -> dict:
         if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
             return {"outcome": "not_runnable", "status": task.status.value}
 
+        if task.status == TaskStatus.QUEUED:
+            task.status = TaskStatus.RUNNING
+            task.started_at = task.started_at or datetime.utcnow()
+            await db.commit()
+
         r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
         all_steps = {s.step_index: s for s in r.scalars().all()}
+
+        # --- Priority 1: resolve a step that's already dispatched and
+        # waiting on real-world confirmation (Q2). At most one call's
+        # worth of work happens here before this function either returns
+        # or falls through to try independent forward progress. ---
+        verifying = next((s for s in all_steps.values() if s.status == TaskStepStatus.VERIFYING), None)
+        verify_elapsed = None
+        if verifying is not None:
+            poll = await _poll_dispatch_status(verifying.tool_name, verifying.raw_result or {})
+            verifying.attempt_count = (verifying.attempt_count or 0) + 1
+            verify_elapsed = (datetime.utcnow() - verifying.started_at).total_seconds() if verifying.started_at else 0.0
+
+            if poll["terminal"] and poll["success"]:
+                verifying.status = TaskStepStatus.SUCCEEDED
+                verifying.outcome_summary = poll["detail"]
+                verifying.completed_at = datetime.utcnow()
+                await db.commit()
+                return {"outcome": "step_verified_succeeded", "step_id": verifying.id, "detail": poll["detail"]}
+
+            if poll["terminal"] and not poll["success"]:
+                verifying.status = TaskStepStatus.FAILED
+                verifying.error_message = poll["detail"]
+                verifying.completed_at = datetime.utcnow()
+                task.status = TaskStatus.PAUSED_FAILED_STEP
+                await db.commit()
+                return {"outcome": "step_verification_failed", "step_id": verifying.id, "reason": poll["detail"]}
+
+            # Not yet terminal -- persist the poll attempt either way, then
+            # decide below whether anything independent can still proceed
+            # in this same call (the "move on" path), or whether this is
+            # genuinely the only thing left (handled after the pending-step
+            # search finds nothing runnable).
+            await db.commit()
+
+        # --- Priority 2: make progress on a runnable PENDING step, "move
+        # on" from an unresolved verify step per Q2 whenever independent
+        # work exists rather than blocking on it needlessly. ---
         pending = sorted(
             (s for s in all_steps.values() if s.status == TaskStepStatus.PENDING),
             key=lambda s: s.step_index,
         )
-
         step = None
         for candidate in pending:
             dep = candidate.depends_on_step_index
@@ -160,6 +266,25 @@ async def execute_next_step(task_id: str) -> dict:
                 break
 
         if step is None:
+            # Nothing independent to run. Either genuinely done, still
+            # honestly waiting on verification, or stuck on a dependency.
+            if verifying is not None:
+                if verify_elapsed is not None and verify_elapsed > VERIFY_TIMEOUT_SECONDS:
+                    # The ONLY invariant that matters here: this branch is
+                    # the sole path into COMPLETED_WITH_UNCONFIRMED_STEPS,
+                    # and plain COMPLETED below is only reachable when
+                    # `verifying` was None to begin with -- a task can
+                    # never report clean success while a dispatched step
+                    # remains unconfirmed.
+                    task.status = TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS
+                    task.completed_at = datetime.utcnow()
+                    await db.commit()
+                    return {
+                        "outcome": "task_completed_with_unconfirmed_steps",
+                        "step_id": verifying.id, "elapsed_seconds": verify_elapsed,
+                    }
+                await db.commit()
+                return {"outcome": "still_verifying", "step_id": verifying.id, "elapsed_seconds": verify_elapsed}
             if pending:
                 # Every remaining pending step is blocked on a dependency
                 # that never succeeded -- shouldn't be reachable given we
@@ -172,10 +297,6 @@ async def execute_next_step(task_id: str) -> dict:
             task.completed_at = datetime.utcnow()
             await db.commit()
             return {"outcome": "task_completed"}
-
-        if task.status == TaskStatus.QUEUED:
-            task.status = TaskStatus.RUNNING
-            task.started_at = task.started_at or datetime.utcnow()
 
         authorized, denial_reason = await _caller_still_authorized(db, task, step.tool_name)
         if not authorized:
@@ -235,9 +356,37 @@ async def execute_next_step(task_id: str) -> dict:
             r = await db.execute(select(Task).where(Task.id == task_id))
             task = r.scalar_one()
             task.step_budget_used = (task.step_budget_used or 0) + 1
+
+            outcome = {"outcome": "step_succeeded", "step_id": step_id, "attempt_count": attempt}
+
+            if tool_name in _VERIFIABLE_TOOLS and _looks_like_async_dispatch(tool_name, result):
+                # A genuinely new step, source=SYSTEM_INSERTED, appended
+                # with a fresh unused step_index (existing steps are never
+                # renumbered) and depending on the dispatching step's own
+                # index -- never a status recycled onto the dispatching
+                # step itself, so the timeline can always tell what AXIOM
+                # planned from what the system added (amendment 3).
+                r2 = await db.execute(select(func.max(TaskStep.step_index)).where(TaskStep.task_id == task_id))
+                max_index = r2.scalar_one()
+                verify_step = TaskStep(
+                    id=str(uuid.uuid4()), task_id=task_id, step_index=(max_index or 0) + 1,
+                    description=f'Verify that "{description}" reached a final state.',
+                    source=TaskStepSource.SYSTEM_INSERTED,
+                    tool_name=tool_name,  # what kind of dispatch to poll, not a tool to call again
+                    tool_args={},
+                    depends_on_step_index=step.step_index,
+                    status=TaskStepStatus.VERIFYING,
+                    raw_result=result,  # carries run_id etc. -- what _poll_dispatch_status reads
+                    started_at=datetime.utcnow(),
+                )
+                db.add(verify_step)
+                await db.flush()
+                outcome["outcome"] = "step_dispatched_pending_verification"
+                outcome["verify_step_id"] = verify_step.id
+
             await db.commit()
 
-        return {"outcome": "step_succeeded", "step_id": step_id, "attempt_count": attempt}
+        return outcome
 
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))

@@ -425,6 +425,7 @@ class TaskStatus(str, enum.Enum):
     PAUSED_PLAN_INVALID = "paused_plan_invalid"  # a completed step's result shows the remaining plan won't reach the goal
     PAUSED_QUOTA_EXCEEDED = "paused_quota_exceeded"  # tenant AI-credit quota exhausted mid-run; resumable once quota resets
     COMPLETED = "completed"
+    COMPLETED_WITH_UNCONFIRMED_STEPS = "completed_with_unconfirmed_steps"  # a dispatched step's verification never reached a terminal state within its window - honest, not clean, success (Q2)
     FAILED = "failed"
     CANCELLED = "cancelled"
     EXPIRED = "expired"  # sat paused past the pause-timeout with no resolution

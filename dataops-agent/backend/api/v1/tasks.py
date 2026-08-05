@@ -78,6 +78,27 @@ def _pause_reason(task: Task, steps: list[TaskStep]) -> str | None:
     return f'Step {failed.step_index} ("{failed.description}") failed after {failed.attempt_count} attempt(s): {failed.error_message}'
 
 
+def _completion_note(task: Task, steps: list[TaskStep]) -> str | None:
+    """Same computed-at-read-time principle as _pause_reason, for the
+    other honest-not-clean terminal status (Q2): a task can finish with a
+    dispatched step it was never able to confirm. 'Completed' alone would
+    be a false clean success; this names the step and says plainly that
+    the underlying operation's real outcome is still unknown."""
+    if task.status != TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS:
+        return None
+    unresolved = next(
+        (s for s in sorted(steps, key=lambda s: s.step_index) if s.status == TaskStepStatus.VERIFYING), None,
+    )
+    if unresolved is None:
+        return None
+    return (
+        f'Completed with unconfirmed steps — step {unresolved.step_index} '
+        f'("{unresolved.description}") could not be confirmed within the verification window '
+        f'and was not re-checked further. The dispatched operation may still be running or may '
+        f'have already finished; check its real status directly.'
+    )
+
+
 def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
     return {
         "id": task.id,
@@ -87,6 +108,7 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         "task_shape": task.task_shape.value,
         "status": task.status.value,
         "pause_reason": _pause_reason(task, steps),
+        "completion_note": _completion_note(task, steps),
         "plan_approved_by": task.plan_approved_by,
         "plan_approved_at": task.plan_approved_at.isoformat() if task.plan_approved_at else None,
         "plan_edited": bool(task.plan_edited),
