@@ -481,6 +481,13 @@ class Task(Base):
     started_at = Column(DateTime, nullable=True)
     paused_at = Column(DateTime, nullable=True)  # drives the pause-timeout expiry check
     completed_at = Column(DateTime, nullable=True)
+    # Real, persisted reason for a non-clean stop (stage 6, Q4): which cap
+    # fired (step/wall-clock/loop) for a FAILED task, or who cancelled and
+    # whether an in-flight step may have completed after, for CANCELLED.
+    # Unlike pause_reason/completion_note/expiry_reason (all computed at
+    # read time from a related step's own data), there's no step to derive
+    # this from -- a wall-clock or loop stop isn't any one step's fault.
+    termination_reason = Column(Text, nullable=True)
 
 
 class TaskStep(Base):

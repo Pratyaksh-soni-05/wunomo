@@ -11,7 +11,7 @@ from sqlalchemy import select
 import api.v1.tasks as tasks_module
 import modules.orchestration.task_executor as executor_module
 from database import AsyncSessionLocal
-from models.all_models import Task, User
+from models.all_models import Task, TaskStatus, User
 from services.auth_service import hash_password, issue_token_for_user
 
 
@@ -154,3 +154,31 @@ async def test_pause_reason_names_the_real_step_and_real_error(client, monkeypat
     assert body["status"] == "paused_failed_step"
     assert "check health" in body["pause_reason"]  # the real step description, not a generic label
     assert "simulated: the underlying service is down" in body["pause_reason"]  # the real error, not "step failed"
+
+
+@pytest.mark.asyncio
+async def test_advance_accepts_a_task_paused_for_quota_not_just_queued_and_running(client, monkeypatch):
+    """Regression guard for a real gap live verification caught: this
+    endpoint's own pre-check historically only accepted QUEUED/RUNNING,
+    so a real PAUSED_QUOTA_EXCEEDED task could never actually be resumed
+    through the real API even though execute_next_step() itself already
+    supported it -- the mocked/direct-call tests didn't catch this
+    because they call execute_next_step() directly, bypassing this
+    endpoint's own separate status check entirely."""
+    token, _, _ = await _register(client, "advquotaresume")
+    task = await _create_and_approve_task(client, token, monkeypatch)
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task["id"]))
+        db_task = r.scalar_one()
+        db_task.status = TaskStatus.PAUSED_QUOTA_EXCEEDED
+        await db.commit()
+
+    async def _ok(tenant_id, tool_name, tool_args):
+        return {"status": "ok"}
+
+    monkeypatch.setattr(executor_module, "_call_tool", _ok)
+
+    r = await client.post(f"/api/v1/tasks/{task['id']}/advance", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    assert r.json()["advance_outcome"]["outcome"] == "step_succeeded"

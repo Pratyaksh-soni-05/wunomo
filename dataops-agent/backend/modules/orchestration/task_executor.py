@@ -76,6 +76,8 @@ MAX_ATTEMPTS_PER_STEP = 3  # 1 initial + up to 2 recovery attempts
 TRANSIENT_RETRY_BACKOFF_SECONDS = 2
 VERIFY_TIMEOUT_SECONDS = 300  # real wall-clock budget for a dispatched step to reach a terminal state
 APPROVAL_PAUSE_TIMEOUT_HOURS = 48  # Q5 amendment: a paused-for-approval task doesn't wait forever
+MAX_TASK_WALL_CLOCK_HOURS = 4  # Q4: real elapsed time since Task.started_at, covers time spent verifying too
+LOOP_DETECTION_THRESHOLD = 3  # same (tool, args) signature attempted this many times = no progress, not persistence
 
 TIER_PERMISSION = "permission"
 TIER_TRANSIENT = "transient"
@@ -205,22 +207,115 @@ async def _poll_dispatch_status(tool_name: str, dispatch_result: dict) -> dict:
     return {"terminal": True, "success": True, "detail": "Unrecognized dispatch type; treated as resolved."}
 
 
+def _set_task_status_unless_cancelled(task: Task, new_status: TaskStatus) -> bool:
+    """The one guard that makes cancel_task() mean something: a step
+    already in flight when cancellation is requested cannot be
+    interrupted (there's no cooperative-cancellation plumbing here, and a
+    concurrent DB write can't stop an already-running `await`), so it
+    runs to completion and its own real outcome is still honestly
+    recorded -- but that completion must never silently overwrite a
+    task-level CANCELLED back to RUNNING/COMPLETED/FAILED/etc. Every
+    task.status write in this module goes through this function instead
+    of a bare assignment. Returns whether the write was applied."""
+    if task.status == TaskStatus.CANCELLED:
+        return False
+    task.status = new_status
+    return True
+
+
+def _check_wall_clock_cap(task: Task) -> str | None:
+    if task.started_at is None:
+        return None
+    elapsed_hours = (datetime.utcnow() - task.started_at).total_seconds() / 3600
+    if elapsed_hours > MAX_TASK_WALL_CLOCK_HOURS:
+        return (
+            f"Stopped: exceeded the {MAX_TASK_WALL_CLOCK_HOURS}-hour wall-clock budget "
+            f"(started at {task.started_at.isoformat()}, running for {elapsed_hours:.1f}h)."
+        )
+    return None
+
+
+def _check_step_budget_cap(task: Task) -> str | None:
+    used = task.step_budget_used or 0
+    if used >= task.step_budget_max:
+        return f"Stopped: exceeded the {task.step_budget_max}-step budget (used {used}/{task.step_budget_max})."
+    return None
+
+
+def _check_for_loop(all_steps: dict) -> str | None:
+    """A "loop" in this execution model can only mean the PLAN itself
+    contains the same (tool, args) pair repeated with no real reason --
+    steps are fixed at plan time, nothing re-plans mid-execution the way
+    a live agent conversation might. Counts ALL occurrences, not just
+    already-attempted ones -- a plan authored with 3 identical steps is
+    already a bad plan before any of them run; waiting for 2 real wasted
+    attempts before catching the 3rd would defeat the point. Excludes
+    SYSTEM_INSERTED verify steps: every one of them shares the same empty
+    tool_args ({}) by construction (see the dispatching-step success
+    branch above), so 3 legitimate, different real dispatches would
+    otherwise collide into a false positive -- this check is about
+    whether the AUTHORED plan repeats itself, not system bookkeeping."""
+    counts: dict[tuple, int] = {}
+    for s in all_steps.values():
+        if not s.tool_name or s.source == TaskStepSource.SYSTEM_INSERTED:
+            continue
+        sig = (s.tool_name, json.dumps(s.tool_args or {}, sort_keys=True))
+        counts[sig] = counts.get(sig, 0) + 1
+    for (tool_name, args_json), count in counts.items():
+        if count >= LOOP_DETECTION_THRESHOLD:
+            return (
+                f"Stopped: detected a loop — '{tool_name}' called {count} times with "
+                f"materially the same arguments ({args_json}) and no progress."
+            )
+    return None
+
+
 async def execute_next_step(task_id: str) -> dict:
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one_or_none()
         if task is None:
             return {"outcome": "task_not_found"}
-        if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
+        if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.PAUSED_QUOTA_EXCEEDED):
             return {"outcome": "not_runnable", "status": task.status.value}
 
-        if task.status == TaskStatus.QUEUED:
-            task.status = TaskStatus.RUNNING
+        if task.status in (TaskStatus.QUEUED, TaskStatus.PAUSED_QUOTA_EXCEEDED):
+            _set_task_status_unless_cancelled(task, TaskStatus.RUNNING)
             task.started_at = task.started_at or datetime.utcnow()
             await db.commit()
 
         r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
         all_steps = {s.step_index: s for s in r.scalars().all()}
+
+        # --- Termination caps (Q4), checked before any new work happens
+        # this call. Each produces a distinguishable real reason, not just
+        # "task stopped" -- FAILED is reused (was otherwise unused by this
+        # module) for all three; PAUSED_QUOTA_EXCEEDED (credit exhaustion)
+        # is handled separately, inside the attempt loop below, since it's
+        # resumable rather than terminal. ---
+        wall_clock_reason = _check_wall_clock_cap(task)
+        if wall_clock_reason:
+            _set_task_status_unless_cancelled(task, TaskStatus.FAILED)
+            task.termination_reason = wall_clock_reason
+            task.completed_at = datetime.utcnow()
+            await db.commit()
+            return {"outcome": "terminated_wall_clock", "reason": wall_clock_reason}
+
+        step_budget_reason = _check_step_budget_cap(task)
+        if step_budget_reason:
+            _set_task_status_unless_cancelled(task, TaskStatus.FAILED)
+            task.termination_reason = step_budget_reason
+            task.completed_at = datetime.utcnow()
+            await db.commit()
+            return {"outcome": "terminated_step_budget", "reason": step_budget_reason}
+
+        loop_reason = _check_for_loop(all_steps)
+        if loop_reason:
+            _set_task_status_unless_cancelled(task, TaskStatus.FAILED)
+            task.termination_reason = loop_reason
+            task.completed_at = datetime.utcnow()
+            await db.commit()
+            return {"outcome": "terminated_loop_detected", "reason": loop_reason}
 
         # --- Priority 1: resolve a step that's already dispatched and
         # waiting on real-world confirmation (Q2). At most one call's
@@ -244,7 +339,7 @@ async def execute_next_step(task_id: str) -> dict:
                 verifying.status = TaskStepStatus.FAILED
                 verifying.error_message = poll["detail"]
                 verifying.completed_at = datetime.utcnow()
-                task.status = TaskStatus.PAUSED_FAILED_STEP
+                _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
                 await db.commit()
                 return {"outcome": "step_verification_failed", "step_id": verifying.id, "reason": poll["detail"]}
 
@@ -280,7 +375,7 @@ async def execute_next_step(task_id: str) -> dict:
                     # `verifying` was None to begin with -- a task can
                     # never report clean success while a dispatched step
                     # remains unconfirmed.
-                    task.status = TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS
+                    _set_task_status_unless_cancelled(task, TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS)
                     task.completed_at = datetime.utcnow()
                     await db.commit()
                     return {
@@ -294,10 +389,10 @@ async def execute_next_step(task_id: str) -> dict:
                 # that never succeeded -- shouldn't be reachable given we
                 # pause the whole task on the first real failure, but
                 # guarded rather than assumed.
-                task.status = TaskStatus.PAUSED_FAILED_STEP
+                _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
                 await db.commit()
                 return {"outcome": "blocked_on_dependency"}
-            task.status = TaskStatus.COMPLETED
+            _set_task_status_unless_cancelled(task, TaskStatus.COMPLETED)
             task.completed_at = datetime.utcnow()
             await db.commit()
             return {"outcome": "task_completed"}
@@ -309,7 +404,7 @@ async def execute_next_step(task_id: str) -> dict:
             step.error_message = f"Blocked: {denial_reason}."
             step.started_at = step.started_at or datetime.utcnow()
             step.completed_at = datetime.utcnow()
-            task.status = TaskStatus.PAUSED_FAILED_STEP
+            _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
             await db.commit()
             return {
                 "outcome": "blocked_permission", "step_id": step.id,
@@ -331,7 +426,7 @@ async def execute_next_step(task_id: str) -> dict:
             )
             step.approval_request_id = approval["approval_id"]
             step.status = TaskStepStatus.BLOCKED_APPROVAL
-            task.status = TaskStatus.PAUSED_NEEDS_APPROVAL
+            _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_NEEDS_APPROVAL)
             task.paused_at = datetime.utcnow()
             await db.commit()
             return {
@@ -343,14 +438,14 @@ async def execute_next_step(task_id: str) -> dict:
             r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == step.approval_request_id))
             approval_req = r.scalar_one_or_none()
             if approval_req is None or approval_req.status == ApprovalStatus.PENDING:
-                task.status = TaskStatus.PAUSED_NEEDS_APPROVAL
+                _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_NEEDS_APPROVAL)
                 await db.commit()
                 return {"outcome": "still_blocked_needs_approval", "step_id": step.id}
             if approval_req.status == ApprovalStatus.REJECTED:
                 step.status = TaskStepStatus.FAILED
                 step.error_message = f"Step rejected: {approval_req.resolution_note or 'no reason given'}."
                 step.completed_at = datetime.utcnow()
-                task.status = TaskStatus.PAUSED_FAILED_STEP
+                _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
                 await db.commit()
                 return {"outcome": "step_rejected", "step_id": step.id, "reason": step.error_message}
             # APPROVED (or, defensively, any other resolved state) -- fall
@@ -365,6 +460,11 @@ async def execute_next_step(task_id: str) -> dict:
         tenant_id, task_user_id = task.tenant_id, task.user_id
         tool_name, tool_args, step_id = step.tool_name, dict(step.tool_args or {}), step.id
         description = step.description
+        # Resuming after a credit-exhaustion pause continues the SAME
+        # attempt budget rather than granting a fresh 3 -- attempt_count
+        # already reflects any attempt that happened before the pause
+        # (see the quota_paused branch below).
+        starting_attempt = (step.attempt_count or 0) + 1
         await db.commit()
 
     # The attempt loop runs outside any single DB transaction -- each
@@ -372,8 +472,9 @@ async def execute_next_step(task_id: str) -> dict:
     # internally, matching this codebase's established pattern.
     last_error = None
     adapted_once = False
+    quota_paused_attempt = None
     current_args = tool_args
-    for attempt in range(1, MAX_ATTEMPTS_PER_STEP + 1):
+    for attempt in range(starting_attempt, MAX_ATTEMPTS_PER_STEP + 1):
         try:
             result = await _call_tool(tenant_id, tool_name, current_args)
         except Exception as exc:
@@ -385,6 +486,14 @@ async def execute_next_step(task_id: str) -> dict:
         if isinstance(result, dict) and result.get("error"):
             last_error = str(result["error"])
             if attempt < MAX_ATTEMPTS_PER_STEP and not adapted_once:
+                # Credit exhaustion pauses the task instead of silently
+                # degrading to an unadapted retry (Q4) -- the only real
+                # LLM spend anywhere in step execution is this adapt call,
+                # so this is the one place quota needs to be checked.
+                quota = await get_quota_status(tenant_id, "ai_credits")
+                if quota["status"] == "exceeded":
+                    quota_paused_attempt = attempt
+                    break
                 current_args = await _adapt_step_args(
                     tenant_id, task_user_id, description, tool_name, current_args, last_error,
                 )
@@ -436,6 +545,29 @@ async def execute_next_step(task_id: str) -> dict:
 
         return outcome
 
+    if quota_paused_attempt is not None:
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
+            step = r.scalar_one()
+            # This attempt genuinely happened and hit a real domain error
+            # -- it counts. Back to PENDING (not FAILED): resuming picks up
+            # at starting_attempt = attempt_count + 1, the SAME budget,
+            # never a fresh 3.
+            step.attempt_count = quota_paused_attempt
+            step.error_message = last_error
+            step.status = TaskStepStatus.PENDING
+
+            r = await db.execute(select(Task).where(Task.id == task_id))
+            task = r.scalar_one()
+            if _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_QUOTA_EXCEEDED):
+                task.paused_at = datetime.utcnow()
+            await db.commit()
+
+        return {
+            "outcome": "paused_quota_exceeded", "step_id": step_id,
+            "attempt_count": quota_paused_attempt, "reason": last_error,
+        }
+
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
         step = r.scalar_one()
@@ -446,7 +578,7 @@ async def execute_next_step(task_id: str) -> dict:
 
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
-        task.status = TaskStatus.PAUSED_FAILED_STEP
+        _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
         await db.commit()
 
     return {
@@ -483,7 +615,7 @@ async def resume_task(task_id: str, resolved_by: str, notes: str = "") -> dict:
             return {"outcome": "not_resumable", "status": task.status.value}
 
         if _is_approval_expired(task):
-            task.status = TaskStatus.EXPIRED
+            _set_task_status_unless_cancelled(task, TaskStatus.EXPIRED)
             await db.commit()
             return {"outcome": "expired"}
 
@@ -504,7 +636,7 @@ async def resume_task(task_id: str, resolved_by: str, notes: str = "") -> dict:
         approval_req.resolution_note = notes
 
         step.status = TaskStepStatus.PENDING
-        task.status = TaskStatus.RUNNING
+        _set_task_status_unless_cancelled(task, TaskStatus.RUNNING)
         await db.commit()
 
     return await execute_next_step(task_id)
@@ -524,7 +656,7 @@ async def reject_task_step(task_id: str, resolved_by: str, notes: str = "") -> d
             return {"outcome": "not_resumable", "status": task.status.value}
 
         if _is_approval_expired(task):
-            task.status = TaskStatus.EXPIRED
+            _set_task_status_unless_cancelled(task, TaskStatus.EXPIRED)
             await db.commit()
             return {"outcome": "expired"}
 
@@ -547,7 +679,51 @@ async def reject_task_step(task_id: str, resolved_by: str, notes: str = "") -> d
         step.status = TaskStepStatus.FAILED
         step.error_message = f"Step rejected: {notes or 'no reason given'}."
         step.completed_at = datetime.utcnow()
-        task.status = TaskStatus.PAUSED_FAILED_STEP
+        _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
         await db.commit()
 
     return {"outcome": "step_rejected", "step_id": step.id}
+
+
+_NON_CANCELLABLE_STATUSES = (
+    TaskStatus.COMPLETED, TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS,
+    TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.PLAN_REJECTED, TaskStatus.EXPIRED,
+)
+
+
+async def cancel_task(task_id: str, cancelled_by: str) -> dict:
+    """Marks the task CANCELLED immediately. Honest about what this can
+    and cannot do: a step already in flight (its tool call already
+    started in a concurrent request) cannot be interrupted -- there is no
+    cooperative-cancellation plumbing in this codebase, and a plain DB
+    write from a separate request has no way to stop an already-running
+    `await` somewhere else. What IS guaranteed: every place
+    execute_next_step() finishes a step goes through
+    _set_task_status_unless_cancelled() before writing Task.status, so a
+    step that finishes AFTER this call still gets its own real,
+    factual outcome recorded (it may have genuinely succeeded), but the
+    task-level status can never be silently stomped back from CANCELLED
+    to RUNNING/COMPLETED/etc. -- see CLAUDE.md for the live-proved race."""
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id))
+        task = r.scalar_one_or_none()
+        if task is None:
+            return {"outcome": "task_not_found"}
+        if task.status in _NON_CANCELLABLE_STATUSES:
+            return {"outcome": "not_cancellable", "status": task.status.value}
+
+        was_running = task.status == TaskStatus.RUNNING
+        task.status = TaskStatus.CANCELLED
+        task.completed_at = datetime.utcnow()
+        task.termination_reason = (
+            f"Cancelled by user {cancelled_by}."
+            + (
+                " A step may have been executing at the moment cancellation was requested; it "
+                "cannot be interrupted mid-flight and may have completed after this task was "
+                "cancelled -- check each step's own status for what actually happened."
+                if was_running else ""
+            )
+        )
+        await db.commit()
+
+    return {"outcome": "cancelled"}

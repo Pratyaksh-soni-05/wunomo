@@ -126,6 +126,23 @@ def _expiry_reason(task: Task) -> str | None:
     )
 
 
+def _quota_paused_reason(task: Task, steps: list[TaskStep]) -> str | None:
+    """Q4: credit exhaustion pauses (resumable) rather than fails -- names
+    the step waiting on quota, distinct from every other pause reason."""
+    if task.status != TaskStatus.PAUSED_QUOTA_EXCEEDED:
+        return None
+    blocked = next(
+        (s for s in sorted(steps, key=lambda s: s.step_index) if s.status == TaskStepStatus.PENDING and s.attempt_count),
+        None,
+    )
+    if blocked is None:
+        return "Paused: tenant AI-credit quota exhausted. Resumable once quota is available again."
+    return (
+        f'Step {blocked.step_index} ("{blocked.description}") is paused after attempt {blocked.attempt_count} '
+        f'because the tenant\'s AI-credit quota is exhausted. Resumable once quota is available again.'
+    )
+
+
 def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
     return {
         "id": task.id,
@@ -138,6 +155,10 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         "completion_note": _completion_note(task, steps),
         "approval_pending_reason": _approval_pending_reason(task, steps),
         "expiry_reason": _expiry_reason(task),
+        "quota_paused_reason": _quota_paused_reason(task, steps),
+        # Real, persisted (not computed) -- set once, at the moment of a
+        # cap-triggered stop or a cancel; see the Task model docstring.
+        "termination_reason": task.termination_reason,
         "paused_at": task.paused_at.isoformat() if task.paused_at else None,
         "plan_approved_by": task.plan_approved_by,
         "plan_approved_at": task.plan_approved_at.isoformat() if task.plan_approved_at else None,
@@ -145,6 +166,7 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         "step_budget_max": task.step_budget_max,
         "step_budget_used": task.step_budget_used,
         "created_at": task.created_at.isoformat() if task.created_at else None,
+        "started_at": task.started_at.isoformat() if task.started_at else None,
         "steps": [_serialize_step(s) for s in sorted(steps, key=lambda s: s.step_index)],
     }
 
@@ -458,7 +480,7 @@ async def advance_task(task_id: str, current_user: dict = Depends(get_current_us
             raise HTTPException(status_code=404, detail="Task not found.")
         if task.user_id != user_id:
             raise HTTPException(status_code=403, detail="Only the task's creator may advance it.")
-        if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
+        if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.PAUSED_QUOTA_EXCEEDED):
             raise HTTPException(
                 status_code=409,
                 detail=f"Task is not runnable (current status: {task.status.value}).",
@@ -544,3 +566,41 @@ async def reject_task_step_endpoint(
         steps = r.scalars().all()
 
     return {**_serialize_task(task, steps), "reject_outcome": result}
+
+
+@router.post("/{task_id}/cancel")
+async def cancel_task_endpoint(task_id: str, current_user: dict = Depends(get_current_user)):
+    """Creator OR approvals.manage (Owner/Admin) may cancel -- unlike
+    resume/reject-step (approvals.manage only, since a creator approving
+    their own risky step defeats the point) or edit/approve-plan
+    (creator only), stopping your own task or stopping a runaway one you
+    have governance authority over are both legitimate. Honest about the
+    one thing it can't do: a step already executing in a concurrent
+    request cannot be interrupted -- see cancel_task()'s docstring and
+    CLAUDE.md for the live-proved race."""
+    from modules.orchestration.task_executor import cancel_task
+
+    tenant_id = current_user["tenant_id"]
+    user_id = current_user["sub"]
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id, Task.tenant_id == tenant_id))
+        task = r.scalar_one_or_none()
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        if task.user_id != user_id and not has_permission(current_user.get("role"), "approvals.manage"):
+            raise HTTPException(status_code=403, detail="Only the task's creator or a manager may cancel it.")
+
+    result = await cancel_task(task_id, cancelled_by=user_id)
+    if result["outcome"] == "not_cancellable":
+        raise HTTPException(
+            status_code=409, detail=f"Task cannot be cancelled (current status: {result['status']}).",
+        )
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id))
+        task = r.scalar_one()
+        r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
+        steps = r.scalars().all()
+
+    return {**_serialize_task(task, steps), "cancel_outcome": result}
