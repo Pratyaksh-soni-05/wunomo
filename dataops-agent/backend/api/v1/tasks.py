@@ -59,7 +59,23 @@ def _serialize_step(step: TaskStep) -> dict:
         "tool_args": step.tool_args,
         "depends_on_step_index": step.depends_on_step_index,
         "status": step.status.value,
+        "attempt_count": step.attempt_count,
+        "error_message": step.error_message,
+        "outcome_summary": step.outcome_summary,
     }
+
+
+def _pause_reason(task: Task, steps: list[TaskStep]) -> str | None:
+    """Computed at read time from the real, already-persisted step data --
+    never a separate stored field to drift out of sync. 'Step 3 failed' is
+    useless; this surfaces which step, its own description, and the real
+    underlying error every time, not a generic wrapper message."""
+    if task.status != TaskStatus.PAUSED_FAILED_STEP:
+        return None
+    failed = next((s for s in sorted(steps, key=lambda s: s.step_index) if s.status == TaskStepStatus.FAILED), None)
+    if failed is None:
+        return None
+    return f'Step {failed.step_index} ("{failed.description}") failed after {failed.attempt_count} attempt(s): {failed.error_message}'
 
 
 def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
@@ -70,6 +86,7 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         "goal": task.goal,
         "task_shape": task.task_shape.value,
         "status": task.status.value,
+        "pause_reason": _pause_reason(task, steps),
         "plan_approved_by": task.plan_approved_by,
         "plan_approved_at": task.plan_approved_at.isoformat() if task.plan_approved_at else None,
         "plan_edited": bool(task.plan_edited),
@@ -366,3 +383,41 @@ async def reject_task_plan(task_id: str, current_user: dict = Depends(get_curren
         **_serialize_task(task, steps),
         "message": "Plan rejected. Start a new task to try again.",
     }
+
+
+@router.post("/{task_id}/advance")
+async def advance_task(task_id: str, current_user: dict = Depends(get_current_user)):
+    """Manually drives one step of execution (stage 3) -- creator-only,
+    matching edit/approve/reject's rule. No automatic scheduling exists
+    yet (deliberately out of stage 3's scope), so this is currently the
+    only way a QUEUED/RUNNING task actually progresses. Delegates to
+    execute_next_step(), which resolves exactly one step to a terminal
+    state -- including whatever retries/adaptation its failure tier
+    calls for -- before returning."""
+    from modules.orchestration.task_executor import execute_next_step
+
+    tenant_id = current_user["tenant_id"]
+    user_id = current_user["sub"]
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id, Task.tenant_id == tenant_id))
+        task = r.scalar_one_or_none()
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        if task.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Only the task's creator may advance it.")
+        if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Task is not runnable (current status: {task.status.value}).",
+            )
+
+    step_outcome = await execute_next_step(task_id)
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id))
+        task = r.scalar_one()
+        r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
+        steps = r.scalars().all()
+
+    return {**_serialize_task(task, steps), "advance_outcome": step_outcome}

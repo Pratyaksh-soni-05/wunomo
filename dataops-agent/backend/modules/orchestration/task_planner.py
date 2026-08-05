@@ -59,15 +59,15 @@ class PlanValidationError(Exception):
     dependency."""
 
 
-def _tool_by_name(name: str):
+def tool_by_name(name: str):
     return next((t for t in ALL_TOOLS if t.name == name), None)
 
 
-def _tool_schema_for_prompt(tool_name: str) -> dict:
+def tool_schema_for_prompt(tool_name: str) -> dict:
     """A tool's arg schema with server-injected args stripped -- neither
     the planning LLM nor a human editor should ever be asked for (or
     allowed to supply) tenant_id/user_id/session_id."""
-    tool_obj = _tool_by_name(tool_name)
+    tool_obj = tool_by_name(tool_name)
     if tool_obj is None:
         return {}
     return {name: schema for name, schema in tool_obj.args.items() if name not in _SERVER_INJECTED_ARGS}
@@ -103,7 +103,7 @@ def validate_step_plan(task_shape: TaskShape, steps: list) -> None:
         if not isinstance(tool_args, dict):
             raise PlanValidationError(f"Step {i}: tool_args must be a JSON object.")
 
-        schema = _tool_schema_for_prompt(tool_name)
+        schema = tool_schema_for_prompt(tool_name)
         unknown_args = set(tool_args) - set(schema)
         if unknown_args:
             raise PlanValidationError(
@@ -130,8 +130,8 @@ def _build_prompt(goal: str, task_shape: TaskShape) -> str:
     allowed_tools = TASK_SHAPE_ALLOWED_TOOLS[task_shape]
     tool_lines = []
     for name in allowed_tools:
-        tool_obj = _tool_by_name(name)
-        schema = _tool_schema_for_prompt(name)
+        tool_obj = tool_by_name(name)
+        schema = tool_schema_for_prompt(name)
         tool_lines.append(f"- {name}: {tool_obj.description}\n  arguments (JSON schema): {json.dumps(schema)}")
     return (
         f"Goal: {goal}\n\n"
