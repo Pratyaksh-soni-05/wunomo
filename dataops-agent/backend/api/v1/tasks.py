@@ -8,16 +8,22 @@ allowed to *do* is a stage-3 concern (per-step, at execution time, per
 amendment 3 -- role is re-read fresh right before each step runs, never
 cached here).
 """
+import json
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from database import AsyncSessionLocal
 from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus
-from modules.orchestration.task_planner import PlanGenerationError, PlanValidationError, generate_plan
+from modules.orchestration.task_planner import (
+    PlanGenerationError, PlanValidationError, generate_plan, validate_step_plan,
+)
+from services.rbac import has_permission
 
-from .auth import enforce_quota
+from .auth import enforce_quota, get_current_user
 
 router = APIRouter()
 
@@ -30,6 +36,17 @@ DEFAULT_STEP_BUDGET_MAX = 20
 class CreateTaskRequest(BaseModel):
     goal: str
     task_shape: str
+
+
+class StepInput(BaseModel):
+    description: str
+    tool_name: str
+    tool_args: dict = {}
+    depends_on_step_index: int | None = None
+
+
+class EditStepsRequest(BaseModel):
+    steps: list[StepInput]
 
 
 def _serialize_step(step: TaskStep) -> dict:
@@ -61,6 +78,61 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "steps": [_serialize_step(s) for s in sorted(steps, key=lambda s: s.step_index)],
     }
+
+
+def _serialize_task_summary(task: Task) -> dict:
+    """List view -- no step list (avoids an N+1 join for something the
+    list screen doesn't need; GET /{id} returns the full detail)."""
+    return {
+        "id": task.id,
+        "user_id": task.user_id,
+        "goal": task.goal,
+        "task_shape": task.task_shape.value,
+        "status": task.status.value,
+        "plan_edited": bool(task.plan_edited),
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+    }
+
+
+@router.get("/")
+async def list_tasks(current_user: dict = Depends(get_current_user)):
+    """Your own tasks always; every tenant member's if you hold
+    tasks.manage_all (Owner/Admin) -- mirrors Team's own cross-member
+    visibility precedent, since a task's goal/steps can be as sensitive
+    as anything else a member does in this product."""
+    tenant_id = current_user["tenant_id"]
+    user_id = current_user["sub"]
+    can_view_all = has_permission(current_user.get("role"), "tasks.manage_all")
+
+    async with AsyncSessionLocal() as db:
+        query = select(Task).where(Task.tenant_id == tenant_id)
+        if not can_view_all:
+            query = query.where(Task.user_id == user_id)
+        query = query.order_by(Task.created_at.desc())
+        r = await db.execute(query)
+        tasks = r.scalars().all()
+
+    return [_serialize_task_summary(t) for t in tasks]
+
+
+@router.get("/{task_id}")
+async def get_task(task_id: str, current_user: dict = Depends(get_current_user)):
+    tenant_id = current_user["tenant_id"]
+    user_id = current_user["sub"]
+    can_view_all = has_permission(current_user.get("role"), "tasks.manage_all")
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id, Task.tenant_id == tenant_id))
+        task = r.scalar_one_or_none()
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        if task.user_id != user_id and not can_view_all:
+            raise HTTPException(status_code=403, detail="You don't have permission to view this task.")
+
+        r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
+        steps = r.scalars().all()
+
+    return _serialize_task(task, steps)
 
 
 @router.post("/")
@@ -124,3 +196,173 @@ async def create_task(body: CreateTaskRequest, current_user: dict = Depends(enfo
             await db.refresh(ts)
 
     return _serialize_task(task, task_steps)
+
+
+def _step_content_key(description, tool_name, tool_args, depends_on_step_index) -> tuple:
+    """Order-independent comparison key for detecting whether a step's
+    content genuinely changed between the persisted plan and an incoming
+    edit."""
+    return (description, tool_name, json.dumps(tool_args or {}, sort_keys=True), depends_on_step_index)
+
+
+@router.patch("/{task_id}/steps")
+async def edit_task_steps(task_id: str, body: EditStepsRequest, current_user: dict = Depends(get_current_user)):
+    """Full-replacement edit of the step list. Only valid while the task
+    is still draft_plan (409 otherwise) and only by the task's own
+    creator (403 otherwise) -- a plan describes what will run under its
+    creator's role at execution time (amendment 3), so nobody else edits
+    it on their behalf. Reuses validate_step_plan(), the exact validator
+    plan generation is bound by, so an edit can never smuggle in a tool
+    the planner itself couldn't have proposed. Never touches
+    plan_approved_by/plan_approved_at -- editing must never implicitly
+    approve; that's the sole job of POST /{id}/approve-plan."""
+    tenant_id = current_user["tenant_id"]
+    user_id = current_user["sub"]
+    incoming_steps = [s.model_dump() for s in body.steps]
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id, Task.tenant_id == tenant_id))
+        task = r.scalar_one_or_none()
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found.")
+        if task.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Only the task's creator may edit its plan.")
+        if task.status != TaskStatus.DRAFT_PLAN:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot edit a plan once it has left draft_plan (current status: {task.status.value}).",
+            )
+
+        try:
+            validate_step_plan(task.task_shape, incoming_steps)
+        except PlanValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+        r = await db.execute(
+            select(TaskStep).where(TaskStep.task_id == task_id).order_by(TaskStep.step_index)
+        )
+        existing_steps = r.scalars().all()
+        existing_keys = [
+            _step_content_key(s.description, s.tool_name, s.tool_args, s.depends_on_step_index)
+            for s in existing_steps
+        ]
+        existing_sources = [s.source for s in existing_steps]
+
+        any_change = len(incoming_steps) != len(existing_steps)
+        planned_steps = []
+        for i, step in enumerate(incoming_steps):
+            new_key = _step_content_key(
+                step["description"], step["tool_name"],
+                step.get("tool_args") or {}, step.get("depends_on_step_index"),
+            )
+            if i < len(existing_keys) and new_key == existing_keys[i]:
+                source = existing_sources[i]
+            else:
+                source = TaskStepSource.HUMAN_EDITED
+                any_change = True
+            planned_steps.append((step, source))
+
+        # Full replacement, per the locked design -- simpler than an
+        # in-place diff/update, and this is a positional (not
+        # content-based) comparison, so a pure reorder of otherwise
+        # identical steps is treated as an edit too, not a no-op.
+        for s in existing_steps:
+            await db.delete(s)
+        await db.flush()
+
+        task_steps = []
+        for i, (step, source) in enumerate(planned_steps):
+            ts = TaskStep(
+                id=str(uuid.uuid4()), task_id=task.id, step_index=i,
+                description=step["description"], source=source,
+                tool_name=step["tool_name"], tool_args=step.get("tool_args") or {},
+                depends_on_step_index=step.get("depends_on_step_index"),
+                status=TaskStepStatus.PENDING,
+            )
+            db.add(ts)
+            task_steps.append(ts)
+
+        if any_change:
+            task.plan_edited = True
+
+        await db.commit()
+        await db.refresh(task)
+        for ts in task_steps:
+            await db.refresh(ts)
+
+    return _serialize_task(task, task_steps)
+
+
+async def _load_own_draft_plan_task(db, task_id: str, tenant_id: str, user_id: str) -> Task:
+    """Shared load+authorize for approve-plan/reject-plan: 404 if the task
+    doesn't exist in this tenant, 403 if it's not yours, 409 if it has
+    already left draft_plan. Same creator-only rule as PATCH /steps --
+    the plan describes what will run under its creator's role."""
+    r = await db.execute(select(Task).where(Task.id == task_id, Task.tenant_id == tenant_id))
+    task = r.scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    if task.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Only the task's creator may act on its plan.")
+    if task.status != TaskStatus.DRAFT_PLAN:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This plan is no longer awaiting a decision (current status: {task.status.value}).",
+        )
+    return task
+
+
+@router.post("/{task_id}/approve-plan")
+async def approve_task_plan(task_id: str, current_user: dict = Depends(get_current_user)):
+    """The only code path that ever sets plan_approved_by/plan_approved_at
+    -- approves the plan exactly as it currently stands (whatever's
+    persisted right now, original or already-edited). Transitions to
+    QUEUED, not RUNNING: the approval-to-pickup window is real and
+    permanent (stage 3's executor hasn't shipped yet, but even once it
+    has, queue depth/worker restarts/credit checks make this a genuine,
+    ongoing state, not just a stage-2-vs-3 build artifact)."""
+    tenant_id = current_user["tenant_id"]
+    user_id = current_user["sub"]
+
+    async with AsyncSessionLocal() as db:
+        task = await _load_own_draft_plan_task(db, task_id, tenant_id, user_id)
+
+        r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
+        steps = r.scalars().all()
+        if not steps:
+            raise HTTPException(status_code=409, detail="Cannot approve a plan with no steps.")
+
+        task.status = TaskStatus.QUEUED
+        task.plan_approved_by = user_id
+        task.plan_approved_at = datetime.utcnow()
+
+        await db.commit()
+        await db.refresh(task)
+        for s in steps:
+            await db.refresh(s)
+
+    return _serialize_task(task, steps)
+
+
+@router.post("/{task_id}/reject-plan")
+async def reject_task_plan(task_id: str, current_user: dict = Depends(get_current_user)):
+    """Terminal for this Task row -- rejecting doesn't leave a mutable
+    draft to retry, it ends this attempt. Trying again means creating a
+    new task, so the response says so explicitly rather than a bare 200
+    with no next step, per explicit instruction."""
+    tenant_id = current_user["tenant_id"]
+    user_id = current_user["sub"]
+
+    async with AsyncSessionLocal() as db:
+        task = await _load_own_draft_plan_task(db, task_id, tenant_id, user_id)
+        task.status = TaskStatus.PLAN_REJECTED
+        await db.commit()
+        await db.refresh(task)
+
+        r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
+        steps = r.scalars().all()
+
+    return {
+        **_serialize_task(task, steps),
+        "message": "Plan rejected. Start a new task to try again.",
+    }
