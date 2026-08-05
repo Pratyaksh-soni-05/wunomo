@@ -8,11 +8,17 @@
 > termination, mid-task approvals, plan provenance, role re-read at
 > execution time, 3 narrow v1 task shapes) — read that section before
 > touching any of this. **Stage 1 (schema + migration + the
-> `tasks.manage_all` capability, no behavior) is done and live-verified**
-> — see the Status Table row below. **Stage 2 (planning phase: goal+shape
-> → a real persisted, human-reviewable plan) is next.** Everything below
+> `tasks.manage_all` capability, no behavior) and Stage 2 (planning phase:
+> goal+shape → a real persisted, human-reviewable, editable, approvable
+> plan) are both done and live-verified** — see the Status Table rows
+> below, including the fix for a real enum-label bug stage 1's migration
+> shipped with (caught before stage 2 built anything on top of it) and
+> the new `TaskStatus.QUEUED` value it prompted. **Stage 3 (execution
+> core: the Q1 failure-tier policy + per-step fresh role/permission
+> re-check, moved up from stage 7 per explicit instruction — enforcement
+> shouldn't trail the thing it's enforcing) is next.** Everything below
 > this paragraph is the pre-item-6 state of the project, kept for history
-> — start with item 6 stage 2, not with anything in the old banner.
+> — start with item 6 stage 3, not with anything in the old banner.
 >
 > **NEXT SESSION STARTS HERE (as of 2026-08-02, superseded above).** All 5 Phase 19 P0 items
 > are done, and the **migration-drift session is now also done** (see
