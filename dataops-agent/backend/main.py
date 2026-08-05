@@ -15,7 +15,7 @@ from api.v1 import (
     incidents, quality, governance, uploads,
     analytics, approvals, transformations,
     cicd, onboarding, catalog, team, billing, settings as settings_router,
-    api_keys,
+    api_keys, tasks,
 )
 
 
@@ -128,6 +128,7 @@ app.include_router(billing.router,         prefix="/api/v1/billing",         tag
 # Phase 16 — Settings persistence
 app.include_router(settings_router.router,  prefix="/api/v1/settings",        tags=["Settings"])
 app.include_router(api_keys.router,        prefix="/api/v1/api-keys",        tags=["API Keys"])
+app.include_router(tasks.router,           prefix="/api/v1/tasks",           tags=["Tasks"])
 
 
 
