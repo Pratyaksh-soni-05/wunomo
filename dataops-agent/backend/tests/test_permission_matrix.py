@@ -76,6 +76,7 @@ REPRESENTATIVE_ENDPOINTS = [
     ("settings.manage", "patch", "/api/v1/settings/", {"name": "New Name"}),
     ("api_keys.manage", "get", "/api/v1/api-keys/", None),
     ("billing.manage", "post", "/api/v1/billing/change-plan", {"plan": "growth"}),
+    ("tasks.manage_all", "get", "/api/v1/tasks/all", None),
 ]
 
 
@@ -112,13 +113,6 @@ def test_every_capability_has_a_matrix_row_or_is_explicitly_exempt():
     (or a deliberate exemption) here."""
     exempt = {
         "view", "transforms.generate",  # no REST call site by design
-        # tasks.manage_all: real call sites now exist (GET /tasks/, GET
-        # /tasks/{id} — api/v1/tasks.py), but this pattern doesn't fit
-        # REPRESENTATIVE_ENDPOINTS' allow/403-deny shape — it's a soft
-        # visibility filter (own tasks vs. every tenant task), not a hard
-        # gate that ever 403s on its own. Covered instead by its own
-        # dedicated tests in test_tasks_read_endpoints.py.
-        "tasks.manage_all",
     }
     covered = {cap for cap, _, _, _ in REPRESENTATIVE_ENDPOINTS}
     missing = set(PERMISSIONS) - covered - exempt

@@ -206,6 +206,58 @@ async def list_tasks(current_user: dict = Depends(get_current_user)):
     return [_serialize_task_summary(t) for t in tasks]
 
 
+# Registered before /{task_id} deliberately -- FastAPI matches routes in
+# registration order, and a path parameter would otherwise swallow these
+# literal segments.
+@router.get("/all")
+async def list_all_tenant_tasks(current_user: dict = Depends(require_permission("tasks.manage_all"))):
+    """Hard-gated (403 for anyone without tasks.manage_all), unlike GET /
+    above, which is a soft per-caller visibility filter -- this is the
+    real, binary-testable endpoint stage 7 promised so tasks.manage_all
+    could leave test_permission_matrix.py's exemption list like every
+    other capability. Every tenant task, not just the caller's own --
+    for the Owner/Admin cross-member monitoring view."""
+    tenant_id = current_user["tenant_id"]
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(Task).where(Task.tenant_id == tenant_id).order_by(Task.created_at.desc())
+        )
+        tasks = r.scalars().all()
+    return [_serialize_task_summary(t) for t in tasks]
+
+
+# Anything not in this set needs a human's attention or is actively
+# working -- a draft plan awaiting review, a step blocked on approval or
+# quota, or genuinely running. The topbar counter (stage 7) and the Tasks
+# list's badge both read this same definition.
+_TERMINAL_STATUSES = frozenset({
+    TaskStatus.PLAN_REJECTED, TaskStatus.COMPLETED, TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS,
+    TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.EXPIRED,
+})
+
+
+@router.get("/counts")
+async def task_counts(current_user: dict = Depends(get_current_user)):
+    """One real number: how many tasks (own, or every tenant task if you
+    hold tasks.manage_all) are not yet in a terminal state -- running,
+    queued, or waiting on you. Real or absent was the explicit
+    requirement for the topbar counter this backs; this endpoint is what
+    makes that number real."""
+    tenant_id = current_user["tenant_id"]
+    user_id = current_user["sub"]
+    can_view_all = has_permission(current_user.get("role"), "tasks.manage_all")
+
+    async with AsyncSessionLocal() as db:
+        query = select(Task.status).where(Task.tenant_id == tenant_id)
+        if not can_view_all:
+            query = query.where(Task.user_id == user_id)
+        r = await db.execute(query)
+        statuses = r.scalars().all()
+
+    active = sum(1 for s in statuses if s not in _TERMINAL_STATUSES)
+    return {"active": active}
+
+
 @router.get("/{task_id}")
 async def get_task(task_id: str, current_user: dict = Depends(get_current_user)):
     tenant_id = current_user["tenant_id"]

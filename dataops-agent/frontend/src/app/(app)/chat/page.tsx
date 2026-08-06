@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/components/ui";
 import { SessionList, MessageThread, ContextPanel, type LocalChatMessage } from "@/components/chat";
+import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
 import {
   getToken, decodeUserFromToken, getChatSessions, getChatHistory, sendChatMessage, getSources,
-  ApiError, type ChatContext,
+  ApiError, type ChatContext, type TaskItem,
 } from "@/lib/api";
 
 export default function ChatPage() {
@@ -26,6 +27,7 @@ export default function ChatPage() {
   const [personalityMode, setPersonalityMode] = useState("engineer");
   const [operationMode, setOperationMode] = useState("assisted");
   const [attachedContext, setAttachedContext] = useState<ChatContext | null>(null);
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
 
   // Bumped by newChat() so a response from a request sent before "New Chat"
   // was clicked can be detected as stale and dropped instead of silently
@@ -138,6 +140,7 @@ export default function ChatPage() {
         onDraftChange={setDraft}
         onSend={send}
         onGoToApprovals={() => router.push("/approvals")}
+        onStartTask={() => setTaskModalOpen(true)}
       />
       <ContextPanel
         messages={messages}
@@ -146,6 +149,18 @@ export default function ChatPage() {
         onAttach={setAttachedContext}
         onClear={() => setAttachedContext(null)}
         onGoToApprovals={() => router.push("/approvals")}
+      />
+      <TaskCreateModal
+        token={token}
+        open={taskModalOpen}
+        onClose={() => setTaskModalOpen(false)}
+        onCreated={(task: TaskItem) => {
+          const taskCardMsg: LocalChatMessage = {
+            role: "assistant", content: "", tool_calls: [], timestamp: new Date().toISOString(),
+            taskCard: { id: task.id, goal: task.goal },
+          };
+          setMessages((prev) => [...prev, taskCardMsg]);
+        }}
       />
     </div>
   );

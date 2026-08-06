@@ -57,6 +57,7 @@ import json
 import uuid
 from datetime import datetime
 
+import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import select, func
 
@@ -95,6 +96,8 @@ TIER_DOMAIN = "domain"
 # (see CLAUDE.md's live-verification note), just not reachable through
 # the locked planner allowlists until stage 5 exists.
 _VERIFIABLE_TOOLS = {"run_pipeline"}
+
+log = structlog.get_logger()
 
 
 async def _caller_still_authorized(db, task: Task, tool_name: str) -> tuple[bool, str | None]:
@@ -270,6 +273,26 @@ def _check_for_loop(all_steps: dict) -> str | None:
     return None
 
 
+async def _notify_task_stopped(task: Task, title: str, message: str, severity: str = "medium") -> None:
+    """Stage 7: 'give it a task and walk away' only works if something
+    tells you when it's done or needs you. Fires at the transitions that
+    genuinely warrant it -- every terminal state, plus mid-task approval
+    (someone needs to act) -- never for the retry-prone pauses
+    (PAUSED_FAILED_STEP, PAUSED_QUOTA_EXCEEDED) that are already visible
+    the moment anyone checks the Tasks screen and would otherwise spam on
+    every failed attempt. Best-effort, matching this module's own
+    NotificationService contract: a delivery failure must never break
+    the actual state transition it's describing."""
+    try:
+        from modules.reporting.notification_service import NotificationService
+        await NotificationService(task.tenant_id).send_alert(
+            channel="both", severity=severity, title=title, message=message,
+            metadata={"task_id": task.id, "status": task.status.value},
+        )
+    except Exception as exc:
+        log.warning("task_notification_failed", task_id=task.id, error=str(exc))
+
+
 async def execute_next_step(task_id: str) -> dict:
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
@@ -299,6 +322,7 @@ async def execute_next_step(task_id: str) -> dict:
             task.termination_reason = wall_clock_reason
             task.completed_at = datetime.utcnow()
             await db.commit()
+            await _notify_task_stopped(task, "Task stopped", wall_clock_reason, severity="high")
             return {"outcome": "terminated_wall_clock", "reason": wall_clock_reason}
 
         step_budget_reason = _check_step_budget_cap(task)
@@ -307,6 +331,7 @@ async def execute_next_step(task_id: str) -> dict:
             task.termination_reason = step_budget_reason
             task.completed_at = datetime.utcnow()
             await db.commit()
+            await _notify_task_stopped(task, "Task stopped", step_budget_reason, severity="high")
             return {"outcome": "terminated_step_budget", "reason": step_budget_reason}
 
         loop_reason = _check_for_loop(all_steps)
@@ -315,6 +340,7 @@ async def execute_next_step(task_id: str) -> dict:
             task.termination_reason = loop_reason
             task.completed_at = datetime.utcnow()
             await db.commit()
+            await _notify_task_stopped(task, "Task stopped", loop_reason, severity="high")
             return {"outcome": "terminated_loop_detected", "reason": loop_reason}
 
         # --- Priority 1: resolve a step that's already dispatched and
@@ -378,6 +404,11 @@ async def execute_next_step(task_id: str) -> dict:
                     _set_task_status_unless_cancelled(task, TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS)
                     task.completed_at = datetime.utcnow()
                     await db.commit()
+                    await _notify_task_stopped(
+                        task, "Task completed with unconfirmed steps",
+                        f'Step {verifying.step_index} ("{verifying.description}") could not be confirmed '
+                        f"within the verification window.", severity="medium",
+                    )
                     return {
                         "outcome": "task_completed_with_unconfirmed_steps",
                         "step_id": verifying.id, "elapsed_seconds": verify_elapsed,
@@ -395,6 +426,9 @@ async def execute_next_step(task_id: str) -> dict:
             _set_task_status_unless_cancelled(task, TaskStatus.COMPLETED)
             task.completed_at = datetime.utcnow()
             await db.commit()
+            await _notify_task_stopped(
+                task, "Task completed", f'Task "{task.goal}" completed successfully.', severity="low",
+            )
             return {"outcome": "task_completed"}
 
         authorized, denial_reason = await _caller_still_authorized(db, task, step.tool_name)
@@ -429,6 +463,11 @@ async def execute_next_step(task_id: str) -> dict:
             _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_NEEDS_APPROVAL)
             task.paused_at = datetime.utcnow()
             await db.commit()
+            await _notify_task_stopped(
+                task, "Task needs approval",
+                f'Step {step.step_index} ("{step.description}") needs approval to run "{step.tool_name}".',
+                severity="medium",
+            )
             return {
                 "outcome": "blocked_needs_approval", "step_id": step.id,
                 "approval_request_id": approval["approval_id"], "risk_level": approval["risk_level"],
@@ -617,6 +656,10 @@ async def resume_task(task_id: str, resolved_by: str, notes: str = "") -> dict:
         if _is_approval_expired(task):
             _set_task_status_unless_cancelled(task, TaskStatus.EXPIRED)
             await db.commit()
+            await _notify_task_stopped(
+                task, "Task expired",
+                f'Task "{task.goal}" expired waiting for approval.', severity="medium",
+            )
             return {"outcome": "expired"}
 
         r = await db.execute(
@@ -658,6 +701,10 @@ async def reject_task_step(task_id: str, resolved_by: str, notes: str = "") -> d
         if _is_approval_expired(task):
             _set_task_status_unless_cancelled(task, TaskStatus.EXPIRED)
             await db.commit()
+            await _notify_task_stopped(
+                task, "Task expired",
+                f'Task "{task.goal}" expired waiting for approval.', severity="medium",
+            )
             return {"outcome": "expired"}
 
         r = await db.execute(
@@ -725,5 +772,6 @@ async def cancel_task(task_id: str, cancelled_by: str) -> dict:
             )
         )
         await db.commit()
+        await _notify_task_stopped(task, "Task cancelled", task.termination_reason, severity="low")
 
     return {"outcome": "cancelled"}

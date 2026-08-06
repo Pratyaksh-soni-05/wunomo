@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Card, Select } from "@/components/ui";
+import { useRouter } from "next/navigation";
+import { Card, Button, Select } from "@/components/ui";
 import { ToolCallBlock } from "./ToolCallBlock";
 import type { LocalChatMessage } from "./types";
 import type { ChatContext } from "@/lib/api";
@@ -53,6 +54,7 @@ export function MessageThread({
   onDraftChange,
   onSend,
   onGoToApprovals,
+  onStartTask,
 }: {
   messages: LocalChatMessage[];
   sending: boolean;
@@ -68,8 +70,10 @@ export function MessageThread({
   onDraftChange: (v: string) => void;
   onSend: () => void;
   onGoToApprovals: () => void;
+  onStartTask: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -102,6 +106,7 @@ export function MessageThread({
           </div>
         </div>
         <div className="chat-header-controls">
+          <Button size="sm" variant="secondary" onClick={onStartTask}>+ Start a Task</Button>
           <Select
             aria-label="Personality mode"
             value={personalityMode}
@@ -133,7 +138,24 @@ export function MessageThread({
         )}
 
         {messages.map((m, i) =>
-          m.role === "user" ? (
+          m.taskCard ? (
+            <div className="chat-bubble-assistant" key={i}>
+              <div className="chat-avatar" style={{ marginTop: 2 }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="4" width="18" height="18" rx="2" />
+                  <line x1="16" y1="2" x2="16" y2="6" />
+                  <line x1="8" y1="2" x2="8" y2="6" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                </svg>
+              </div>
+              <div className="chat-bubble-assistant-inner">
+                <Card className="chat-bubble-assistant-text flex items-center justify-between" style={{ gap: 12 }}>
+                  <span>Started task: <strong>{m.taskCard.goal}</strong></span>
+                  <Button size="sm" onClick={() => router.push(`/tasks/${m.taskCard!.id}`)}>View progress</Button>
+                </Card>
+              </div>
+            </div>
+          ) : m.role === "user" ? (
             <div className="chat-bubble-user" key={i}>
               <div className="chat-bubble-user-inner">{m.content}</div>
             </div>

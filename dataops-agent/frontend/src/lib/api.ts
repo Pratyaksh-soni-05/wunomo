@@ -1023,6 +1023,132 @@ export function getCurrentPlan(token: string): Promise<CurrentPlan> {
 // calls either anymore. GET /billing/plans still exists on the backend if
 // a future read-only plan-comparison view needs it.
 
+// ---------- Tasks (item 6, stage 7) ----------
+
+export type TaskShapeValue = "diagnose_pipeline_failure" | "investigate_incident" | "sync_profile_quality";
+
+export const TASK_SHAPES: { value: TaskShapeValue; label: string }[] = [
+  { value: "diagnose_pipeline_failure", label: "Diagnose pipeline failure" },
+  { value: "investigate_incident", label: "Investigate incident" },
+  { value: "sync_profile_quality", label: "Sync, profile & quality-check a source" },
+];
+
+export type TaskStepProvenance = "llm_planned" | "human_edited" | "system_inserted";
+
+export interface TaskStepItem {
+  id: string;
+  step_index: number;
+  description: string;
+  source: TaskStepProvenance;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  depends_on_step_index: number | null;
+  status: "pending" | "running" | "verifying" | "succeeded" | "failed" | "skipped" | "blocked_approval";
+  attempt_count: number;
+  error_message: string | null;
+  outcome_summary: string | null;
+  approval_request_id: string | null;
+}
+
+export interface TaskItem {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  goal: string;
+  task_shape: TaskShapeValue;
+  status: string;
+  pause_reason: string | null;
+  completion_note: string | null;
+  approval_pending_reason: string | null;
+  expiry_reason: string | null;
+  quota_paused_reason: string | null;
+  termination_reason: string | null;
+  paused_at: string | null;
+  plan_approved_by: string | null;
+  plan_approved_at: string | null;
+  plan_edited: boolean;
+  step_budget_max: number;
+  step_budget_used: number;
+  created_at: string | null;
+  started_at: string | null;
+  steps: TaskStepItem[];
+}
+
+export interface TaskSummary {
+  id: string;
+  user_id: string;
+  goal: string;
+  task_shape: TaskShapeValue;
+  status: string;
+  plan_edited: boolean;
+  created_at: string | null;
+}
+
+export function getTasks(token: string): Promise<TaskSummary[]> {
+  return authedRequest("/api/v1/tasks/", token);
+}
+
+// Hard-gated tasks.manage_all -- 403s for anyone without it, unlike
+// getTasks() above (a soft per-caller filter that never itself 403s).
+export function getAllTenantTasks(token: string): Promise<TaskSummary[]> {
+  return authedRequest("/api/v1/tasks/all", token);
+}
+
+export function getTaskCounts(token: string): Promise<{ active: number }> {
+  return authedRequest("/api/v1/tasks/counts", token);
+}
+
+export function getTask(token: string, id: string): Promise<TaskItem> {
+  return authedRequest(`/api/v1/tasks/${id}`, token);
+}
+
+export function createTask(token: string, params: { goal: string; task_shape: TaskShapeValue }): Promise<TaskItem> {
+  return request("/api/v1/tasks/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
+export interface TaskStepEditInput {
+  description: string;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  depends_on_step_index: number | null;
+}
+
+export function editTaskSteps(token: string, id: string, steps: TaskStepEditInput[]): Promise<TaskItem> {
+  return request(`/api/v1/tasks/${id}/steps`, {
+    method: "PATCH", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ steps }),
+  });
+}
+
+export function approveTaskPlan(token: string, id: string): Promise<TaskItem> {
+  return request(`/api/v1/tasks/${id}/approve-plan`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function rejectTaskPlan(token: string, id: string): Promise<TaskItem & { message: string }> {
+  return request(`/api/v1/tasks/${id}/reject-plan`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function advanceTask(token: string, id: string): Promise<TaskItem & { advance_outcome: Record<string, unknown> }> {
+  return request(`/api/v1/tasks/${id}/advance`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function resumeTask(token: string, id: string, notes = ""): Promise<TaskItem> {
+  return request(`/api/v1/tasks/${id}/resume`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ notes }),
+  });
+}
+
+export function rejectTaskStep(token: string, id: string, notes = ""): Promise<TaskItem> {
+  return request(`/api/v1/tasks/${id}/reject-step`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ notes }),
+  });
+}
+
+export function cancelTask(token: string, id: string): Promise<TaskItem> {
+  return request(`/api/v1/tasks/${id}/cancel`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
 // ---------- Local session storage ----------
 
 const TOKEN_KEY = "axiom_token";
