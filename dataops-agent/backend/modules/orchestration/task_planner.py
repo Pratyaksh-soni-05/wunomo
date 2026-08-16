@@ -35,10 +35,10 @@ _MAX_GENERATION_ATTEMPTS = 2
 # pattern as dataops_agent.py's TOOL_CAPABILITIES assertion.
 TASK_SHAPE_ALLOWED_TOOLS: dict[TaskShape, list[str]] = {
     TaskShape.DIAGNOSE_PIPELINE_FAILURE: [
-        "get_pipeline_run_history", "check_freshness", "get_cicd_status", "get_system_health",
+        "list_pipelines", "get_pipeline_run_history", "check_freshness", "get_cicd_status", "get_system_health",
     ],
     TaskShape.INVESTIGATE_INCIDENT: [
-        "list_open_incidents", "triage_incident", "resolve_incident", "get_pipeline_run_history",
+        "list_open_incidents", "triage_incident", "resolve_incident", "list_pipelines", "get_pipeline_run_history",
     ],
     TaskShape.SYNC_PROFILE_QUALITY: [
         "list_data_sources", "sync_source", "profile_schema", "run_quality_checks", "get_quality_report",

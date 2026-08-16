@@ -1,6 +1,14 @@
 from langchain_core.tools import tool
 
 @tool
+async def list_pipelines(tenant_id: str) -> dict:
+    """List all pipelines for the tenant - the discovery step for turning
+    a human-named pipeline (e.g. "the HR Sync Pipeline") into a real
+    pipeline_id, the same role list_data_sources plays for sources."""
+    from modules.orchestration.dag_manager import DAGManager
+    return await DAGManager(tenant_id).list_pipelines()
+
+@tool
 async def create_pipeline(tenant_id: str, name: str, source_id: str, pipeline_config: dict) -> dict:
     """Create a new DataOps pipeline with steps, transforms, quality rules, and schedule."""
     from modules.orchestration.dag_manager import DAGManager
@@ -37,5 +45,5 @@ async def set_pipeline_schedule(tenant_id: str, pipeline_id: str, cron_expressio
     from modules.orchestration.dag_manager import DAGManager
     return await DAGManager(tenant_id).set_schedule(pipeline_id, cron_expression)
 
-orchestration_tools = [create_pipeline, run_pipeline, pause_pipeline,
+orchestration_tools = [list_pipelines, create_pipeline, run_pipeline, pause_pipeline,
                         get_pipeline_run_history, backfill_pipeline, set_pipeline_schedule]

@@ -149,6 +149,7 @@ TOOL_CAPABILITIES: dict[str, str] = {
     "list_business_rules": "view",
 
     # Orchestration
+    "list_pipelines": "view",
     "create_pipeline": "pipelines.create",
     "run_pipeline": "pipelines.operate",
     "pause_pipeline": "pipelines.operate",

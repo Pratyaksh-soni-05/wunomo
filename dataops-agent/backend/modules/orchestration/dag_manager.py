@@ -160,6 +160,30 @@ class DAGManager:
                 "updated_at": str(p.updated_at)
             }
 
+    # ── LIST ──────────────────────────────────────────────────────────────────
+    async def list_pipelines(self) -> dict:
+        """Tenant-scoped pipeline listing - the discovery step that was
+        missing for the AXIOM task-planner's DIAGNOSE_PIPELINE_FAILURE and
+        INVESTIGATE_INCIDENT shapes: neither had any way to turn a
+        human-named pipeline into the real ID get_pipeline_run_history
+        requires, matching list_data_sources's existing role for sources
+        (see docs/context/SESSION_LOG.md's 2026-08 argument-resolution
+        writeup)."""
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(select(Pipeline).where(Pipeline.tenant_id == self.tenant_id))
+            pipelines = r.scalars().all()
+            return {
+                "pipelines": [
+                    {
+                        "id": p.id, "name": p.name, "status": p.status,
+                        "source_id": p.source_id, "schedule_cron": p.schedule_cron,
+                        "created_at": str(p.created_at),
+                    }
+                    for p in pipelines
+                ],
+                "count": len(pipelines),
+            }
+
     # ── UPDATE ────────────────────────────────────────────────────────────────
     async def update_pipeline(self, pipeline_id: str, **kwargs) -> dict:
         async with AsyncSessionLocal() as db:
