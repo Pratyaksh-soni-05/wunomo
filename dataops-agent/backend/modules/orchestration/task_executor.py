@@ -136,6 +136,85 @@ _ARG_RESOLUTION_SOURCES = {
 }
 
 
+async def _candidate_ids_for_arg(db, task_id: str, step: TaskStep, arg_key: str) -> set:
+    """The real ids _resolve_step_args (Tier 1) or _unresolved_reference_
+    note (Commit 4) would consider a match for arg_key, given this task's
+    own earlier discovery steps and this step's own description. Shared
+    so both "resolve it" and "explain why it's still wrong" read the
+    identical evidence — a message that says "no source matched" must be
+    checking the same thing resolution itself checked, not a second,
+    possibly-inconsistent notion of a match."""
+    spec = _ARG_RESOLUTION_SOURCES.get(arg_key)
+    if spec is None:
+        return set()
+    description = (step.description or "").lower()
+    r = await db.execute(
+        select(TaskStep).where(
+            TaskStep.task_id == task_id,
+            TaskStep.tool_name == spec["discovery_tool"],
+            TaskStep.status == TaskStepStatus.SUCCEEDED,
+        )
+    )
+    discovery_steps = r.scalars().all()
+
+    candidates = set()
+    for ds in discovery_steps:
+        raw = ds.raw_result
+        records = raw if spec["list_key"] is None else (raw or {}).get(spec["list_key"])
+        if not isinstance(records, list):
+            continue
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            name, rid = rec.get(spec["name_key"]), rec.get(spec["id_key"])
+            if name and rid and str(name).lower() in description:
+                candidates.add(rid)
+    return candidates
+
+
+async def _unresolved_reference_note(db, task_id: str, step: TaskStep, tool_args: dict) -> str | None:
+    """Commit 4: honest failure messaging. Called only once a step has
+    exhausted its attempt budget and is about to fail — checks whether any
+    of its _id-shaped arguments still don't match a real record this task
+    actually discovered, using the exact same matching _resolve_step_args
+    already tried. Deliberately re-checked fresh here rather than threaded
+    through from the original resolution attempt: an approval-gated step
+    resolves once, at the approval-gate call, and can fail much later on
+    a separate resume call — there's no in-memory state connecting those
+    two calls, and adding persisted state just to carry this note across
+    them would be exactly the kind of new state the idempotency design
+    was built to avoid needing. Re-deriving it from the same evidence at
+    failure time is cheap (no LLM call) and always consistent with
+    whatever resolution actually did or didn't do.
+
+    Returns None if nothing looks reference-shaped (a genuinely different
+    kind of failure) — callers should fall back to the raw tool error
+    alone in that case, not invent a resolution story that isn't real.
+
+    tool_args is passed explicitly rather than read off step.tool_args —
+    the DB row is only ever updated on a step's success, so by the time a
+    step has exhausted its attempts, step.tool_args can still hold the
+    pre-Tier-2 value while the real last-attempted args (post-adapt) only
+    ever existed in execute_next_step()'s local current_args. Checking
+    against what was actually last tried, not what's persisted, is what
+    makes this note honest."""
+    unresolved = []
+    for arg_key in _ARG_RESOLUTION_SOURCES:
+        if arg_key not in tool_args:
+            continue
+        candidates = await _candidate_ids_for_arg(db, task_id, step, arg_key)
+        if tool_args[arg_key] not in candidates:
+            unresolved.append((arg_key, len(candidates)))
+    if not unresolved:
+        return None
+    parts = [
+        f"'{key}' ({'no match' if n == 0 else f'{n} ambiguous matches'} for "
+        f"this step's description among what this task discovered earlier)"
+        for key, n in unresolved
+    ]
+    return "Could not determine the real value for " + ", ".join(parts) + "."
+
+
 async def _resolve_step_args(db, task_id: str, step: TaskStep) -> dict:
     """Tier 1 (deterministic): the task planner generates a step's entire
     tool_args upfront, before any earlier step has actually run — it
@@ -160,34 +239,12 @@ async def _resolve_step_args(db, task_id: str, step: TaskStep) -> dict:
     callers own that guarantee.
     """
     tool_args = dict(step.tool_args or {})
-    description = (step.description or "").lower()
     resolved = dict(tool_args)
 
-    for arg_key, spec in _ARG_RESOLUTION_SOURCES.items():
+    for arg_key in _ARG_RESOLUTION_SOURCES:
         if arg_key not in tool_args:
             continue
-        r = await db.execute(
-            select(TaskStep).where(
-                TaskStep.task_id == task_id,
-                TaskStep.tool_name == spec["discovery_tool"],
-                TaskStep.status == TaskStepStatus.SUCCEEDED,
-            )
-        )
-        discovery_steps = r.scalars().all()
-
-        candidates = set()
-        for ds in discovery_steps:
-            raw = ds.raw_result
-            records = raw if spec["list_key"] is None else (raw or {}).get(spec["list_key"])
-            if not isinstance(records, list):
-                continue
-            for rec in records:
-                if not isinstance(rec, dict):
-                    continue
-                name, rid = rec.get(spec["name_key"]), rec.get(spec["id_key"])
-                if name and rid and str(name).lower() in description:
-                    candidates.add(rid)
-
+        candidates = await _candidate_ids_for_arg(db, task_id, step, arg_key)
         if len(candidates) == 1:
             resolved[arg_key] = candidates.pop()
         # 0 or 2+ candidates: leave as-is, Tier 2 gets a shot on failure.
@@ -751,9 +808,15 @@ async def execute_next_step(task_id: str) -> dict:
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
         step = r.scalar_one()
+        # Commit 4: honest failure messaging. The raw tool error ("Source
+        # not found") blames the entity for not existing, when the real
+        # problem was often that the argument sent to look it up was never
+        # a real value to begin with — checked against the same evidence
+        # resolution itself used, not guessed.
+        note = await _unresolved_reference_note(db, task_id, step, current_args)
         step.status = TaskStepStatus.FAILED
         step.attempt_count = MAX_ATTEMPTS_PER_STEP
-        step.error_message = last_error
+        step.error_message = f"{note} Real error: {last_error}" if note else last_error
         step.completed_at = datetime.utcnow()
 
         r = await db.execute(select(Task).where(Task.id == task_id))
@@ -763,7 +826,7 @@ async def execute_next_step(task_id: str) -> dict:
 
     return {
         "outcome": "step_failed", "step_id": step_id,
-        "attempt_count": MAX_ATTEMPTS_PER_STEP, "reason": last_error,
+        "attempt_count": MAX_ATTEMPTS_PER_STEP, "reason": step.error_message,
     }
 
 

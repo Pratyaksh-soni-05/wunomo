@@ -13,6 +13,10 @@ silently without any test noticing:
 2. Human-edited steps are never touched by resolution, even when a
    deterministic match is available and the human's value looks wrong —
    a human who typed a specific value meant that value.
+
+Also covers Commit 4 (honest failure messaging): when neither tier can
+resolve a reference, the final failure message says so explicitly
+instead of only repeating the raw tool error.
 """
 import uuid
 
@@ -143,3 +147,43 @@ async def test_resolution_skips_human_edited_args(client):
 
     step = await _fresh_step(step_id)
     assert step.tool_args["source_id"] == "human-typed-value"
+
+
+@pytest.mark.asyncio
+async def test_honest_failure_message_when_neither_tier_resolves(client, monkeypatch):
+    """Commit 4: a reference that never matches anything real (0
+    candidates, and Tier 2 can't improve on it either) fails with an
+    explicit "could not determine the real value" note, not just the raw
+    tool error repeated back — the raw error blames the entity for not
+    existing when the actual problem was the argument was never real to
+    begin with. Uses get_pipeline_run_history/list_pipelines (a low-risk,
+    auto-run tool, no approval gate in the way) to exercise the final
+    attempt-budget-exhausted failure path directly."""
+    tenant_id, user_id = await _register(client, "resolvehonestfail")
+    task_id, step_id = await _seed_task_with_discovery(
+        tenant_id, user_id,
+        discovery_raw_result={"pipelines": [{"id": "pl-real-1", "name": "Sales Ingestion Pipeline"}], "count": 1},
+        discovery_tool_name="list_pipelines",
+        step_tool_name="get_pipeline_run_history",
+        # Deliberately unrelated to anything discovered — 0 candidates.
+        step_tool_args={"pipeline_id": "totally_unrelated_guess"},
+        step_description="Check recent runs for a pipeline nothing here describes by name.",
+    )
+
+    async def _always_not_found(tenant_id, tool_name, tool_args):
+        return {"error": "Pipeline not found"}
+
+    async def _cant_improve(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None):
+        return tool_args  # Tier 2 also has nothing to go on
+
+    monkeypatch.setattr(executor_module, "_call_tool", _always_not_found)
+    monkeypatch.setattr(executor_module, "_adapt_step_args", _cant_improve)
+
+    outcome = await execute_next_step(task_id)
+    assert outcome["outcome"] == "step_failed"
+
+    step = await _fresh_step(step_id)
+    assert step.status == TaskStepStatus.FAILED
+    assert "Could not determine the real value for 'pipeline_id'" in step.error_message
+    assert "no match" in step.error_message
+    assert "Pipeline not found" in step.error_message  # the real underlying error is still present, not replaced
