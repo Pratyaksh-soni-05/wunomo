@@ -10,6 +10,196 @@ otherwise only in someone's head or a chat transcript.
 
 ---
 
+## 2026-08-16 — Findings 8/9's real root cause, argument resolution built (4 commits, UNVERIFIED), and a quota-estimate lesson
+
+### Context
+
+The user ran the first real end-to-end self-test walkthrough against the
+expanded `SELF_TEST_GUIDE.md`, logged 28 raw findings
+(`docs/context/WALKTHROUGH_FINDINGS_2026-08.md`), and asked for a
+diagnosis session on 7 of them before any fix. Findings 8/9 ("after
+Approve & Resume, the continue buttons don't come back") turned out to be
+the significant one — the investigation is what this whole session grew
+out of.
+
+### Done
+
+- **Diagnosed findings 8/9 to their real root cause, live, not from code
+  alone.** The buttons correctly do not reappear — `PAUSED_FAILED_STEP`
+  is genuinely not advanceable, by design. The real bug is upstream:
+  `task_planner.py`'s plan generation writes a step's entire `tool_args`
+  in one LLM call, before any earlier step (e.g. `list_data_sources`) has
+  actually run, so a step needing an ID discovered by an earlier step gets
+  a fabricated placeholder (`"source_id": "sales_orders_source_id"`)
+  instead of a real one. Reproduced live via a real Playwright-driven
+  task run, then confirmed via direct DB query — step 0's own persisted
+  `raw_result` contained the real UUID (`"id":
+  "2bc8a71d-c518-449d-aa87-bdb4f6e922df", "name": "Sales Orders"`) right
+  next to step 1's placeholder that never used it.
+- **Checked all three task shapes, not just the one that failed** — found
+  a second, worse pattern (call it "Pattern B"): `get_pipeline_run_history`
+  needs `pipeline_id`, and *no tool in the entire registered set* could
+  ever discover one — not "the shape doesn't call the discovery tool,"
+  there was no discovery tool to call, in any shape. Confirmed this isn't
+  theoretical: queried the real `tasks`/`task_steps` tables for the last 7
+  days of genuinely human-run tasks (filtering out the years of automated
+  pytest fixture noise in that table) and found exactly one real
+  completion ever, a maximally vague "help" goal that happened to only
+  need zero-argument tools. Every real run that named a specific pipeline
+  or source — including both of the user's own real Part C and Part D
+  self-test attempts — hit `PAUSED_FAILED_STEP`. This is the finding
+  behind the new Workflow Rule 10 below: stages 1–7 verified every piece
+  of the Tasks machinery without ever verifying that a real, non-trivial
+  plan could reach `COMPLETED`.
+- **Proposed and got approval for the fix design** before writing code
+  (execution-time resolution, not plan-time — the planner structurally
+  cannot know an ID that doesn't exist yet). Built as 4 separate,
+  individually-tested commits:
+  1. `fdd8ece` — new `list_pipelines` tool (closes Pattern B for
+     `DIAGNOSE_PIPELINE_FAILURE`/`INVESTIGATE_INCIDENT`). Found and fixed
+     a self-inflicted collision while getting this green: `DAGManager`
+     already had a `list_pipelines()` method backing the real
+     `GET /pipelines/` REST endpoint; the new one silently shadowed it
+     (Python keeps the later definition) until the existing
+     `test_list_pipelines_reports_next_run_and_last_run` caught it.
+  2. `d3c0fc3` — Tier 1 deterministic resolution: matches a step's
+     `_id`-shaped arg against a prior successful discovery step's real
+     `raw_result` by name/title, no LLM call. Two insertion points, not
+     one (verified by reading the full execution flow before writing
+     anything, per explicit instruction not to assume) — before the
+     approval gate is created (so what's displayed on the card is what
+     runs) and before an auto-run step's first attempt, mutually
+     exclusive by risk tier so a step is never resolved twice.
+  3. `ee9fa93` — Tier 2: `_adapt_step_args` (the existing LLM-correction
+     fallback) now sees the same accumulated prior real results, for the
+     ambiguous/uncovered cases Tier 1 didn't resolve.
+  4. `f68b62d` — honest failure messaging: a step that still can't be
+     resolved by either tier now says so explicitly, alongside (not
+     instead of) the real underlying tool error.
+- **Idempotency and human-edit-safety proven with real tests, not just
+  argued for.** `test_resolution_is_noop_on_resume` monkeypatches
+  `_resolve_step_args` to raise if called a second time, then resumes an
+  already-resolved step and asserts the executed args are byte-identical
+  to what was on the approval card. `test_resolution_skips_human_edited_args`
+  confirms a human-typed value that deterministic matching *could* have
+  "corrected" is left exactly as typed.
+- **Discovered mid-build that the full pytest suite itself spends real
+  Gemini quota** — `test_real_live_llm_generates_a_valid_reviewable_plan`
+  is a genuine, unmocked LLM call, and re-running the full suite after
+  each commit (standard practice, to confirm zero regressions) cost 5
+  real `task_planning` calls plus 1 `task_step_adapt` call across the
+  session — quota that hadn't been budgeted for, since the original
+  estimate given at the start of the build only counted the *intentional*
+  live verification work, not the incidental cost of routine suite
+  re-runs along the way. By the time this was noticed, 18 of ~20 daily
+  Gemini calls were gone and live verification (which needs 3+ fresh plan
+  generations minimum) hadn't started. Fixed properly, not just
+  noted: the test is now `@pytest.mark.live_llm`, excluded from the
+  default `pytest tests/` run (`pytest.ini`'s `addopts`), run explicitly
+  via `pytest tests/ -m live_llm` — see `docs/context/GOTCHAS.md`'s new
+  entry for the full detail and the confirmed collection counts
+  (397 default / 1 live-LLM-only).
+- **Verifying that fix surfaced a second, more unsettling discovery: the
+  "18 of ~20" quota number above was itself measured with a query that
+  can overcount.** The confirming default-suite run (397 passed, 0
+  deselected... 1 deselected) still added 3 new rows genuinely labeled
+  `provider='gemini'` in `llm_usage_events` — traced to
+  `test_llm_usage_metering.py`'s three tests, which mock `get_primary_llm`
+  (returns a fake object) rather than `invoke_llm()` itself, so
+  `invoke_llm()`'s real body — including its real usage-logging call —
+  still runs and writes a real "gemini"-labeled row for a call that never
+  touched the network. `SELECT count(*) ... WHERE provider='gemini'` (the
+  self-test guide's own documented zero-cost quota check) cannot tell
+  these apart from real spend. This means the "18 of ~20" figure reported
+  to the user mid-session was an upper bound, not an exact count — if the
+  backend suite had already run earlier the same day (plausible, given
+  how much of today's session involved it), the true remaining quota was
+  probably somewhat higher than stated. Reported to the user as soon as
+  found; did not unilaterally revise the earlier stop-for-quota decision
+  on the strength of this — that's the user's call, not something to
+  quietly resolve by continuing. Full detail in the same new
+  `docs/context/GOTCHAS.md` entry.
+
+### Decisions
+
+- **Deterministic resolution first, LLM-adapt only as fallback** — not
+  the user's own initial framing (which leaned toward feeding prior
+  results straight into the existing LLM-adapt call). Argued and agreed:
+  an LLM correcting a bad ID from a schema and an error message alone is
+  guessing blind with no way to know the real value; a deterministic
+  name-match against the actual fetched record is both free and more
+  reliable than a guess informed by the same data would be.
+- **Resolution happens before the approval gate renders, not after
+  approval, not lazily on resume.** This was the user's explicit,
+  named-as-most-important requirement: what's displayed on an approval
+  card and what later executes must be the same value, or approving
+  something becomes meaningless. Verified this holds by construction
+  (two mutually-exclusive, risk-tier-gated insertion points, no code path
+  that resolves a step twice) and by a test that would fail loudly if a
+  future refactor broke it.
+- **Human-edited steps are never touched, using the existing
+  `TaskStepSource.HUMAN_EDITED` provenance signal** — not new state, per
+  explicit instruction. A human who typed a value meant that value, even
+  if deterministic matching disagrees.
+- **Pattern B (`list_pipelines`) built and shipped as its own first
+  commit**, not folded into the resolution commits — it's a real,
+  separate gap (no tool could ever discover a pipeline ID, in any shape),
+  not a symptom of the same argument-threading bug the other three
+  commits fix.
+- **Stopped before live verification rather than push through on the
+  Groq fallback.** Quota was the explicit, pre-agreed stop condition
+  ("stop if it would exhaust quota mid-run... I'd rather resume tomorrow
+  than have a half-verified claim"). Given the choice explicitly, the
+  user chose to resume tomorrow on Gemini rather than let the three
+  required live runs land partly on the fallback provider.
+
+### Open
+
+- **Commits `fdd8ece`/`d3c0fc3`/`ee9fa93`/`f68b62d` are built, unit-
+  tested, and committed — but UNVERIFIED against the actual product.**
+  Per the new Workflow Rule 10 this same session added, none of this
+  counts as done until a real task reaches `COMPLETED` through the real
+  UI. `docs/context/STATUS_TABLE.md` has deliberately **not** been
+  updated to mark any of this fixed — see its own new note. Tomorrow's
+  first action, before anything else: the zero-cost quota check
+  (`SELECT provider, count(*) ... FROM llm_usage_events WHERE created_at
+  >= CURRENT_DATE`) — **treat the result as an upper bound, not exact**,
+  per the measurement-contamination discovery two bullets up; if the
+  backend suite hasn't run yet today, the count is clean. Then the three
+  live verifications to `COMPLETED`:
+  `sync_profile_quality` on the demo tenant, `diagnose_pipeline_failure`
+  using the new `list_pipelines` step (no ID supplied by the user),
+  `investigate_incident` against the real, never-yet-run HR Sync incident.
+  Screenshot every approval gate hit along the way and confirm the
+  `tool_args` shown are the resolved real values, not placeholders, and
+  that what executed matches what was displayed — the exact property the
+  idempotency tests already assert, now checked against the real running
+  app instead of a test double.
+- **`docs/context/WALKTHROUGH_FINDINGS_2026-08.md` items 8, 9, and 16
+  deliberately left `Open`, not `Closed`** — the original instruction was
+  to mark them closed as "not bugs," but that was written before the
+  quota discovery interrupted the plan. Given the fix itself isn't yet
+  live-verified, closing the findings that motivated it would be the same
+  kind of premature claim Workflow Rule 10 exists to prevent. Revisit
+  once tomorrow's live runs land.
+- **Findings 12, 13, 14, 15, 21, 18, 2/3, 20** from the original 7-item
+  diagnosis batch are unrelated to this fix and remain wherever that
+  diagnosis session left them — not touched this session.
+
+### Gotchas
+
+- See `docs/context/GOTCHAS.md`'s new entry for the pytest live-LLM-cost
+  discovery in full — not duplicated here.
+- Refactoring `_resolve_step_args`'s per-arg matching logic out into a
+  shared `_candidate_ids_for_arg()` helper (so the honest-failure-message
+  check in Commit 4 and the resolution itself in Commit 2 can never
+  disagree about what counts as a match) was decided *after* Commit 2
+  already shipped — worth doing this extraction up front next time a
+  "resolve X" and "explain why X wasn't resolved" pair is being built
+  together, rather than writing the check twice and unifying it later.
+
+---
+
 ## 2026-08-12 — Item 6 stage 7 wrap-up, a beginner self-test guide, and the first account-migration checkpoint
 
 ### Context
