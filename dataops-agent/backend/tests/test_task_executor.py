@@ -194,7 +194,7 @@ async def test_domain_error_triggers_exactly_one_adapt_call_then_succeeds(client
             return {"error": "Pipeline not found"}
         return {"pipeline_id": tool_args["pipeline_id"], "runs": []}
 
-    async def _fake_adapt(tenant_id, user_id, description, tool_name, tool_args, error_message):
+    async def _fake_adapt(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None):
         adapt_calls["n"] += 1
         assert "Pipeline not found" in error_message
         return {"pipeline_id": "corrected-id"}
@@ -222,7 +222,7 @@ async def test_domain_error_adapt_still_fails_exhausts_budget_with_one_adapt_cal
     async def _always_not_found(tenant_id, tool_name, tool_args):
         return {"error": "Pipeline not found"}
 
-    async def _fake_adapt(tenant_id, user_id, description, tool_name, tool_args, error_message):
+    async def _fake_adapt(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None):
         adapt_calls["n"] += 1
         return tool_args  # can't actually fix a genuinely deleted pipeline
 
@@ -238,6 +238,63 @@ async def test_domain_error_adapt_still_fails_exhausts_budget_with_one_adapt_cal
     assert step.status == TaskStepStatus.FAILED
     assert "Pipeline not found" in step.error_message
     assert task.status == TaskStatus.PAUSED_FAILED_STEP
+
+
+@pytest.mark.asyncio
+async def test_adapt_receives_accumulated_prior_step_results(client, monkeypatch):
+    """Tier 2 (2026-08): when Tier 1's deterministic match doesn't apply
+    (here, a step with no earlier SUCCEEDED discovery step to match
+    against at all -- the args stay whatever they were seeded with), the
+    LLM-adapt fallback must still be handed this task's own earlier
+    successful steps' real raw_results, not just the schema + error
+    message it always had. This only proves the plumbing reaches
+    _adapt_step_args intact -- see test_task_executor_resolution.py for
+    Tier 1's own deterministic-match coverage."""
+    tenant_id, user_id = await _register(client, "execadaptcontext")
+    async with AsyncSessionLocal() as db:
+        task = Task(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
+            goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
+            status=TaskStatus.QUEUED, step_budget_max=20,
+        )
+        db.add(task)
+        await db.flush()
+        earlier = TaskStep(
+            id=str(uuid.uuid4()), task_id=task.id, step_index=0,
+            description="check health", source=TaskStepSource.LLM_PLANNED,
+            tool_name="get_system_health", tool_args={},
+            status=TaskStepStatus.SUCCEEDED,
+            raw_result={"note": "the real prior result the fallback should see"},
+        )
+        step = TaskStep(
+            id=str(uuid.uuid4()), task_id=task.id, step_index=1,
+            description="check history", source=TaskStepSource.LLM_PLANNED,
+            tool_name="get_pipeline_run_history", tool_args={"pipeline_id": "bad-id"},
+            status=TaskStepStatus.PENDING, depends_on_step_index=0,
+        )
+        db.add(earlier)
+        db.add(step)
+        await db.commit()
+        task_id, step_id = task.id, step.id
+
+    async def _not_found(tenant_id, tool_name, tool_args):
+        return {"error": "Pipeline not found"}
+
+    seen = {}
+
+    async def _fake_adapt(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None):
+        seen["prior_results"] = prior_results
+        return tool_args
+
+    monkeypatch.setattr(executor_module, "_call_tool", _not_found)
+    monkeypatch.setattr(executor_module, "_adapt_step_args", _fake_adapt)
+
+    await execute_next_step(task_id)
+
+    assert seen["prior_results"] == [
+        {"step_index": 0, "tool_name": "get_system_health",
+         "result": {"note": "the real prior result the fallback should see"}},
+    ]
 
 
 @pytest.mark.asyncio

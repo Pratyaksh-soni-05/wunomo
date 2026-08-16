@@ -195,24 +195,47 @@ async def _resolve_step_args(db, task_id: str, step: TaskStep) -> dict:
     return resolved
 
 
+_ADAPT_PRIOR_RESULTS_MAX_CHARS = 3000  # keeps the adapt prompt bounded regardless of how much a discovery step returned
+
+
 async def _adapt_step_args(
     tenant_id: str, user_id: str, description: str, tool_name: str, tool_args: dict, error_message: str,
+    prior_results: list[dict] | None = None,
 ) -> dict:
     """One LLM call: shows the real failure to the model and asks for
     corrected arguments. Falls back to the original arguments (a no-op
     "adaptation") if the LLM's response isn't a usable JSON object, or if
     the tenant is out of AI-credit quota -- adaptation is a nice-to-have
-    recovery step, not something that should itself crash a task."""
+    recovery step, not something that should itself crash a task.
+
+    Tier 2 fallback (2026-08): only reached when Tier 1's deterministic
+    match (_resolve_step_args) was ambiguous or didn't apply -- so this is
+    already the harder case, not the common one. prior_results (this
+    task's own earlier successful steps, e.g. a list_data_sources call's
+    real, fetched records) is given directly, for the same reason Tier 1
+    reads raw_result instead of guessing: an LLM correcting a wrong ID
+    from the schema and an error message alone is guessing blind, with no
+    way to know what the real ID actually is unless shown it."""
     quota = await get_quota_status(tenant_id, "ai_credits")
     if quota["status"] == "exceeded":
         return tool_args
 
     schema = tool_schema_for_prompt(tool_name)
+    context = ""
+    if prior_results:
+        text = json.dumps(prior_results, default=str)
+        if len(text) > _ADAPT_PRIOR_RESULTS_MAX_CHARS:
+            text = text[:_ADAPT_PRIOR_RESULTS_MAX_CHARS] + "... (truncated)"
+        context = (
+            f"\nReal results from earlier steps in this same task (use these to find "
+            f"the correct real value -- do not guess a new placeholder):\n{text}\n"
+        )
     prompt = (
         f'A task step just failed. Step: "{description}"\n'
         f"Tool: {tool_name}\n"
         f"Arguments used: {json.dumps(tool_args)}\n"
-        f"Real error returned: {error_message}\n\n"
+        f"Real error returned: {error_message}\n"
+        f"{context}\n"
         f"Tool argument schema: {json.dumps(schema)}\n\n"
         "Propose corrected arguments as a JSON object matching the schema above that "
         "might succeed instead, based on the real error. If you cannot improve on the "
@@ -611,6 +634,16 @@ async def execute_next_step(task_id: str) -> dict:
         # already reflects any attempt that happened before the pause
         # (see the quota_paused branch below).
         starting_attempt = (step.attempt_count or 0) + 1
+        # Tier 2 fallback context (see _adapt_step_args) -- gathered here,
+        # inside the transaction, since the attempt loop below runs
+        # outside any DB session. Only earlier steps that actually
+        # succeeded, in order; a step still PENDING/FAILED has nothing
+        # trustworthy to contribute.
+        prior_results = [
+            {"step_index": s.step_index, "tool_name": s.tool_name, "result": s.raw_result}
+            for s in sorted(all_steps.values(), key=lambda s: s.step_index)
+            if s.status == TaskStepStatus.SUCCEEDED and s.step_index < step.step_index
+        ]
         await db.commit()
 
     # The attempt loop runs outside any single DB transaction -- each
@@ -642,6 +675,7 @@ async def execute_next_step(task_id: str) -> dict:
                     break
                 current_args = await _adapt_step_args(
                     tenant_id, task_user_id, description, tool_name, current_args, last_error,
+                    prior_results=prior_results,
                 )
                 adapted_once = True
             continue
