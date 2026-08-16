@@ -179,6 +179,7 @@ async def test_successful_generation_persists_a_real_reviewable_plan(client, mon
 
 
 @pytest.mark.asyncio
+@pytest.mark.live_llm
 async def test_real_live_llm_generates_a_valid_reviewable_plan(client):
     """Definitive live proof, not a mock: a real LLM call producing a real
     plan whose steps genuinely reference the diagnose_pipeline_failure
