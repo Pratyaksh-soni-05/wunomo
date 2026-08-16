@@ -1,12 +1,17 @@
 "use client";
 
 import { useRouter, usePathname } from "next/navigation";
+import { isAxiomDomain } from "./navItems";
 
 export function AxiomFab() {
   const router = useRouter();
   const pathname = usePathname();
 
-  if (pathname === "/chat") return null;
+  // Hides across all of AXIOM's own domain (chat + Tasks, 2026-08 IA
+  // restructure), not just the chat route itself - the sidebar's own
+  // back-link already covers "how do I get to AXIOM" once you're on a
+  // Tasks screen, so a second floating shortcut there is redundant.
+  if (isAxiomDomain(pathname)) return null;
 
   return (
     <button className="axiom-fab" onClick={() => router.push("/chat")}>
