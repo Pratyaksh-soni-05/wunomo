@@ -13,6 +13,11 @@ preserved exactly, not fixed, not interpreted, not merged, not resolved
 into proposed solutions. Numbering matches the docx exactly (1–28) —
 later sessions should cite findings by this number.
 
+**Items 29+ are not from the docx.** They're findings surfaced by later
+sessions working in this codebase (each row says which one), appended to
+keep one single numbered list rather than a second competing index. Same
+rules apply: logged, not fixed, not interpreted beyond what's stated.
+
 **Class** is a light categorization only (Bug / Feature / Untested /
 Design / Unclear) — it does not imply anything about severity, root
 cause, or fix approach. **Guide section** is filled in only where the
@@ -52,6 +57,8 @@ for every item.
 | 26 | approvals: check from different accounts for cicd action/ agent action | — | Untested | image19.png | Open |
 | 27 | The self test guide has nothing on testing the CICD and automations feature please see into that too. | — | Feature | none identified | Open |
 | 28 | ALL OF THIS HAS TO BE AUTOMATED the user upload data in the axiom chat is what we want and then the ai employee carries out all the remaining steps on its opwnm is what the main idea is just like claude code try to make the possible . make it chat friendly all the major working the user does while chatting with axiom if data needed axiom asks for it user uploads the data csv and axiom puts it in datasources and does profiling and all other steps on its own this is what we want fully automated process to reduce human effort. | — | Feature | none identified | Open |
+| 29 | Nav items are not role-filtered — every logged-in user sees the identical sidebar regardless of role (a Viewer sees Team, Billing, Settings, and CI/CD listed exactly like an Owner does) and only hits a wall once they actually try to use something inside those screens. Found while investigating the sidebar's real role-gating for the 2026-08 IA restructure proposal — confirmed directly by reading `navItems.tsx`/`Sidebar.tsx`/`layout.tsx`, none of which do any role-based filtering; all real enforcement is one layer down, at the page/control level. Not fixed — logged only, per instruction. | — | Bug | none | Open |
+| 30 | Governance's own **Audit Log** tab (a real, live tab inside the Governance screen) has the identical name as the sidebar's separate **Audit Logs** item (a stub page, unrelated screen) — a genuine naming collision between two different things. Already documented once, in passing, in `docs/SELF_TEST_GUIDE.md` §11's own note about this exact collision. Logged here as its own findings-index item per instruction — explicitly not renamed this session. | §11 | Design | none | Open |
 
 ---
 
