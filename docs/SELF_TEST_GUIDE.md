@@ -411,8 +411,21 @@ with you reviewing and approving each risky step before it happens.
 Nothing you've done so far in this guide used AXIOM's AI at all — this is
 the first part that spends real AI calls (see Section 5 for exact costs).
 
-**3.12** In the left sidebar, under **WORKSPACE**, click **AXIOM** (it has
-a **Live** badge next to it). This opens the chat screen.
+**3.12** In the left sidebar, under **WORKSPACE**, click **AI Employees**.
+
+**What you should see:** a grid of AI employee cards — **AXIOM** is the
+only one marked **Active**; the rest (LEDGER, DEPLOY, INSIGHT, SENTINEL,
+PULSE) are labeled **Coming Soon** and have no button. On the AXIOM card,
+click **Open AXIOM →**.
+
+**What you should see now:** you land on the chat screen, and the sidebar
+itself changes — the full workspace nav list crossfades out and is
+replaced by just two items, **AXIOM** (with its **Live** badge) and
+**Tasks**. At the top of the sidebar, where **Production** used to sit, a
+**← Back to Workspace** link now appears — that's your way out of AXIOM's
+domain from anywhere inside it, not just from this screen. (This is a
+2026-08 change — AXIOM used to be a direct top-level sidebar item; it's
+now nested behind AI Employees like every other AI employee will be.)
 
 ![AXIOM chat screen with the "+ Start a Task" button](self_test_assets/01-chat-start-task-button.png)
 
@@ -716,10 +729,14 @@ both tabs share the same login storage.
 3. Click **Accept invite & join**.
 
 **Now, still in that Incognito window, as the Viewer:**
-1. Click **AXIOM** in the sidebar → **+ Start a Task**.
-2. Type: `Sync and profile my Sales Orders source, then run quality checks on it.`
-3. Pick task type **"Sync, profile & quality-check a source."**
-4. Click **Generate Plan**, then **View progress**.
+1. In the sidebar, click **AI Employees**, then on the AXIOM card click
+   **Open AXIOM →** (same detour as §3.12 — the Viewer lands on the
+   dashboard fresh, so AXIOM isn't in their sidebar until they go through
+   AI Employees either, same as anyone else).
+2. Click **+ Start a Task**.
+3. Type: `Sync and profile my Sales Orders source, then run quality checks on it.`
+4. Pick task type **"Sync, profile & quality-check a source."**
+5. Click **Generate Plan**, then **View progress**.
 
 **Cost: 1 real AI call** (occasionally 2, same rule as 3.16) — this comes
 out of the same shared daily quota as everything else in this guide, not
@@ -728,7 +745,7 @@ a separate per-user allowance.
 **What you should see:** this all works completely normally — a Viewer
 can create a plan, edit it, and approve it, exactly like before.
 
-5. Click **Approve Plan**, then **Run to completion**.
+6. Click **Approve Plan**, then **Run to completion**.
 
 **What you should see now — the real point of this test:** the first
 step that tries to actually *do* something (like `sync_source`) fails
@@ -1192,9 +1209,6 @@ after Section 5/6 and still have exercised everything load-bearing.
 
 These are left out on purpose, not forgotten:
 
-- **AI Employees** — a static roadmap grid (only AXIOM is real; the rest
-  are marked "Coming Soon"). One real link on the whole screen ("Open
-  AXIOM"), already covered via the sidebar itself.
 - **Billing** — the entire screen is read-only informational copy
   ("handled manually... contact us," "coming soon"). There is no button
   anywhere on it to click.
