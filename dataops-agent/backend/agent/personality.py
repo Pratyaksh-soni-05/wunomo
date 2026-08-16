@@ -57,7 +57,7 @@ RISK_ACTIONS = {
         "execute_sql_transform", "run_python_transform",
     ],
     "low": [
-        "list_data_sources", "preview_source_data", "detect_schema_drift",
+        "list_data_sources", "list_pipelines", "preview_source_data", "detect_schema_drift",
         "generate_sql_transform", "get_quality_report", "list_business_rules",
         "get_pipeline_run_history",
         "check_freshness", "detect_anomalies", "list_open_incidents",

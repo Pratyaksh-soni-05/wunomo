@@ -1,0 +1,145 @@
+"""Tier 1 argument resolution (2026-08 — see docs/context/SESSION_LOG.md
+for the full diagnosis and docs/context/WALKTHROUGH_FINDINGS_2026-08.md
+items 8/9). Two properties this suite exists specifically to guard,
+per explicit instruction that a future refactor could otherwise break
+silently without any test noticing:
+
+1. Idempotency — a step's args are resolved at most once, ever. Re-
+   entering execute_next_step() on a resume must not re-run resolution,
+   because the approval card the human reviewed already showed the
+   resolved value; re-resolving afterward would mean approving one thing
+   and executing another, exactly the failure mode this design exists to
+   prevent.
+2. Human-edited steps are never touched by resolution, even when a
+   deterministic match is available and the human's value looks wrong —
+   a human who typed a specific value meant that value.
+"""
+import uuid
+
+import pytest
+from sqlalchemy import select
+
+import modules.orchestration.task_executor as executor_module
+from database import AsyncSessionLocal
+from modules.orchestration.task_executor import execute_next_step, resume_task
+from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus
+
+
+async def _register(client, prefix="taskresolve"):
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": f"{prefix}-{uuid.uuid4().hex[:8]}@example.com",
+        "password": "test1234", "full_name": "Task Resolution Test",
+        "tenant_name": f"Task Resolution Corp {uuid.uuid4().hex[:6]}",
+    })
+    body = reg.json()
+    return body["tenant_id"], body["user_id"]
+
+
+async def _seed_task_with_discovery(
+    tenant_id, user_id, *, discovery_raw_result, discovery_tool_name,
+    step_tool_name, step_tool_args, step_description, step_source=TaskStepSource.LLM_PLANNED,
+):
+    """A two-step task: a discovery step already SUCCEEDED with a real
+    raw_result, and the dependent step PENDING right behind it — matching
+    exactly the shape execute_next_step() picks up next (lowest step_index
+    PENDING step whose depends_on_step_index is already SUCCEEDED)."""
+    async with AsyncSessionLocal() as db:
+        task = Task(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
+            goal="test", task_shape=TaskShape.SYNC_PROFILE_QUALITY,
+            status=TaskStatus.RUNNING, step_budget_max=20,
+        )
+        db.add(task)
+        await db.flush()
+        discovery_step = TaskStep(
+            id=str(uuid.uuid4()), task_id=task.id, step_index=0,
+            description="Discover the real entities.", source=TaskStepSource.LLM_PLANNED,
+            tool_name=discovery_tool_name, tool_args={},
+            status=TaskStepStatus.SUCCEEDED, raw_result=discovery_raw_result,
+            attempt_count=1,
+        )
+        step = TaskStep(
+            id=str(uuid.uuid4()), task_id=task.id, step_index=1,
+            description=step_description, source=step_source,
+            tool_name=step_tool_name, tool_args=step_tool_args,
+            status=TaskStepStatus.PENDING, depends_on_step_index=0,
+        )
+        db.add(discovery_step)
+        db.add(step)
+        await db.commit()
+        return task.id, step.id
+
+
+async def _fresh_step(step_id):
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
+        return r.scalar_one()
+
+
+@pytest.mark.asyncio
+async def test_resolution_is_noop_on_resume(client, monkeypatch):
+    tenant_id, user_id = await _register(client, "resolvenoop")
+    task_id, step_id = await _seed_task_with_discovery(
+        tenant_id, user_id,
+        discovery_raw_result={"sources": [{"id": "src-real-123", "name": "Sales Orders"}], "count": 1},
+        discovery_tool_name="list_data_sources",
+        step_tool_name="sync_source",
+        step_tool_args={"source_id": "sales_orders_source_id"},  # the real, observed placeholder shape
+        step_description="Trigger an incremental sync for the Sales Orders data source.",
+    )
+
+    outcome = await execute_next_step(task_id)
+    assert outcome["outcome"] == "blocked_needs_approval"
+
+    step = await _fresh_step(step_id)
+    # Tier 1 resolved it before the approval card could ever render this
+    # value — this is what the human would have seen on the card.
+    assert step.tool_args["source_id"] == "src-real-123"
+    approved_args = dict(step.tool_args)
+
+    # Prove resolution does not fire a second time on resume. If it did,
+    # this monkeypatch makes the failure obvious instead of silently
+    # producing the same (coincidentally correct) value twice.
+    async def _poison(*args, **kwargs):
+        raise AssertionError("_resolve_step_args was called again on resume — idempotency broken")
+    monkeypatch.setattr(executor_module, "_resolve_step_args", _poison)
+
+    seen_args = {}
+
+    async def _capture(tenant_id, tool_name, tool_args):
+        seen_args.update(tool_args)
+        return {"status": "synced", "rows": 5}
+    monkeypatch.setattr(executor_module, "_call_tool", _capture)
+
+    result = await resume_task(task_id, resolved_by=str(uuid.uuid4()))
+    assert result["outcome"] == "step_succeeded"
+
+    # What executed is byte-identical to what was displayed on the card —
+    # the entire point of resolving before the gate, not after it.
+    assert seen_args == approved_args
+    step = await _fresh_step(step_id)
+    assert step.tool_args["source_id"] == "src-real-123"
+
+
+@pytest.mark.asyncio
+async def test_resolution_skips_human_edited_args(client):
+    tenant_id, user_id = await _register(client, "resolvehumanedit")
+    task_id, step_id = await _seed_task_with_discovery(
+        tenant_id, user_id,
+        discovery_raw_result={"sources": [{"id": "src-real-123", "name": "Sales Orders"}], "count": 1},
+        discovery_tool_name="list_data_sources",
+        step_tool_name="sync_source",
+        # Deliberately a value that does NOT match anything real, and that
+        # a deterministic pass over this description WOULD "correct" to
+        # src-real-123 if it were allowed to run. A human is presumed to
+        # have meant this value, wrong-looking or not.
+        step_tool_args={"source_id": "human-typed-value"},
+        step_description="Trigger an incremental sync for the Sales Orders data source.",
+        step_source=TaskStepSource.HUMAN_EDITED,
+    )
+
+    outcome = await execute_next_step(task_id)
+    assert outcome["outcome"] == "blocked_needs_approval"
+
+    step = await _fresh_step(step_id)
+    assert step.tool_args["source_id"] == "human-typed-value"

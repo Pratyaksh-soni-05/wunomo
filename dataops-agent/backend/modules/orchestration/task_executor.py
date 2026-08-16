@@ -116,6 +116,85 @@ async def _caller_still_authorized(db, task: Task, tool_name: str) -> tuple[bool
     return True, None
 
 
+
+# Deterministic argument resolution (Tier 1, 2026-08 — see
+# docs/context/SESSION_LOG.md for the full diagnosis). Which target arg
+# key maps to which discovery tool's output is explicit and small rather
+# than a generic "find any list of dicts" scan, so a name collision across
+# unrelated entity types (a source and a pipeline sharing a name) can't
+# cross-contaminate a resolution. Extend this dict, not the matching
+# logic, when a new discovery tool + entity type is added. Field names
+# genuinely differ per tool (confirmed by reading each one, not assumed):
+# list_data_sources/list_pipelines wrap in {"sources"/"pipelines": [...]},
+# id key "id", name key "name"; list_open_incidents returns a bare list
+# (cap_tool_result only wraps empty results), id key "incident_id", name
+# key "title" — not "id"/"name" like the other two.
+_ARG_RESOLUTION_SOURCES = {
+    "source_id": {"discovery_tool": "list_data_sources", "list_key": "sources", "id_key": "id", "name_key": "name"},
+    "pipeline_id": {"discovery_tool": "list_pipelines", "list_key": "pipelines", "id_key": "id", "name_key": "name"},
+    "incident_id": {"discovery_tool": "list_open_incidents", "list_key": None, "id_key": "incident_id", "name_key": "title"},
+}
+
+
+async def _resolve_step_args(db, task_id: str, step: TaskStep) -> dict:
+    """Tier 1 (deterministic): the task planner generates a step's entire
+    tool_args upfront, before any earlier step has actually run — it
+    structurally cannot know a real ID a prior discovery step (e.g.
+    list_data_sources) hasn't fetched yet, so it writes a plausible-looking
+    placeholder instead (e.g. "sales_orders_source_id"), which then fails
+    every time. This replaces that placeholder with the real ID by
+    matching the target entity's name/title against THIS step's own
+    human-readable description — no LLM call, and more reliable than one,
+    since it reads the actual fetched record rather than guessing from a
+    schema + error message. Falls through untouched (Tier 2's
+    _adapt_step_args gets a shot on failure) for any arg not covered by
+    _ARG_RESOLUTION_SOURCES, or where the match is ambiguous (0 or 2+
+    candidates) — never guesses between multiple plausible matches.
+
+    Callers are responsible for never invoking this on a human-edited step
+    (source == HUMAN_EDITED) — a human who typed a specific value meant
+    that value, deterministic "correction" or not. Also relied on for
+    idempotency: both call sites additionally guard so a given step's args
+    are resolved at most once, ever (see the risk-tier split in
+    execute_next_step) — this function itself doesn't re-check that, its
+    callers own that guarantee.
+    """
+    tool_args = dict(step.tool_args or {})
+    description = (step.description or "").lower()
+    resolved = dict(tool_args)
+
+    for arg_key, spec in _ARG_RESOLUTION_SOURCES.items():
+        if arg_key not in tool_args:
+            continue
+        r = await db.execute(
+            select(TaskStep).where(
+                TaskStep.task_id == task_id,
+                TaskStep.tool_name == spec["discovery_tool"],
+                TaskStep.status == TaskStepStatus.SUCCEEDED,
+            )
+        )
+        discovery_steps = r.scalars().all()
+
+        candidates = set()
+        for ds in discovery_steps:
+            raw = ds.raw_result
+            records = raw if spec["list_key"] is None else (raw or {}).get(spec["list_key"])
+            if not isinstance(records, list):
+                continue
+            for rec in records:
+                if not isinstance(rec, dict):
+                    continue
+                name, rid = rec.get(spec["name_key"]), rec.get(spec["id_key"])
+                if name and rid and str(name).lower() in description:
+                    candidates.add(rid)
+
+        if len(candidates) == 1:
+            resolved[arg_key] = candidates.pop()
+        # 0 or 2+ candidates: leave as-is, Tier 2 gets a shot on failure.
+
+    return resolved
+
+
 async def _adapt_step_args(
     tenant_id: str, user_id: str, description: str, tool_name: str, tool_args: dict, error_message: str,
 ) -> dict:
@@ -453,6 +532,19 @@ async def execute_next_step(task_id: str) -> dict:
         # have granted one), so gating is unconditional on tier: medium
         # or high always requires approval, low never does.
         if get_risk_level(step.tool_name) in ("medium", "high") and step.approval_request_id is None:
+            # Tier 1 resolution — must happen before the ApprovalRequest is
+            # created, not after: what gets displayed on the approval card
+            # (action_args below, and the same TaskStep row the step-
+            # timeline table renders) has to already be the real, final
+            # value the tool will actually be called with. Resolving later
+            # (e.g. lazily in resume_task) would mean approving one thing
+            # and executing another. Guarded by approval_request_id is None
+            # above (this whole block only runs once per step, ever) and
+            # by risk tier here in _resolve_step_args's sibling call below
+            # — together these guarantee a step's args are resolved
+            # exactly once, never re-touched on a resume.
+            if step.source != TaskStepSource.HUMAN_EDITED:
+                step.tool_args = await _resolve_step_args(db, task_id, step)
             approval = await PolicyEngine(task.tenant_id).create_request(
                 user_id=task.user_id, session_id=task.id, action_name=step.tool_name,
                 action_args=step.tool_args or {}, risk_level=get_risk_level(step.tool_name),
@@ -493,6 +585,21 @@ async def execute_next_step(task_id: str) -> dict:
             # cached replay -- so it re-validates its own preconditions
             # and, one line above, _caller_still_authorized() already
             # re-validated the initiating user's authority for real.
+
+        # Tier 1 resolution for auto-run (low-risk) steps — the sibling of
+        # the approval-gate call above. Explicitly excludes medium/high
+        # risk here (rather than relying on "they never reach this branch
+        # unresolved" implicitly) so a step's args are resolved at exactly
+        # one of these two call sites, never both: a medium/high-risk step
+        # was already resolved before its approval card rendered, and must
+        # not be silently re-resolved on the resume pass just because it
+        # happens to also have attempt_count == 0 here.
+        if (
+            (step.attempt_count or 0) == 0
+            and get_risk_level(step.tool_name) not in ("medium", "high")
+            and step.source != TaskStepSource.HUMAN_EDITED
+        ):
+            step.tool_args = await _resolve_step_args(db, task_id, step)
 
         step.status = TaskStepStatus.RUNNING
         step.started_at = step.started_at or datetime.utcnow()

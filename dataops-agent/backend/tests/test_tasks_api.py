@@ -197,7 +197,10 @@ async def test_real_live_llm_generates_a_valid_reviewable_plan(client):
     assert body["status"] == "draft_plan"
     assert 1 <= len(body["steps"]) <= 8
 
-    allowed_tools = {"get_pipeline_run_history", "check_freshness", "get_cicd_status", "get_system_health"}
+    allowed_tools = {
+        "list_pipelines", "get_pipeline_run_history", "check_freshness",
+        "get_cicd_status", "get_system_health",
+    }
     for step in body["steps"]:
         assert step["tool_name"] in allowed_tools
         assert step["source"] == "llm_planned"
