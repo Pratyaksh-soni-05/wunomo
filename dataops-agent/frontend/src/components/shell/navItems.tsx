@@ -1,11 +1,16 @@
 import { ReactNode } from "react";
 
+export type NavDomain = "workspace" | "axiom";
+
 export interface NavItem {
   slug: string;
   label: string;
   icon: ReactNode;
   phase?: number;
   badge?: { text: string; variant?: "count" | "danger" | "warning" | "live" };
+  /** Which sidebar mode this item belongs to (2026-08 IA restructure —
+   * see docs/context/SESSION_LOG.md). Every item needs exactly one. */
+  domain: NavDomain;
 }
 
 export interface NavSection {
@@ -27,6 +32,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "dashboard",
         label: "Dashboard",
         phase: 9,
+        domain: "workspace",
         icon: icon(
           <>
             <rect x="3" y="3" width="7" height="7" rx="1" />
@@ -45,6 +51,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "ai-employees",
         label: "AI Employees",
         phase: 18,
+        domain: "workspace",
         icon: icon(
           <>
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -54,16 +61,28 @@ export const NAV_SECTIONS: NavSection[] = [
           </>
         ),
       },
+    ],
+  },
+  {
+    // Unlabeled on purpose, same convention as the Dashboard section above -
+    // this is AXIOM's own domain (2026-08 IA restructure), only ever shown
+    // by the AXIOM-mode sidebar (see AXIOM_NAV_SECTIONS below), where the
+    // back-link header already establishes the context. A visible "AXIOM"
+    // label here would be redundant with that header.
+    label: null,
+    items: [
       {
         slug: "chat",
         label: "AXIOM",
         phase: 10,
         badge: { text: "Live", variant: "live" },
+        domain: "axiom",
         icon: icon(<path d="M12 2a8 8 0 0 1 8 8v12l-4-4H4a8 8 0 0 1 0-16" />),
       },
       {
         slug: "tasks",
         label: "Tasks",
+        domain: "axiom",
         icon: icon(
           <>
             <rect x="3" y="4" width="18" height="18" rx="2" />
@@ -83,6 +102,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "sources",
         label: "Data Sources",
         phase: 12,
+        domain: "workspace",
         icon: icon(
           <>
             <ellipse cx="12" cy="5" rx="9" ry="3" />
@@ -95,6 +115,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "catalog",
         label: "Data Catalog",
         phase: 14,
+        domain: "workspace",
         icon: icon(
           <>
             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -106,12 +127,14 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "pipelines",
         label: "Pipelines",
         phase: 12,
+        domain: "workspace",
         icon: icon(<polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />),
       },
       {
         slug: "transforms",
         label: "Transforms",
         phase: 14,
+        domain: "workspace",
         icon: icon(
           <>
             <polyline points="16 18 22 12 16 6" />
@@ -128,12 +151,14 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "quality",
         label: "Quality",
         phase: 12,
+        domain: "workspace",
         icon: icon(<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />),
       },
       {
         slug: "incidents",
         label: "Incidents",
         phase: 12,
+        domain: "workspace",
         icon: icon(
           <>
             <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
@@ -146,6 +171,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "governance",
         label: "Governance",
         phase: 12,
+        domain: "workspace",
         icon: icon(
           <>
             <circle cx="12" cy="5" r="2" />
@@ -160,11 +186,13 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         slug: "automations",
         label: "Automations",
+        domain: "workspace",
         icon: icon(<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />),
       },
       {
         slug: "cicd",
         label: "CI / CD",
+        domain: "workspace",
         icon: icon(
           <>
             <circle cx="18" cy="18" r="3" />
@@ -178,6 +206,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "approvals",
         label: "Approvals",
         phase: 12,
+        domain: "workspace",
         icon: icon(
           <>
             <polyline points="9 11 12 14 22 4" />
@@ -193,6 +222,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         slug: "analytics",
         label: "Analytics",
+        domain: "workspace",
         icon: icon(
           <>
             <line x1="18" y1="20" x2="18" y2="10" />
@@ -209,6 +239,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         slug: "audit",
         label: "Audit Logs",
+        domain: "workspace",
         icon: icon(
           <>
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -222,6 +253,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "team",
         label: "Team",
         phase: 17,
+        domain: "workspace",
         icon: icon(
           <>
             <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -235,6 +267,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "billing",
         label: "Billing",
         phase: 17,
+        domain: "workspace",
         icon: icon(
           <>
             <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
@@ -246,6 +279,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "settings",
         label: "Settings",
         phase: 17,
+        domain: "workspace",
         icon: icon(
           <>
             <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
@@ -257,4 +291,31 @@ export const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
+// Union of every item regardless of domain - unchanged in shape/order from
+// before the 2026-08 IA restructure. CommandPalette (Ctrl+K search) and
+// Topbar (breadcrumb label lookup) both depend on this staying the full
+// set - never filter it down to one domain.
 export const ALL_NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap((s) => s.items);
+
+function sectionsForDomain(domain: NavDomain): NavSection[] {
+  return NAV_SECTIONS
+    .map((s) => ({ ...s, items: s.items.filter((i) => i.domain === domain) }))
+    .filter((s) => s.items.length > 0);
+}
+
+/** The default sidebar - everything except AXIOM's own chat/Tasks domain. */
+export const WORKSPACE_NAV_SECTIONS: NavSection[] = sectionsForDomain("workspace");
+
+/** Shown only while inside AXIOM's own routes (see isAxiomDomain below). */
+export const AXIOM_NAV_SECTIONS: NavSection[] = sectionsForDomain("axiom");
+
+/**
+ * Route -> sidebar-domain mapping (2026-08 IA restructure). Single source
+ * of truth - Sidebar.tsx and AxiomFab.tsx both call this rather than each
+ * hand-rolling their own path check, so the two can't drift out of sync.
+ * Prefix match (not exact), so /tasks/[id] deep links count as AXIOM's
+ * domain the same as the /tasks list itself.
+ */
+export function isAxiomDomain(pathname: string): boolean {
+  return pathname.startsWith("/chat") || pathname.startsWith("/tasks");
+}

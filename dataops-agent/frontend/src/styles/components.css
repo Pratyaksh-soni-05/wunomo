@@ -369,7 +369,26 @@ tr.selected td { background: var(--ocean-50) !important; }
 }
 .sidebar-workspace-sel:hover { background: rgba(255,255,255,0.1); }
 .sidebar-workspace-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* AXIOM-mode escape hatch (2026-08 IA restructure) - occupies the same slot
+   as .sidebar-workspace-sel above, never both at once. Uses --on-dark, not
+   --surface or a bare light color, since this sits on the permanently-dark
+   sidebar background (see the existing --on-dark gotcha in GOTCHAS.md). */
+.sidebar-back-link {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 9px;
+  border-radius: var(--radius-sm); background: none; border: none; cursor: pointer;
+  color: var(--on-dark); font-size: 12px; font-weight: 600; transition: background var(--t-fast);
+}
+.sidebar-back-link:hover { background: rgba(255,255,255,0.1); }
+.sidebar-back-link svg { flex-shrink: 0; }
+.sidebar.collapsed .sidebar-back-link span { display: none; }
+.sidebar.collapsed .sidebar-back-link { justify-content: center; padding: 7px; }
 .sidebar-nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px 0; }
+/* Workspace<->AXIOM crossfade (2026-08 IA restructure). Only ever toggled
+   by Sidebar.tsx's own post-mount domain-change effect - never applied on
+   first render, so a deep link/hard refresh paints at full opacity with no
+   flash. See Sidebar.tsx's FADE_OUT_MS comment for the full sequence. */
+.sidebar-nav-content { opacity: 1; transition: opacity var(--t-fast); }
+.sidebar-nav-content.fading { opacity: 0; }
 .sidebar-section { padding: 16px 12px 4px; }
 .sidebar-section-label { font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.08em; }
 .sidebar-item {
