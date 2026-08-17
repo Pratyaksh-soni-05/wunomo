@@ -136,18 +136,17 @@ _ARG_RESOLUTION_SOURCES = {
 }
 
 
-async def _candidate_ids_for_arg(db, task_id: str, step: TaskStep, arg_key: str) -> set:
-    """The real ids _resolve_step_args (Tier 1) or _unresolved_reference_
-    note (Commit 4) would consider a match for arg_key, given this task's
-    own earlier discovery steps and this step's own description. Shared
-    so both "resolve it" and "explain why it's still wrong" read the
-    identical evidence — a message that says "no source matched" must be
-    checking the same thing resolution itself checked, not a second,
-    possibly-inconsistent notion of a match."""
+async def _discovered_records_for_arg(db, task_id: str, arg_key: str) -> list[dict]:
+    """Every real {"name": ..., "id": ...} pair a prior SUCCEEDED discovery
+    step for this arg_key actually returned, across the whole task so far
+    — the one piece of raw evidence both _candidate_ids_for_arg (Tier 1,
+    filtered to a single step's own description below) and
+    _all_discovered_ids_for_arg (Tier 2's guardrail, unfiltered) are built
+    from. Neither tier is ever allowed to treat an id as real unless it
+    traces back to a record in this list."""
     spec = _ARG_RESOLUTION_SOURCES.get(arg_key)
     if spec is None:
-        return set()
-    description = (step.description or "").lower()
+        return []
     r = await db.execute(
         select(TaskStep).where(
             TaskStep.task_id == task_id,
@@ -157,19 +156,77 @@ async def _candidate_ids_for_arg(db, task_id: str, step: TaskStep, arg_key: str)
     )
     discovery_steps = r.scalars().all()
 
-    candidates = set()
+    records = []
     for ds in discovery_steps:
         raw = ds.raw_result
-        records = raw if spec["list_key"] is None else (raw or {}).get(spec["list_key"])
-        if not isinstance(records, list):
+        recs = raw if spec["list_key"] is None else (raw or {}).get(spec["list_key"])
+        if not isinstance(recs, list):
             continue
-        for rec in records:
+        for rec in recs:
             if not isinstance(rec, dict):
                 continue
             name, rid = rec.get(spec["name_key"]), rec.get(spec["id_key"])
-            if name and rid and str(name).lower() in description:
-                candidates.add(rid)
-    return candidates
+            if name and rid:
+                records.append({"name": name, "id": rid})
+    return records
+
+
+async def _candidate_ids_for_arg(db, task_id: str, step: TaskStep, arg_key: str) -> set:
+    """The real ids _resolve_step_args (Tier 1) or _unresolved_reference_
+    note (Commit 4) would consider a match for arg_key, given this task's
+    own earlier discovery steps and this step's own description. Shared
+    so both "resolve it" and "explain why it's still wrong" read the
+    identical evidence — a message that says "no source matched" must be
+    checking the same thing resolution itself checked, not a second,
+    possibly-inconsistent notion of a match."""
+    description = (step.description or "").lower()
+    records = await _discovered_records_for_arg(db, task_id, arg_key)
+    return {rec["id"] for rec in records if str(rec["name"]).lower() in description}
+
+
+async def _all_discovered_ids_for_arg(db, task_id: str, arg_key: str) -> set:
+    """Tier 2's never-guess guardrail evidence: every real id this task has
+    discovered for arg_key so far, regardless of whether the current step's
+    own description names it — deliberately broader than
+    _candidate_ids_for_arg (that description-restricted match is Tier 1's
+    job, already tried and already failed by the time Tier 2 runs). Tier 2
+    is allowed to succeed where Tier 1 couldn't (e.g. a step whose
+    description paraphrases rather than quotes the record it means), but
+    only when this pool has exactly one real candidate — with 2+, picking
+    one is exactly the unjustified guess-between-plausible-matches Tier 1
+    already refuses to make (_resolve_step_args's own rule), just made by
+    an LLM instead of a substring match. Found live, 2026-08-17: without
+    this, a diagnose_pipeline_failure task targeting a nonexistent
+    pipeline had its pipeline_id silently swapped onto a real, unrelated
+    pipeline from this same pool, and the step reported success."""
+    records = await _discovered_records_for_arg(db, task_id, arg_key)
+    return {rec["id"] for rec in records}
+
+
+async def _reject_ungrounded_adaptation(db, task_id: str, original_args: dict, adapted_args: dict) -> dict:
+    """Applied to every Tier 2 (_adapt_step_args) result before it's used
+    for the next attempt. For each _id-shaped key Tier 2 changed, the new
+    value is kept only if it's a real id this task actually discovered for
+    that key AND that discovery pool has exactly one member — see
+    _all_discovered_ids_for_arg for why "exactly one," not just "is real."
+    A rejected key reverts to whatever it held before this adapt call
+    (almost always the same unresolved placeholder Tier 1 already declined
+    to touch), so the step fails again on the next attempt with nothing
+    new — and, once attempts are exhausted, _unresolved_reference_note
+    reports it honestly instead of a silently-wrong "success". Keys Tier 2
+    left unchanged, and any key outside _ARG_RESOLUTION_SOURCES entirely
+    (nothing here constrains those), pass through untouched."""
+    result = dict(adapted_args)
+    for arg_key in _ARG_RESOLUTION_SOURCES:
+        if arg_key not in adapted_args:
+            continue
+        proposed = adapted_args[arg_key]
+        if proposed == original_args.get(arg_key):
+            continue
+        pool = await _all_discovered_ids_for_arg(db, task_id, arg_key)
+        if proposed not in pool or len(pool) != 1:
+            result[arg_key] = original_args.get(arg_key)
+    return result
 
 
 async def _unresolved_reference_note(db, task_id: str, step: TaskStep, tool_args: dict) -> str | None:
@@ -730,10 +787,14 @@ async def execute_next_step(task_id: str) -> dict:
                 if quota["status"] == "exceeded":
                     quota_paused_attempt = attempt
                     break
-                current_args = await _adapt_step_args(
+                adapted_args = await _adapt_step_args(
                     tenant_id, task_user_id, description, tool_name, current_args, last_error,
                     prior_results=prior_results,
                 )
+                async with AsyncSessionLocal() as guard_db:
+                    current_args = await _reject_ungrounded_adaptation(
+                        guard_db, task_id, current_args, adapted_args,
+                    )
                 adapted_once = True
             continue
 

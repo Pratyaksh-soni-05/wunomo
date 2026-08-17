@@ -150,6 +150,70 @@ async def test_resolution_skips_human_edited_args(client):
 
 
 @pytest.mark.asyncio
+async def test_tier2_never_substitutes_an_undiscovered_or_ambiguous_entity(client, monkeypatch):
+    """Item 32 (2026-08-17, found live): Tier 2's LLM adapt call must never
+    silently retarget a step onto a different real entity when the one the
+    plan actually meant doesn't exist. Two discovered pipelines, neither
+    named by the step's own description — Tier 1 correctly finds 0
+    candidates (already covered above), and here Tier 2 is mocked to
+    propose one of the two real-but-wrong pipeline ids anyway, exactly
+    reproducing the live bug (a diagnose_pipeline_failure task targeting a
+    nonexistent "Zephyr Cargo Manifest Pipeline" got silently pointed at
+    the real "Sales Ingestion Pipeline" instead). The guardrail
+    (_reject_ungrounded_adaptation) must revert the proposed id — 2 real
+    candidates with nothing narrowing it down is exactly the kind of guess
+    Tier 1 already refuses to make — so the step fails honestly instead of
+    succeeding against the wrong pipeline."""
+    tenant_id, user_id = await _register(client, "resolveneverguess")
+    task_id, step_id = await _seed_task_with_discovery(
+        tenant_id, user_id,
+        discovery_raw_result={
+            "pipelines": [
+                {"id": "pl-real-1", "name": "HR Sync Pipeline"},
+                {"id": "pl-real-2", "name": "Sales Ingestion Pipeline"},
+            ],
+            "count": 2,
+        },
+        discovery_tool_name="list_pipelines",
+        step_tool_name="get_pipeline_run_history",
+        step_tool_args={"pipeline_id": "zephyr_cargo_manifest_pipeline_id"},
+        step_description="Retrieve the run history for the Zephyr Cargo Manifest Pipeline to diagnose the failures.",
+    )
+
+    seen_args = []
+
+    async def _always_not_found(tenant_id, tool_name, tool_args):
+        seen_args.append(dict(tool_args))
+        return {"error": "Pipeline not found"}
+
+    async def _wrongly_substitutes(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None):
+        # Simulates exactly the live bug: picks a REAL id from prior_results
+        # that has nothing to do with what the step actually asked for.
+        return {**tool_args, "pipeline_id": "pl-real-2"}
+
+    monkeypatch.setattr(executor_module, "_call_tool", _always_not_found)
+    monkeypatch.setattr(executor_module, "_adapt_step_args", _wrongly_substitutes)
+
+    outcome = await execute_next_step(task_id)
+    assert outcome["outcome"] == "step_failed"
+
+    # The guardrail must have reverted the substitution on every attempt --
+    # the wrong-but-real id must never have reached the tool at all.
+    assert all(a["pipeline_id"] != "pl-real-2" for a in seen_args)
+
+    step = await _fresh_step(step_id)
+    assert step.status == TaskStepStatus.FAILED
+    assert "Could not determine the real value for 'pipeline_id'" in step.error_message
+    # Tier 1's own (description-text-matched) candidate count is 0 here --
+    # neither real pipeline's name appears in this step's description --
+    # which is exactly why Tier 2 was reached at all; the guardrail's
+    # "exactly one, from the full pool" check is separate evidence and is
+    # what actually blocked the substitution (proven above via seen_args).
+    assert "no match" in step.error_message
+    assert "Pipeline not found" in step.error_message
+
+
+@pytest.mark.asyncio
 async def test_honest_failure_message_when_neither_tier_resolves(client, monkeypatch):
     """Commit 4: a reference that never matches anything real (0
     candidates, and Tier 2 can't improve on it either) fails with an

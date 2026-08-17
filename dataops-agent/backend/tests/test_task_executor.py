@@ -185,6 +185,22 @@ async def test_domain_error_triggers_exactly_one_adapt_call_then_succeeds(client
     tenant_id, user_id = await _register(client, "execdomain")
     task_id, step_id = await _seed_queued_task(tenant_id, user_id, tool_args={"pipeline_id": "bad-id"})
 
+    # Tier 2's never-guess guardrail (item 32, 2026-08-17) only accepts an
+    # adapted _id-shaped value that's a real id this task actually
+    # discovered, with nothing else ambiguous about it -- give it exactly
+    # that single real candidate so this test still exercises the retry
+    # mechanics it's named for, not the guardrail (that has its own
+    # dedicated tests in test_task_executor_resolution.py).
+    async with AsyncSessionLocal() as db:
+        db.add(TaskStep(
+            id=str(uuid.uuid4()), task_id=task_id, step_index=99,
+            description="discovery", source=TaskStepSource.LLM_PLANNED,
+            tool_name="list_pipelines", tool_args={},
+            status=TaskStepStatus.SUCCEEDED,
+            raw_result={"pipelines": [{"id": "corrected-id", "name": "Sales Ingestion Pipeline"}], "count": 1},
+        ))
+        await db.commit()
+
     calls = {"n": 0}
     adapt_calls = {"n": 0}
 
