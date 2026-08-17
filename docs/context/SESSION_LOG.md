@@ -134,18 +134,74 @@ plus two small pieces of cleanup work requested first: fixing
   changes), and item 32 in particular needs its own design discussion
   (how should Tier 2 signal "no real match exists" instead of always
   returning a corrected value) rather than a reactive patch.
+  **Superseded later the same day** — see "Done (follow-up)" below; the
+  user asked for both fixed immediately after this report went out.
 
 ### Open
 
-- Items 31 and 32 (`WALKTHROUGH_FINDINGS_2026-08.md`) are real, live-found,
-  unfixed. Item 32 is probably the more urgent of the two — a silent
-  wrong-entity substitution that reports success is a worse failure mode
-  than an honest error, and undermines exactly the kind of trust this
-  whole argument-resolution effort was built to establish.
-- `sync_profile_quality`'s allowed-tools list (`task_planner.py`) has no
-  way to discover a real `pipeline_id` — either give it one, or make
-  `run_quality_checks` accept a `source_id` alternative, or make it
-  validate existence and error honestly (item 31).
+- `sync_profile_quality`'s allowed-tools list (`task_planner.py`) still
+  has no way to discover a real `pipeline_id` for its own last step —
+  item 31's fix (below) makes `run_quality_checks` fail honestly on a
+  bogus one instead of lying about success, but doesn't give this task
+  shape any way to find a *real* one. A `sync_profile_quality` task will
+  still legitimately fail at its last step for any pipeline whose
+  quality checks were meant to be reachable this way — not regressed
+  today, just not what today's follow-up work was scoped to fix either.
+
+### Done (follow-up, same day — items 31 & 32 fixed)
+
+Immediately after the report above, asked to fix both, no new features.
+
+- **Item 31**: `QualityRuleEngine.run_checks()` and the same-shape
+  `BusinessRules.run_all()` (`modules/quality/business_rules.py`) now
+  check the pipeline exists before reporting a result — a bogus
+  `pipeline_id` returns `{"error": "Pipeline ... not found"}` instead of
+  a false "100% passed, no active rules." Checked every other
+  `pipeline_id`/`source_id`-taking function in `modules/` for the same
+  shape first, per explicit instruction: `get_pipeline_run_history`,
+  `detect_anomalies`, `get_pipeline_stats` already validated existence
+  correctly; `business_rules.run_all()` had the identical gap, fixed
+  alongside `run_checks()` since it's the same bug, not a new feature.
+  Live-verified against the real dev DB, both functions, plus confirmed
+  a real ruleless pipeline still correctly reports 100%/no-rules (that's
+  a true statement for a real pipeline, unlike for a fake one). Commit
+  `f6b4028`.
+- **Item 32**: ported Tier 1's never-guess guardrail to Tier 2. New
+  `_reject_ungrounded_adaptation()` runs after every `_adapt_step_args`
+  call — an `_id`-shaped key Tier 2 changed is only kept if the new value
+  is a real id this task actually discovered for that key AND the
+  discovery pool has exactly one member; otherwise it reverts to the
+  pre-adaptation value, so the step fails again and, once attempts are
+  exhausted, the existing honest-failure message reports it truthfully.
+  `_candidate_ids_for_arg` (Tier 1) and the new
+  `_all_discovered_ids_for_arg` (Tier 2's guardrail) now share one
+  `_discovered_records_for_arg` helper. New test
+  `test_tier2_never_substitutes_an_undiscovered_or_ambiguous_entity`
+  reproduces the live bug's exact shape. One pre-existing test
+  (`test_domain_error_triggers_exactly_one_adapt_call_then_succeeds`) had
+  no real discovery step behind its test double's "corrected-id" — given
+  one real matching candidate so it still tests retry mechanics, not the
+  new guardrail it wasn't written to exercise.
+  **Live-verified for both a read-only and a mutating shape**, per
+  explicit instruction that the mutating case is the one that matters:
+  re-ran the exact Zephyr Cargo Manifest Pipeline scenario
+  (`diagnose_pipeline_failure`, read-only `get_pipeline_run_history`) —
+  now fails honestly after 3 attempts instead of completing against
+  Sales Ingestion Pipeline. Then a `sync_profile_quality` task naming a
+  nonexistent "Zenith Marketing Leads" source, with the 2 real sources
+  (Employee Records, Sales Orders) in the discovered pool — `sync_source`
+  (a real mutation) correctly kept the unresolved placeholder at its
+  approval gate, and after approval failed honestly rather than silently
+  syncing either real source; confirmed directly against the DB that
+  neither source's `last_profiled_at`/`updated_at` changed. Commit
+  `e312212`.
+- Full backend suite: 397 passed, 1 pre-existing unrelated flake
+  (`test_freshness_check_notifies_once_per_newly_stale_source_not_every_tick`,
+  already documented in `STATUS_TABLE.md`'s Known-broken table as
+  order/state-dependent on other tenants' stale sources in the shared
+  dev DB — confirmed by re-reading that row before concluding this
+  wasn't a regression, not assumed).
+- Both findings closed in `WALKTHROUGH_FINDINGS_2026-08.md`.
 
 ### Gotchas
 
