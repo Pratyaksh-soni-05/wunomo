@@ -143,6 +143,14 @@ class BusinessRules:
             pipeline_id=pipeline_id,
         )
         try:
+            if pipeline_id is not None:
+                async with AsyncSessionLocal() as db:
+                    p = await db.execute(select(Pipeline).where(
+                        Pipeline.id == pipeline_id,
+                        Pipeline.tenant_id == self.tenant_id,
+                    ))
+                    if p.scalar_one_or_none() is None:
+                        return {"error": f"Pipeline {pipeline_id} not found"}
             rules = await self.list_rules(pipeline_id=pipeline_id)
             if isinstance(rules, dict) and "error" in rules:
                 return rules

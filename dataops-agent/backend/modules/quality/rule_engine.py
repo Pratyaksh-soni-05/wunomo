@@ -91,6 +91,12 @@ class QualityRuleEngine:
     # ── RUN CHECKS ────────────────────────────────────────────────────────────
     async def run_checks(self, pipeline_id: str) -> dict:
         async with AsyncSessionLocal() as db:
+            p = await db.execute(select(Pipeline).where(
+                Pipeline.id == pipeline_id,
+                Pipeline.tenant_id == self.tenant_id,
+            ))
+            if p.scalar_one_or_none() is None:
+                return {"error": f"Pipeline {pipeline_id} not found"}
             r = await db.execute(select(QualityRule).where(
                 QualityRule.pipeline_id == pipeline_id,
                 QualityRule.tenant_id == self.tenant_id,
