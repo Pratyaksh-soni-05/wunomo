@@ -36,15 +36,15 @@ for every item.
 | 5 | remove the ask axiom button from the bottom left completely | — | Bug | image7.png | Open |
 | 6 | Axiom -> view progress -> each task should have bigger box in which we can edit anf review at once in the edit plan tab. | — | Design | image10.png (uncertain — see note below) | Open |
 | 7 | notification duration of every action or completion of the noptifications appearing on bottom left should be increased more smooth animation | — | Design | image4.png | Open |
-| 8 | in step #3.30 in self test guide. After running the completion button is not coming back | §3.30 | Bug | image17.jpg (shared with item 9) | Open |
-| 9 | 3.30 → 3.32 steps in self test guide are not working | §3.30–3.32 | Bug | image17.jpg (shared with item 8) | Open |
+| 8 | in step #3.30 in self test guide. After running the completion button is not coming back | §3.30 | Bug | image17.jpg (shared with item 9) | Closed (2026-08-17) |
+| 9 | 3.30 → 3.32 steps in self test guide are not working | §3.30–3.32 | Bug | image17.jpg (shared with item 8) | Closed (2026-08-17) |
 | 10 | increase all button sizes make them more aesthetic easy to click and only text is written when cursor hovers on top then a greay button boundary appears just like claude or any other website | — | Design | image21.jpg, image18.jpg, image3.jpg | Open |
 | 11 | 'help' → should give error and not generate any plan in step 4.1 in self test guide but it is working and still appearing in the task list with plan approval | §4.1 | Bug | none identified | Open |
 | 12 | when rejected the assurance box is not appearing back again | — | Unclear | image22.jpg (uncertain — see note below) | Open |
 | 13 | Add re run buttons | — | Unclear | none identified | Open |
 | 14 | step 4.50 in self test guide Terminal response not correct | §4.50 (as written) | Unclear | image20.png | Open |
 | 15 | 4.54 check terminal output again | §4.54 (as written) | Unclear | image9.png | Open |
-| 16 | in step 6.1 in self test guide cards not reloading after refresh | §6.1 | Bug | none identified | Open |
+| 16 | in step 6.1 in self test guide cards not reloading after refresh | §6.1 | Bug | none identified | Closed (2026-08-17) |
 | 17 | 6.3 → 6.4 check from different accounts | §6.3–6.4 | Untested | image11.png | Open |
 | 18 | 6.6 → dosent go to the conversation when clicked | §6.6 | Bug | image1.png | Open |
 | 19 | 8.3 → SQL execute and dry run not running for csv but it should as per the sel;f test guide from claude | §8.3 | Bug | image13.png | Open |
@@ -59,8 +59,41 @@ for every item.
 | 28 | ALL OF THIS HAS TO BE AUTOMATED the user upload data in the axiom chat is what we want and then the ai employee carries out all the remaining steps on its opwnm is what the main idea is just like claude code try to make the possible . make it chat friendly all the major working the user does while chatting with axiom if data needed axiom asks for it user uploads the data csv and axiom puts it in datasources and does profiling and all other steps on its own this is what we want fully automated process to reduce human effort. | — | Feature | none identified | Open |
 | 29 | Nav items are not role-filtered — every logged-in user sees the identical sidebar regardless of role (a Viewer sees Team, Billing, Settings, and CI/CD listed exactly like an Owner does) and only hits a wall once they actually try to use something inside those screens. Found while investigating the sidebar's real role-gating for the 2026-08 IA restructure proposal — confirmed directly by reading `navItems.tsx`/`Sidebar.tsx`/`layout.tsx`, none of which do any role-based filtering; all real enforcement is one layer down, at the page/control level. Not fixed — logged only, per instruction. | — | Bug | none | Open |
 | 30 | Governance's own **Audit Log** tab (a real, live tab inside the Governance screen) has the identical name as the sidebar's separate **Audit Logs** item (a stub page, unrelated screen) — a genuine naming collision between two different things. Already documented once, in passing, in `docs/SELF_TEST_GUIDE.md` §11's own note about this exact collision. Logged here as its own findings-index item per instruction — explicitly not renamed this session. | §11 | Design | none | Open |
+| 31 | `run_quality_checks` accepts any `pipeline_id` string, including one that matches no real pipeline, and returns a false "100% passed, no active quality rules" result instead of erroring. Root cause: `QualityRuleEngine.run_checks()` (`modules/quality/rule_engine.py:92-103`) queries `QualityRule WHERE pipeline_id == pipeline_id` with no existence check first — zero rows matched looks identical whether the pipeline is real-but-ruleless or the ID is complete garbage. Found live, 2026-08-17, verifying the findings-8/9 argument-resolution fix: the `sync_profile_quality` task shape's own allowed-tools list (`TASK_SHAPE_ALLOWED_TOOLS`, `task_planner.py`) has no pipeline-discovery tool, so its final step's `pipeline_id` can never be resolved to a real value by either resolution tier — the task still reached `COMPLETED`, but the last step's "success" was hollow (zero rules actually evaluated). Not fixed — logged only, per instruction. Two independent gaps, either fixable alone: give this task shape a pipeline-discovery step, and/or make `run_quality_checks` verify the pipeline exists before reporting a score. | — | Bug | T1_09_step3.png, T1_11_final_status.png (session scratchpad, not repo-committed) | Open |
+| 32 | Tier 2's LLM-based argument adaptation (`_adapt_step_args`, `task_executor.py`, added 2026-08-16) can silently substitute a real but *wrong* entity's ID when the entity the plan actually meant doesn't exist at all, and the step then reports success. Found live, 2026-08-17: a `diagnose_pipeline_failure` task deliberately targeting a nonexistent "Zephyr Cargo Manifest Pipeline" saw its `pipeline_id` placeholder replaced with the real ID of the unrelated "Sales Ingestion Pipeline" (visible in `prior_results` from the same task's own `list_pipelines` call) — the tool call succeeded against that wrong pipeline, and the task reached `COMPLETED` reporting on the wrong entity's run history, no error anywhere. Contrast with the same session's item 31/§Tier-1 behavior: Tier 1 (`_resolve_step_args`) is deliberately built to never guess between candidates and leave a genuine non-match untouched; Tier 2 has no equivalent guardrail — its prompt asks the LLM to *fix* the arguments, and a plausible-looking real ID from `prior_results` satisfies that instruction even when nothing in the task's own evidence actually supports it being the right one. Not fixed — logged only, per instruction. A real fix likely means telling the adapt prompt it's allowed to say "no real match exists" instead of always returning a corrected value, and treating that as a genuine failure rather than a success. | — | Bug | T4_04_status_check.png (session scratchpad, not repo-committed) | Open |
 
 ---
+
+## Closure notes (2026-08-17)
+
+Items 8, 9, and 16 are closed together — all three trace to the same root
+cause diagnosed 2026-08-16 (see `SESSION_LOG.md`'s 2026-08-16 and
+2026-08-17 entries): Tasks generated a plan with plan-time argument
+placeholders (e.g. `"source_id": "sales_orders_source_id"`) that no step
+ever replaced with a real value, so every non-trivial task step referencing
+an entity discovered by an earlier step failed every time — item 8's
+"completion button not coming back" and item 9's "3.30 → 3.32 not working"
+are that failure as experienced in the self-test guide's own walkthrough;
+item 16's "cards not reloading after refresh" was the same non-terminal,
+stuck-task state observed from the Tasks list view instead of the task
+detail view.
+
+**Closed on the strength of three real, human-run tasks reaching
+`COMPLETED` today, live, on Gemini** (not mocked, not "failed legibly" —
+see Workflow Rule 10): `sync_profile_quality` on the real Sales Orders
+source, `diagnose_pipeline_failure` against the real HR Sync Pipeline
+(found by name via the new `list_pipelines` tool, no ID supplied),
+and `investigate_incident` against the real HR Sync incident, including a
+real `resolve_incident` mutation. Every approval gate hit during those
+three runs displayed the real, resolved argument values before execution,
+and what executed matched what was displayed, confirmed via screenshot
+at each gate.
+
+**This does not mean argument resolution is now bug-free** — see items 31
+and 32 above, both found live during this same verification pass. Neither
+contradicts that 8/9/16's specific symptom (tasks structurally unable to
+reach `COMPLETED`) is fixed; both are different, narrower gaps the fix's
+own live testing surfaced.
 
 ## Notes on screenshot correlation
 

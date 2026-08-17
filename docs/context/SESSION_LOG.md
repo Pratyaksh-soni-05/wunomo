@@ -10,6 +10,157 @@ otherwise only in someone's head or a chat transcript.
 
 ---
 
+## 2026-08-17 — Argument resolution live-verified (findings 8/9/16 closed), two new findings surfaced, metering test fixed
+
+### Context
+
+Direct continuation of 2026-08-16: the resolution fix (Tier 1 deterministic
++ Tier 2 LLM-adapt, plus the new `list_pipelines` tool) was built,
+unit-tested, and committed, but explicitly marked UNVERIFIED pending a
+real live run, per Workflow Rule 10. Today's session did that verification,
+plus two small pieces of cleanup work requested first: fixing
+`test_llm_usage_metering.py`'s own contamination of the real
+`llm_usage_events` table, and a fresh quota check before spending anything.
+
+### Done
+
+- **`test_llm_usage_metering.py` rewritten.** Three of its tests
+  monkeypatched `get_primary_llm` and then called the real `invoke_llm()`,
+  so `log_llm_usage()`'s real DB commit ran every time regardless of the
+  LLM being fake — 3 phantom `gemini`-labeled rows per full suite run.
+  Rewritten so only one test (`test_log_llm_usage_persists_a_real_row`,
+  calling `log_llm_usage()` directly) still writes a real row — the one
+  genuinely unavoidable case, since testing "does this function persist a
+  row" requires it to persist a row. Committed as `fe2c782`.
+- **Historical audit**: of 348 all-time `gemini`-labeled rows in
+  `llm_usage_events`, 222 (63.8%) were provably fake, all traceable by
+  tenant name to this one file's old pattern (`Usage Test Corp` 89,
+  `Reasoning Test Corp` 80, `List Content Test Corp` 53 rows). Confirmed
+  via grep that no other current test file reproduces the anti-pattern.
+  Full detail in `docs/context/GOTCHAS.md`.
+- **Fresh quota check, before spending anything**: `gemini: 1` for today,
+  and that one row was known precisely — the synthetic row from the
+  metering-test fix above, run moments earlier. Real Gemini spend before
+  live verification: 0. New calendar day (2026-08-17), fresh quota window.
+- **Three real, human-run tasks reached `COMPLETED`, live, on Gemini, via
+  Playwright driving the actual running app** — the core proof this whole
+  arc was building toward:
+  - `sync_profile_quality` on the real "Sales Orders" source. All 4 steps
+    succeeded (`list_data_sources` → `sync_source` → `profile_schema` →
+    `run_quality_checks`). Approval gates for `sync_source` and
+    `profile_schema` both displayed the real resolved `source_id`
+    (`2bc8a71d-c518-449d-aa87-bdb4f6e922df`), not the plan-time
+    placeholder, and executed args matched exactly.
+  - `diagnose_pipeline_failure` against the real "HR Sync Pipeline,"
+    referenced by name only — no ID supplied by the human at any point.
+    Step 0 used the new `list_pipelines` tool to find it
+    (`20b0cca2-b089-4de5-871d-a0b66f7fd614`); step 1's `pipeline_id`
+    resolved automatically (auto-run tier, no approval gate needed for
+    this low-risk tool) with no error.
+  - `investigate_incident` against the real HR Sync incident. It was
+    already `RESOLVED` (resolved manually outside the Tasks feature,
+    2026-08-16 09:42) — reset to `OPEN` directly in the DB first, to let
+    the Tasks feature process real, pre-existing data for the first time
+    rather than fabricating a new incident. 5 steps, real `resolve_incident`
+    mutation confirmed in the `incidents` table
+    (`resolved_at: 2026-08-17T07:23:47`). Two steps (`triage_incident`,
+    `resolve_incident`) hit a live, unforced Tier 1 miss — 0 candidates,
+    because the step's own generated description didn't literally quote
+    the incident's title — and both were correctly recovered by Tier 2's
+    LLM adapt using the task's real prior discovered data.
+  - Approval-gate screenshots captured at every gate across all three
+    runs (session scratchpad, not repo-committed) confirming resolved
+    real values shown pre-execution matched what actually executed.
+- **Forced a genuine, unrecoverable resolution failure and captured the
+  new honest error message live.** A 4th task (`investigate_incident`,
+  run when the tenant genuinely had zero open incidents) exhausted all 3
+  attempts and failed with: *"Could not determine the real value for
+  'incident_id' (no match for this step's description among what this
+  task discovered earlier). Real error: Incident INC-HR-SYNC-001 not
+  found."* — the commit-4 honest-failure message, working exactly as
+  designed, live.
+- **Two new findings surfaced by this same live testing, not swept in
+  with the closure above** — logged as findings-index items 31 and 32
+  (`docs/context/WALKTHROUGH_FINDINGS_2026-08.md`), both `Open`, not fixed:
+  - **Item 31**: `run_quality_checks` accepts any `pipeline_id`, including
+    one matching no real pipeline, and returns a false "100% passed, no
+    active rules" result instead of erroring
+    (`modules/quality/rule_engine.py:92-103` has no existence check).
+    Compounded by `sync_profile_quality`'s own allowed-tools list having
+    no pipeline-discovery tool at all, so this task shape can structurally
+    never resolve a real `pipeline_id` for its last step. The live
+    `sync_profile_quality` run above reached `COMPLETED`, but its last
+    step's "success" was hollow — zero quality rules were ever actually
+    evaluated.
+  - **Item 32 (the more serious one)**: Tier 2's LLM adapt
+    (`_adapt_step_args`) can silently substitute a real but *wrong* entity
+    when the one the plan actually meant doesn't exist at all, and the
+    step reports success. Proven live: a `diagnose_pipeline_failure` task
+    deliberately targeting a nonexistent "Zephyr Cargo Manifest Pipeline"
+    had its `pipeline_id` replaced with the real ID of the unrelated
+    "Sales Ingestion Pipeline" (visible in the task's own `prior_results`),
+    the tool call succeeded against that wrong pipeline, and the task
+    reached `COMPLETED` reporting on the wrong entity — no error anywhere.
+    Tier 1 has an explicit never-guess guardrail; Tier 2 has no equivalent
+    one, since its prompt just asks the LLM to "fix" the arguments and a
+    plausible real ID satisfies that even when nothing actually supports
+    it being correct.
+- **Closed findings 8, 9, and 16** (`docs/context/WALKTHROUGH_FINDINGS_2026-08.md`)
+  on the strength of the three live `COMPLETED` runs above — see that
+  file's "Closure notes (2026-08-17)" section for the full reasoning.
+  Updated `docs/context/STATUS_TABLE.md`'s 2026-08-16 qualifier row to
+  `[RESOLVED: 2026-08-17]` with a new row documenting the live evidence,
+  per Workflow Rule 9 (never leave a stale known-broken row riding once
+  its fix lands).
+
+### Decisions
+
+- **Reset the HR Sync incident from `RESOLVED` to `OPEN` via direct SQL**
+  rather than fabricating a new incident, since the real incident already
+  existed with real prior data (detection, root cause, pipeline linkage)
+  and had simply never been run through the Tasks feature specifically —
+  restoring its pre-resolution state let `investigate_incident` process
+  real, existing data for the first time, which is what the verification
+  needed to prove.
+- **Created two extra throwaway tasks (targeting a nonexistent pipeline,
+  and a tenant with zero open incidents) specifically to force resolution
+  failure**, beyond the three the plan called for — the three planned runs
+  all resolved cleanly or recovered via Tier 2, so none of them naturally
+  produced the honest-failure-message proof the original plan also
+  required; forcing it was the only way to actually see that code path
+  live rather than trust the unit test alone.
+- **Did not attempt to fix items 31 or 32 this session** — out of scope
+  for what was approved (live verification of the existing fix, not new
+  changes), and item 32 in particular needs its own design discussion
+  (how should Tier 2 signal "no real match exists" instead of always
+  returning a corrected value) rather than a reactive patch.
+
+### Open
+
+- Items 31 and 32 (`WALKTHROUGH_FINDINGS_2026-08.md`) are real, live-found,
+  unfixed. Item 32 is probably the more urgent of the two — a silent
+  wrong-entity substitution that reports success is a worse failure mode
+  than an honest error, and undermines exactly the kind of trust this
+  whole argument-resolution effort was built to establish.
+- `sync_profile_quality`'s allowed-tools list (`task_planner.py`) has no
+  way to discover a real `pipeline_id` — either give it one, or make
+  `run_quality_checks` accept a `source_id` alternative, or make it
+  validate existence and error honestly (item 31).
+
+### Gotchas
+
+- Quota tracking via `llm_usage_events` is only as clean as the tests
+  writing to it — see `docs/context/GOTCHAS.md`'s updated entry for the
+  full historical contamination numbers (222 of 348 all-time `gemini`
+  rows). Fixed going forward, not retroactively — the historical rows
+  themselves weren't deleted or relabeled, just documented as unreliable.
+- Total real Gemini spend today: 5 `task_planning` + 4 `task_step_adapt` +
+  1 `incident_triage` = 10 real calls, all on primary (no Groq fallback
+  triggered at any point) — well inside the ~20/day budget, no need to
+  stop early or ration across the verification runs.
+
+---
+
 ## 2026-08-16 — Findings 8/9's real root cause, argument resolution built (4 commits, UNVERIFIED), and a quota-estimate lesson
 
 ### Context
