@@ -145,6 +145,15 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    // Axiom-domain items only - kept under its original label. Approvals
+    // used to also live in this section object, but shares no items with
+    // either domain the other doesn't have, so it's now split into its
+    // own section right below with its own label ("Governance") rather
+    // than reusing this one - a shared NavSection's label is rendered by
+    // BOTH domain-filtered views (sectionsForDomain only filters items,
+    // not the label), so relabeling this section would have also
+    // relabeled the axiom sidebar's own group - the one that literally
+    // contains a "Governance" nav item - to "Governance" too.
     label: "Quality & Ops",
     items: [
       {
@@ -202,6 +211,15 @@ export const NAV_SECTIONS: NavSection[] = [
           </>
         ),
       },
+    ],
+  },
+  {
+    // Workspace-only, split out of the section above (see its comment) -
+    // renamed from "Quality & Ops" to "Governance" per explicit request:
+    // it's a work queue, not a settings screen, so it doesn't belong
+    // under Admin either.
+    label: "Governance",
+    items: [
       {
         slug: "approvals",
         label: "Approvals",
