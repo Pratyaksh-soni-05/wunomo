@@ -116,11 +116,27 @@
   --accent-subtle-border: var(--ocean-100);  /* light — .credits-badge/.chat-context-chip's border, paired with --accent-subtle-bg. Dark override in the dark blocks, so a grey dark chip doesn't keep a blue-tinted edge. */
   --deep-ground: #061024;              /* light. Gradient terminus / footer — .landing-final-cta */
 
+  /* Phase 3 (2026-08-19): the auth brand panel's own background — layered
+     radial-gradient glows deepening to --deep-ground, NOT tied to
+     --accent-fill (which inverts to a light grey in dark mode via Decision
+     1 — wrong for this panel, which stays dark-ish in both themes). Dark
+     value (flat, no gradient, "no colour") lives in the dark blocks below.
+     --mesh-glow-1/2 exist only to feed this gradient, not a general-purpose
+     token — reuses the same hexes as --focus-ring's dark value and
+     --accent-fill respectively, since those are already the two blues this
+     product uses, not a third invented one. */
+  --mesh-glow-1: #2277FF;
+  --mesh-glow-2: #0056FF;
+  --auth-brand-bg:
+    radial-gradient(ellipse 900px 700px at 10% 0%, color-mix(in srgb, var(--mesh-glow-1) 45%, transparent), transparent 70%),
+    radial-gradient(ellipse 800px 600px at 100% -10%, color-mix(in srgb, var(--mesh-glow-2) 35%, transparent), transparent 65%),
+    var(--deep-ground);
+
   /* Text / link — must satisfy AA against --surface and --bg */
   --accent-text: #0056FF;              /* light: 5.496:1/surface, 5.238:1/bg. Replaces Phase 1's #416487 (--ocean-650) stopgap. */
   --accent-text-hover: var(--ocean-700);
   --badge-accent-text: var(--midnight-700);
-  --on-accent-text: var(--midnight-100);  /* light — .auth-brand p's secondary text on --accent-fill. Dark override in the dark blocks, since --accent-fill inverts there and this must still read against whatever it becomes. */
+  --on-accent-text: var(--midnight-100);  /* light — .auth-brand p's secondary text on --auth-brand-bg's mesh. Dark override in the dark blocks. */
 
   /* Border */
   --accent-border: var(--focus-ring);  /* tracks focus-ring so both stay in sync across themes */
@@ -323,14 +339,22 @@
      dark-resolved above in this same rule, so referencing them here picks
      up their dark values, not the light ones. Applies to every current
      --accent-fill consumer: .btn-primary, .chip-selected, .chat-avatar,
-     .chat-bubble-user-inner, the base .toast, and .auth-brand (whose
-     heading uses --on-accent-fill directly and whose secondary tagline
-     uses --on-accent-text, overridden separately below since a light fill
-     needs a dark-enough secondary text, not another light one). */
+     .chat-bubble-user-inner, and the base .toast. NOT .auth-brand as of
+     Phase 3 (2026-08-19) — that panel got its own bespoke background
+     (--auth-brand-bg below) once it stopped being a plain accent-fill
+     consumer, so it no longer inherits this inversion. */
   --accent-fill: var(--text-primary);       /* #F2F2F3 */
   --on-accent-fill: var(--bg);              /* #0A0A0B — 17.7:1 on the above */
   --accent-fill-hover: #FFFFFF;
-  --on-accent-text: var(--border-strong);   /* #3A3A40 — 10.1:1 on --accent-fill's #F2F2F3; --midnight-100 (light mode's value) would be near-invisible on a light fill */
+
+  /* Phase 3: near-black with a subtle lift, no colour — reuses
+     --surface-hover rather than inventing a new grey. --on-accent-text's
+     dark value changed from Decision 1's --border-strong (right for text
+     on a light-grey inverted fill, wrong here) to --text-secondary — this
+     panel stays dark in both themes, so its secondary text needs to stay
+     light in both themes too. 6.22:1 on --auth-brand-bg's dark flat value. */
+  --auth-brand-bg: var(--surface-hover);    /* #1A1A1D */
+  --on-accent-text: var(--text-secondary);  /* #9A9AA2 */
 
   /* Decision 2 (2026-08-19): opaque low-lift grey, not a translucent blue
      tint — the same defect class the badges just had. */
@@ -389,7 +413,8 @@
     --accent-fill: var(--text-primary);
     --on-accent-fill: var(--bg);
     --accent-fill-hover: #FFFFFF;
-    --on-accent-text: var(--border-strong);
+    --auth-brand-bg: var(--surface-hover);
+    --on-accent-text: var(--text-secondary);
     --accent-subtle-bg: var(--surface-hover);
     --accent-subtle-border: var(--border);
   }

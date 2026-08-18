@@ -1,5 +1,20 @@
 import { ReactNode } from "react";
+import { WunomoWordmark } from "@/components/brand";
 
+/**
+ * Phase 3 (2026-08-19): the brand panel carries the wordmark plus one
+ * constant line of copy (sourced from the approved marketing-site landing
+ * hero, not invented here — see the Phase 3 report for where it came from).
+ * `headline`/`tagline` are the per-page context login/signup have always
+ * passed ("Welcome back to Wunomo AI" vs "Set up your workspace on Wunomo
+ * AI", etc.) — rendered for real on the right panel, above the form, in
+ * the body font (General Sans). The display serif (--font-display) stays
+ * confined to the single brand-panel copy line; it does not appear here.
+ * An earlier pass hid these in a visually-hidden span instead of rendering
+ * them, which was a regression: it removed the only visual difference
+ * between the login and signup screens, and put a heading in front of
+ * screen-reader users that sighted users never see.
+ */
 export function AuthShell({
   headline,
   tagline,
@@ -12,11 +27,17 @@ export function AuthShell({
   return (
     <div className="auth-shell">
       <div className="auth-brand">
-        <h1>{headline}</h1>
-        <p>{tagline}</p>
+        <WunomoWordmark className="auth-brand-wordmark" />
+        <p className="auth-brand-copy">The AI workforce for modern companies.</p>
       </div>
       <div className="auth-form-side">
-        <div className="auth-card">{children}</div>
+        <div className="auth-card">
+          <div className="auth-context">
+            <h1 className="auth-context-headline">{headline}</h1>
+            <p className="auth-context-tagline">{tagline}</p>
+          </div>
+          {children}
+        </div>
       </div>
     </div>
   );

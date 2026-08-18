@@ -209,7 +209,7 @@ export function MessageThread({
           <div className="chat-composer-actions">
             <span className="text-xs text-muted">Enter to send</span>
             <button
-              className="btn btn-primary btn-sm"
+              className="btn btn-primary btn-anchored btn-sm"
               disabled={!draft.trim() || sending}
               onClick={onSend}
             >

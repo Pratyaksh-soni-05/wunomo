@@ -120,6 +120,18 @@ fixing the size. Claude's own interface does the same split.
 light, filled `--text` on `--bg` (light-on-dark inversion) in dark. 52px tall,
 white/inverted label. Hover deepens the fill and adds a soft shadow.
 
+**Tier 1 exception — input-anchored buttons (added 2026-08-19, Correction 1):**
+a Tier 1 button sitting inline with the field it submits — the chat composer's
+Send button, a search bar's inline submit, anything in that shape — matches
+the height of that field instead of the standalone 52px, floored at 44px. A
+Send button taller than the textarea beside it is worse than the original
+too-small complaint. Implemented as a `.btn-anchored` modifier
+(`.btn-anchored.btn-primary` etc.) rather than reusing plain `.btn-sm`, since
+`.btn-sm` also covers the dense-table row actions (Approve/Reject/Delete/
+Resolve) that are deliberately **not** this exception — those stay at 52px
+until Phase 6 decides how to handle table-row density (see that phase's note
+below). Don't use `.btn-anchored` outside a genuine input-adjacent context.
+
 **Tier 2 — Secondary. Ghost with hover box.** *(the treatment you described)*
 Transparent at rest, label only. On hover: 1px border in `--border-hover`, a
 subtle background lift, no colour shift. Transition `--t-slow`, 280ms.
@@ -128,6 +140,19 @@ subtle background lift, no colour shift. Transition `--t-slow`, 280ms.
 **Tier 3 — Tertiary / icon / nav.**
 Same ghost-to-bordered behaviour, 44×44 minimum target even where the glyph is
 16px.
+
+**Tier 3 exception — glyphs inside something smaller than 44px (added
+2026-08-19, Correction 2):** two real cases can't take a 44px control without
+breaking their own container — the ✕ inside `.chat-context-chip` (a 4px-padded
+pill) and the hover-reveal ✕ on a chat session/saved-prompt row (would blow
+out every row in the list to fit it). Both are deliberate, reasoned
+exceptions, not oversights — do not "fix" them to 44×44 later. Instead they
+get a **minimum 24×24 hit area** via padding/a pseudo-element that extends the
+clickable region beyond the visible glyph, without changing visible layout —
+`.chat-context-chip button`/`.chat-session-delete`/`.chat-saved-prompt-remove`
+each carry `padding: 4px` (glyph is ~14-16px, so the hit area comes out to
+~22-24px) and `margin: -4px` to pull that padding out of the visual flow so
+the surrounding chip/row doesn't grow.
 
 **All tiers:** visible 2px focus ring at 2px offset, on keyboard focus only
 (`:focus-visible`). In dark mode the focus ring is the one non-logo blue.
@@ -335,6 +360,18 @@ One screen, so I can react before twenty more.
 5. Settings, Billing, and everything remaining
 
 Report after 1, after 2, and at the end. Both themes each time.
+
+**Queued from Phase 2 (Correction 4, 2026-08-19) — decide, don't rediscover:**
+every dense table's row actions (Sources/Pipelines/Quality/Incidents/
+Governance/Team/Settings/CI-CD/Approvals/Tasks — Trigger, Pause, Delete,
+Approve, Reject, Resolve, Revoke...) are 2-3 `.btn-sm` buttons per row, and
+Tier 1 (danger/success) has no size-modifier escape from its 52px floor, nor
+does Tier 2/3's 44px. Every one of these rows has already grown. Item 2 above
+is exactly where this has to get resolved — pick one, deliberately: taller
+rows (simplest, costs vertical density), an overflow/kebab menu (reclaims
+density, costs a click), or icon-only actions with tooltips (reclaims width,
+costs discoverability). Whichever screen goes first sets the pattern for the
+rest of item 2's list, so decide it once, not per-screen.
 
 ---
 
