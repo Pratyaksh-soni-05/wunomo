@@ -49,9 +49,10 @@ function StepsTable({ steps, editing, onEditStep }: {
         {sorted.map((s, i) => (
           <Tr key={s.id}>
             <Td>{s.step_index}</Td>
-            <Td style={{ maxWidth: 260 }}>
+            <Td style={{ maxWidth: 340 }}>
               {editing ? (
-                <Input
+                <textarea
+                  className="input" style={{ minHeight: 72, fontSize: 13, width: "100%", resize: "vertical" }}
                   value={s.description}
                   onChange={(e) => onEditStep?.(i, { description: e.target.value })}
                 />
@@ -62,7 +63,7 @@ function StepsTable({ steps, editing, onEditStep }: {
                 <div className="text-xs text-muted">depends on step {s.depends_on_step_index}</div>
               )}
             </Td>
-            <Td style={{ maxWidth: 320 }}>
+            <Td style={{ maxWidth: 420 }}>
               {editing ? (
                 <div className="flex flex-col gap-1">
                   <Input
@@ -70,7 +71,7 @@ function StepsTable({ steps, editing, onEditStep }: {
                     onChange={(e) => onEditStep?.(i, { tool_name: e.target.value })}
                   />
                   <textarea
-                    className="code-block" style={{ minHeight: 60, fontSize: 11, width: "100%", resize: "vertical" }}
+                    className="code-block" style={{ minHeight: 160, fontSize: 12, width: "100%", resize: "vertical" }}
                     spellCheck={false}
                     value={JSON.stringify(s.tool_args, null, 2)}
                     onChange={(e) => {
