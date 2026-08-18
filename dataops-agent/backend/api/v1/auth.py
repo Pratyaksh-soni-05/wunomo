@@ -287,17 +287,20 @@ VALID_THEMES = ("light", "dark", "system")
 
 @router.get("/me")
 async def me(user=Depends(get_current_user)):
-    """Merges the JWT payload with a fresh DB read of `theme` - deliberately
-    not a JWT claim (same staleness reasoning as personality_mode/
-    operation_mode, Phase 3 decisions), so this must be read fresh here
-    rather than baked into the token at issue time."""
+    """Merges the JWT payload with a fresh DB read of `theme`/`email_verified`
+    - deliberately not JWT claims (same staleness reasoning as
+    personality_mode/operation_mode, Phase 3 decisions), so both must be read
+    fresh here rather than baked into the token at issue time. email_verified
+    in particular must never be stale: it's what item 25's Settings notice
+    checks to decide whether to show the "verify your email" prompt, and a
+    token issued before verifying would otherwise keep showing it forever."""
     from database import AsyncSessionLocal
     from models.all_models import User
     from sqlalchemy import select
     async with AsyncSessionLocal() as db:
-        r = await db.execute(select(User.theme).where(User.id == user["sub"]))
-        theme = r.scalar()
-    return {**user, "theme": theme}
+        r = await db.execute(select(User.theme, User.email_verified).where(User.id == user["sub"]))
+        row = r.one()
+    return {**user, "theme": row.theme, "email_verified": bool(row.email_verified)}
 
 
 class MeUpdate(BaseModel):

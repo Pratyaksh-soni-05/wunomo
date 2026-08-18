@@ -1,3 +1,8 @@
+// Item 22: rendering honors the workspace's configured IANA timezone
+// (Settings > Workspace), falling back to the browser's own detected zone
+// until one has ever been saved - see lib/timezone.ts.
+import { getStoredTimezone } from "./timezone";
+
 // This project's own backend emits three distinct raw timestamp shapes for
 // what is, in every case, a UTC value with no local-timezone meaning of its
 // own - see CLAUDE.md Hard Rule 3 and docs/context/GOTCHAS.md for the full
@@ -40,14 +45,31 @@ export function parseApiDate(iso: string | null | undefined): Date | null {
   return new Date(HAS_OFFSET.test(normalized) ? normalized : normalized + "Z");
 }
 
-/** Full date + time, in the browser's local timezone. */
+/**
+ * Full date + time, in the workspace's configured timezone (Settings >
+ * Workspace, item 22) - falls back to the browser's own detected zone
+ * until one has ever been saved. An invalid/unrecognized IANA name (should
+ * never happen via the Settings dropdown, but not impossible via a raw API
+ * call) makes toLocaleString throw - caught here so a bad stored value
+ * degrades to the browser's default zone instead of blanking the whole page.
+ */
 export function formatApiDate(iso: string | null | undefined, fallback = "—"): string {
   const d = parseApiDate(iso);
-  return d && !isNaN(d.getTime()) ? d.toLocaleString() : fallback;
+  if (!d || isNaN(d.getTime())) return fallback;
+  try {
+    return d.toLocaleString(undefined, { timeZone: getStoredTimezone() });
+  } catch {
+    return d.toLocaleString();
+  }
 }
 
-/** Date only (no time), in the browser's local timezone. */
+/** Date only (no time), in the workspace's configured timezone - see formatApiDate. */
 export function formatApiDateOnly(iso: string | null | undefined, fallback = "—"): string {
   const d = parseApiDate(iso);
-  return d && !isNaN(d.getTime()) ? d.toLocaleDateString() : fallback;
+  if (!d || isNaN(d.getTime())) return fallback;
+  try {
+    return d.toLocaleDateString(undefined, { timeZone: getStoredTimezone() });
+  } catch {
+    return d.toLocaleDateString();
+  }
 }

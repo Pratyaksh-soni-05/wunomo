@@ -7,11 +7,13 @@ import {
 } from "@/components/ui";
 import {
   getToken, decodeUserFromToken, getSettings, updateSettings,
-  createApiKey, listApiKeys, revokeApiKey,
+  createApiKey, listApiKeys, revokeApiKey, getOnboardingProfile, testSlackWebhook,
+  getMe, requestEmailVerifyCode, verifyEmailVerifyCode, saveSession, isChoose, isNoAccount,
   type NotifyOn, type ApiKeyItem,
 } from "@/lib/api";
 import { applyTheme, getStoredTheme, resolveEffectiveTheme, type ThemePreference } from "@/lib/theme";
 import { formatApiDateOnly } from "@/lib/dates";
+import { applyTimezone, detectBrowserTimezone, timezoneOptionsWithDetected } from "@/lib/timezone";
 
 // Kept in sync manually with backend/services/llm_service.py's
 // SUPPORTED_MODEL_OVERRIDES - there's no list endpoint to fetch this from
@@ -33,6 +35,7 @@ const NOTIFY_ON_LABELS: Record<keyof NotifyOn, string> = {
 
 const TABS = [
   { id: "workspace", label: "Workspace" },
+  { id: "profile", label: "Profile" },
   { id: "notifications", label: "Notifications" },
   { id: "ai-model", label: "AI Model" },
   { id: "theme", label: "Theme" },
@@ -75,8 +78,9 @@ export default function SettingsPage() {
             {tab === "workspace" && (
               <WorkspaceTab settings={s} canManage={canManage} onSave={(u) => saveMut.mutate(u)} saving={saveMut.isPending} />
             )}
+            {tab === "profile" && <ProfileTab token={token} />}
             {tab === "notifications" && (
-              <NotificationsTab prefs={s?.notification_prefs} canManage={canManage} onSave={(u) => saveMut.mutate(u)} saving={saveMut.isPending} />
+              <NotificationsTab token={token} prefs={s?.notification_prefs} canManage={canManage} onSave={(u) => saveMut.mutate(u)} saving={saveMut.isPending} />
             )}
             {tab === "ai-model" && (
               <AiModelTab current={s?.ai_model_override ?? null} canManage={canManage} onSave={(u) => saveMut.mutate(u)} saving={saveMut.isPending} />
@@ -111,11 +115,16 @@ function WorkspaceTab({
   const [name, setName] = useState("");
   const [timezone, setTimezone] = useState("");
   const [description, setDescription] = useState("");
+  const tzOptions = timezoneOptionsWithDetected();
 
   useEffect(() => {
     if (!settings) return;
     setName(settings.name ?? "");
-    setTimezone(settings.timezone ?? "");
+    // Item 22: an unconfigured workspace defaults the dropdown to the
+    // browser's own detected zone ("correct according to the machine's
+    // timezone") rather than a blank/arbitrary value - the user can still
+    // override it, but the first thing they see is already right.
+    setTimezone(settings.timezone || detectBrowserTimezone());
     setDescription(settings.description ?? "");
   }, [settings]);
 
@@ -124,11 +133,26 @@ function WorkspaceTab({
       <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 480 }}>
         {!canManage && <ReadOnlyNotice />}
         <Input label="Workspace name" value={name} disabled={!canManage} onChange={(e) => setName(e.target.value)} />
-        <Input label="Timezone" placeholder="e.g. America/New_York" value={timezone} disabled={!canManage} onChange={(e) => setTimezone(e.target.value)} />
+        <Select label="Timezone" value={timezone} disabled={!canManage} onChange={(e) => setTimezone(e.target.value)}>
+          {tzOptions.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+        </Select>
+        <p className="text-muted text-sm" style={{ marginTop: -8 }}>
+          Applies to every timestamp shown across the app for everyone in this workspace.
+        </p>
         <Input label="Description" placeholder="Optional" value={description} disabled={!canManage} onChange={(e) => setDescription(e.target.value)} />
         {canManage && (
           <div>
-            <Button size="sm" disabled={saving || !name.trim()} onClick={() => onSave({ name, timezone, description })}>
+            <Button
+              size="sm"
+              disabled={saving || !name.trim()}
+              onClick={() => {
+                // Applies to this browser immediately rather than waiting
+                // for the next full-shell mount to reconcile from the
+                // server - same reasoning as ThemeTab's applyTheme() call.
+                applyTimezone(timezone);
+                onSave({ name, timezone, description });
+              }}
+            >
               {saving ? "Saving…" : "Save"}
             </Button>
           </div>
@@ -138,34 +162,240 @@ function WorkspaceTab({
   );
 }
 
+// ---------- Profile (item 23: surface onboarding answers, read-only) ----------
+
+function ProfileField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="input-label" style={{ marginBottom: 4 }}>{label}</div>
+      <div className="text-sm">{value}</div>
+    </div>
+  );
+}
+
+// Item 25 (second half): "invalid email task should be there when the
+// email not verified." Reuses the existing email-code login endpoints as
+// a proof-of-ownership check on the account's CURRENT email - it's the
+// same infrastructure, not a new verification mechanism, since re-proving
+// you can receive mail at your own address is functionally identical to
+// logging in via a code. Building a flow to CHANGE to a genuinely new
+// email is a separate, larger, more security-sensitive piece (JWT
+// reissue semantics, cross-tenant uniqueness, whether the old address
+// gets notified) - deliberately not built here; see the session notes.
+function EmailVerificationCard({ token }: { token: string }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const me = useQuery({ queryKey: ["me"], queryFn: () => getMe(token) });
+  const [sent, setSent] = useState(false);
+  const [code, setCode] = useState("");
+  const [sending, setSending] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+
+  if (me.isLoading) return <Skeleton style={{ height: 60, borderRadius: 12 }} />;
+  if (!me.data || me.data.email_verified) return null;
+
+  const email = me.data.email;
+
+  const sendCode = async () => {
+    setSending(true);
+    try {
+      const result = await requestEmailVerifyCode(email);
+      // The endpoint returns 200 with {status: "rate_limited"} rather than
+      // an error status (same enumeration-safety reasoning as the login
+      // flow this is shared with) - found live while verifying this: after
+      // enough requests in the last hour, this branch fires and no code is
+      // actually sent. Must not fall through to the success toast/code-entry
+      // view, or the user is left staring at a code box that can never
+      // succeed with no indication why.
+      if (result.status === "rate_limited") {
+        toast.push("Too many code requests recently — wait a bit and try again.", "warning");
+        return;
+      }
+      setSent(true);
+      toast.push(`Verification code sent to ${email}.`, "default");
+    } catch {
+      toast.push("Couldn't send a verification code. Try again.", "danger");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const verify = async () => {
+    if (!code.trim()) return;
+    setVerifying(true);
+    try {
+      const result = await verifyEmailVerifyCode(email, code.trim());
+      if (isChoose(result) || isNoAccount(result)) {
+        toast.push("Couldn't verify — try requesting a new code.", "danger");
+        return;
+      }
+      saveSession(result.access_token, result.tenant_id, result.user_id);
+      qc.invalidateQueries({ queryKey: ["me"] });
+      toast.push("Email verified.", "success");
+      setSent(false);
+      setCode("");
+    } catch {
+      toast.push("Invalid or expired code.", "danger");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <Card>
+      <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <Badge variant="warning">Email not verified</Badge>
+        <p className="text-sm">
+          <strong>{email}</strong> hasn&apos;t been verified. Some account-security features
+          (like password reset) depend on being able to reach you at this address.
+        </p>
+        {!sent ? (
+          <div>
+            <Button size="sm" disabled={sending} onClick={sendCode}>
+              {sending ? "Sending…" : "Send verification code"}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex gap-2" style={{ maxWidth: 320 }}>
+            <Input placeholder="6-digit code" value={code} onChange={(e) => setCode(e.target.value)} />
+            <Button size="sm" disabled={verifying || !code.trim()} onClick={verify}>
+              {verifying ? "Verifying…" : "Verify"}
+            </Button>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function ProfileTab({ token }: { token: string }) {
+  const profile = useQuery({ queryKey: ["onboarding-profile"], queryFn: () => getOnboardingProfile(token) });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <EmailVerificationCard token={token} />
+
+      {profile.isLoading ? (
+        <Skeleton style={{ height: 160, borderRadius: 12 }} />
+      ) : !profile.data?.completed ? (
+        <Card>
+          <div className="card-body">
+            <p className="text-muted text-sm">
+              No onboarding answers on file yet — this workspace either signed up before onboarding
+              existed, or skipped it.
+            </p>
+          </div>
+        </Card>
+      ) : (
+        <Card>
+          <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 480 }}>
+            <p className="text-muted text-sm">
+              What you told us during setup. These aren&apos;t editable here yet — reach out if
+              anything needs correcting.
+            </p>
+            <ProfileField label="Role" value={profile.data.role || "—"} />
+            <ProfileField label="Industry" value={profile.data.industry || "—"} />
+            <ProfileField label="Company size" value={profile.data.company_size || "—"} />
+            <ProfileField label="How AXIOM helps you" value={profile.data.use_cases?.length ? profile.data.use_cases.join(", ") : "—"} />
+            <ProfileField label="Data stack" value={profile.data.data_stack?.length ? profile.data.data_stack.join(", ") : "—"} />
+            <ProfileField label="Completed" value={formatApiDateOnly(profile.data.completed_at)} />
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ---------- Notifications ----------
 
 function NotificationsTab({
-  prefs, canManage, onSave, saving,
+  token, prefs, canManage, onSave, saving,
 }: {
+  token: string;
   prefs: { slack_webhook_url: string | null; alert_email: string | null; notify_on: NotifyOn } | undefined;
   canManage: boolean;
   onSave: (u: { notification_prefs: { slack_webhook_url?: string; alert_email?: string; notify_on: NotifyOn } }) => void;
   saving: boolean;
 }) {
+  const toast = useToast();
   const [webhook, setWebhook] = useState("");
   const [email, setEmail] = useState("");
   const [notifyOn, setNotifyOn] = useState<NotifyOn>({
     incident_created: true, pipeline_failed: true, deployment_failed: true, approval_required: true,
   });
+  // Item 25 "double verification": a changed Slack URL must pass a real
+  // test send before Save is allowed to persist it - lastVerified tracks
+  // exactly which string value passed, so editing the field after a
+  // successful test re-locks Save (it's re-verifying THIS value, not a
+  // one-time unlock). Unchanged from what's already saved never needs
+  // re-testing at all.
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [lastVerified, setLastVerified] = useState<string | null>(null);
 
   useEffect(() => {
     if (!prefs) return;
     setWebhook(prefs.slack_webhook_url ?? "");
     setEmail(prefs.alert_email ?? "");
     setNotifyOn(prefs.notify_on);
+    setLastVerified(prefs.slack_webhook_url ?? null);
+    setTestResult(null);
   }, [prefs]);
+
+  const webhookChanged = webhook.trim() !== (prefs?.slack_webhook_url ?? "").trim();
+  const webhookNeedsTest = webhook.trim() !== "" && webhookChanged && webhook.trim() !== lastVerified;
+
+  const runTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await testSlackWebhook(token, webhook.trim());
+      setTestResult(result);
+      if (result.ok) {
+        setLastVerified(webhook.trim());
+        toast.push("Test message sent — check your Slack channel.", "success");
+      }
+    } catch {
+      setTestResult({ ok: false, error: "Couldn't reach the server to run the test." });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   return (
     <Card>
       <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 480 }}>
         {!canManage && <ReadOnlyNotice />}
-        <Input label="Slack webhook URL" placeholder="https://hooks.slack.com/..." value={webhook} disabled={!canManage} onChange={(e) => setWebhook(e.target.value)} />
+        <div>
+          <div className="flex gap-2" style={{ alignItems: "flex-end" }}>
+            <div style={{ flex: 1 }}>
+              <Input
+                label="Slack webhook URL" placeholder="https://hooks.slack.com/..." value={webhook}
+                disabled={!canManage}
+                onChange={(e) => { setWebhook(e.target.value); setTestResult(null); }}
+              />
+            </div>
+            {canManage && (
+              <Button
+                size="sm" variant="secondary"
+                disabled={testing || !webhook.trim()}
+                onClick={runTest}
+              >
+                {testing ? "Testing…" : "Test"}
+              </Button>
+            )}
+          </div>
+          {testResult && (
+            <p className={`text-sm ${testResult.ok ? "" : "text-danger"}`} style={{ marginTop: 4 }}>
+              {testResult.ok ? "✓ Verified — test message sent." : `✗ ${testResult.error}`}
+            </p>
+          )}
+          {!testResult && webhookNeedsTest && (
+            <p className="text-muted text-sm" style={{ marginTop: 4 }}>
+              Test this webhook before saving — a new or changed URL must send successfully at least once.
+            </p>
+          )}
+        </div>
         <Input label="Alert email" placeholder="alerts@yourcompany.com" value={email} disabled={!canManage} onChange={(e) => setEmail(e.target.value)} />
 
         <div>
@@ -189,7 +419,8 @@ function NotificationsTab({
           <div>
             <Button
               size="sm"
-              disabled={saving}
+              disabled={saving || webhookNeedsTest}
+              title={webhookNeedsTest ? "Test the Slack webhook before saving" : undefined}
               onClick={() => onSave({ notification_prefs: { slack_webhook_url: webhook, alert_email: email, notify_on: notifyOn } })}
             >
               {saving ? "Saving…" : "Save"}

@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar, Topbar, CommandPalette } from "@/components/shell";
-import { getToken, decodeUserFromToken, getMe, type DecodedUser } from "@/lib/api";
+import { getToken, decodeUserFromToken, getMe, getSettings, type DecodedUser } from "@/lib/api";
 import { QueryProvider } from "@/lib/queryClient";
 import { applyTheme, getStoredTheme, type ThemePreference } from "@/lib/theme";
+import { applyTimezone, getStoredTimezone } from "@/lib/timezone";
 
 export default function AppShellLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -35,6 +36,23 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
       })
       .catch(() => {
         // Non-fatal - keep whatever localStorage already applied.
+      });
+
+    // Item 22: same reasoning as theme above, but the workspace's timezone
+    // (not per-user) is the source of truth here - getSettings() over
+    // getMe(). A workspace that's never set one yet gets timezone: null/""
+    // back, which must NOT overwrite the browser-detected default already
+    // sitting in localStorage.
+    getSettings(token)
+      .then((res) => {
+        const tz = res.settings.timezone;
+        if (tz && tz !== getStoredTimezone()) {
+          applyTimezone(tz);
+        }
+      })
+      .catch(() => {
+        // Non-fatal - keep whatever localStorage/browser-detected zone is
+        // already in effect.
       });
   }, [router]);
 

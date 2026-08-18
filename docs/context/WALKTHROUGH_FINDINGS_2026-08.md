@@ -50,10 +50,10 @@ for every item.
 | 19 | 8.3 → SQL execute and dry run not running for csv but it should as per the sel;f test guide from claude | §8.3 | Bug | image13.png | Closed (2026-08-19) — diagnosed as a guide error, not a product bug; see closure note |
 | 20 | got logged out randomly maybe after 1 hour | — | Bug | none identified | Open |
 | 21 | incidents banner does not go from dashboard notifications evenm after resolving and checking the incident. No clode button to clode the popup on investigate prompt tab | — | Bug | image2.png | Closed (2026-08-19) |
-| 22 | Settings page full customize it. The timezone should be a drop down menu instead of manually typing timezone and after setting timezone it should work and should be correct according to machines timezone | — | Unclear | image14.png | Open |
-| 23 | Onm first sign up some questionnaire is asked for more better understanding of user so store those answers in the user profile section in the setting tab | — | Feature | none identified | Open |
+| 22 | Settings page full customize it. The timezone should be a drop down menu instead of manually typing timezone and after setting timezone it should work and should be correct according to machines timezone | — | Unclear | image14.png | Closed (2026-08-19) |
+| 23 | Onm first sign up some questionnaire is asked for more better understanding of user so store those answers in the user profile section in the setting tab | — | Feature | none identified | Closed (2026-08-19) |
 | 24 | Main change very important; PUT AXIOM in a sub folder in the dashboard with all the other employees. The side panel make it free free up some space. Like first i click on ai employees then i choose axiom and then the side panel changes accordingly and all axiom chat features appear in the side panel. Axiom is not the main employee is just the first on to be built so put it with all the other employees yet to come in a sub section. | — | Feature | none identified | Closed (2026-08-19) |
-| 25 | double verification for changing the mail or slack url anbd invalid email task should be there when the email not verified. | — | Feature | image8.png | Open |
+| 25 | double verification for changing the mail or slack url anbd invalid email task should be there when the email not verified. | — | Feature | image8.png | Closed (2026-08-19) — Slack double-verification and the unverified-email notice only; changing to a NEW email is a separate, unbuilt piece, see closure note |
 | 26 | approvals: check from different accounts for cicd action/ agent action | — | Untested | image19.png | Open |
 | 27 | The self test guide has nothing on testing the CICD and automations feature please see into that too. | — | Feature | none identified | Open |
 | 28 | ALL OF THIS HAS TO BE AUTOMATED the user upload data in the axiom chat is what we want and then the ai employee carries out all the remaining steps on its opwnm is what the main idea is just like claude code try to make the possible . make it chat friendly all the major working the user does while chatting with axiom if data needed axiom asks for it user uploads the data csv and axiom puts it in datasources and does profiling and all other steps on its own this is what we want fully automated process to reduce human effort. | — | Feature | none identified | Open |
@@ -75,6 +75,7 @@ for every item.
 | 44 | Two real, backend-wired frontend routes — `/cicd` and `/` (the marketing landing page) — have zero presence in `docs/SELF_TEST_GUIDE.md`, the only self-test walkthrough this product has; neither is mentioned even as a deliberate exclusion (contrast with Billing, which is explicitly named and reasoned about in §13). A tester who only ever follows the guide end to end would never be prompted to open either screen. Found during the 2026-08-18 product status audit (frontend-route subagent pass). Not fixed — a test-process gap, not a product bug. | — | Untested | 2026-08-18 audit | Open |
 | 45 | The API emits three different raw timestamp string shapes for the same conceptual "when did this happen" value, depending on which serialization path produced it: a bare naive string with microseconds (`"2026-08-16 09:46:54.933113"`), a bare Pydantic-serialized naive string (`"2026-08-16T09:46:54.933113"`), and a genuinely tz-aware ISO string with trailing `Z` (CI/CD models only, per Hard Rule 3's documented exception). The frontend now normalizes all three correctly via `frontend/src/lib/dates.ts` (built for items 2/3, closed 2026-08-19), but any consumer hitting the API directly — a script, an integration, a future mobile client — gets the raw inconsistency with no way to distinguish "naive, needs UTC assumed" from "already aware" except by knowing which endpoint it came from. Found while building items 2/3's fix, 2026-08-19. Not fixed — an API-contract problem, not urgent, explicitly out of scope for this session. | — | Bug | none | Open |
 | 46 | `Task.originating_session_id` (`models/all_models.py:465`) exists in the model and its own migration specifically to trace a task back to the chat session it was spawned from, but no code path ever sets it — confirmed by grepping the entire backend: `create_task()` (`api/v1/tasks.py:308`) never assigns it, and the frontend's "+ Start a Task" flow (`TaskCreateModal.tsx` → `createTask()`) never sends a session_id in the first place. Every task in this codebase has `originating_session_id = NULL` regardless of whether it was actually started from within a chat conversation. Found 2026-08-19 while investigating item 4 (delete-conversation) — needed to confirm whether deleting a session could orphan a task; it can't, because none are actually linked. Not fixed — logged only. | — | Bug | none | Open |
+| 47 | `services/auth_service.py`'s email-code rate limiter (`MAX_REQUESTS_PER_IP_PER_HOUR = 20`, key `otp:ip:{ip}`) is real Redis state shared across an entire pytest session with no per-test-file reset fixture found. Running a sufficiently broad `-k` selection that happens to pull in several files calling `POST /auth/email-code/request` (e.g. `-k "auth or settings"`) can exhaust the 20/hour budget purely from the suite's own combined request volume, then spuriously fail `test_email_code_auth.py::test_resend_cooldown_blocks_immediate_second_request` and `::test_rate_limit_bookkeeping_is_symmetric_for_nonexistent_emails` — both pass cleanly in isolation (`pytest tests/test_email_code_auth.py`, 11/11) and only fail when combined with enough sibling tests to burn the shared quota first; confirmed live by reading `otp:ip:127.0.0.1` from Redis directly after a failing run (23, over the 20 cap) and after a clean isolated run. Found 2026-08-19 while running the full auth/settings suite to verify item 25's changes — not a regression from that work, and not fixed here (test-infrastructure fragility, not a product bug). | — | Bug | none | Open |
 
 ---
 
@@ -263,6 +264,97 @@ to Approvals** button that navigated to `/approvals`; confirmed that
 conversation then deleted cleanly — proving the block is genuinely
 pending-only, not a blanket "ever had an approval" refusal. `npx tsc
 --noEmit` and `npm run build` both clean.
+
+## Batch 3, items 22/23/25 closed (2026-08-19) — settings customization
+
+- **Item 22**: Workspace tab's Timezone field is now a real `<select>` of
+  IANA zone names (`frontend/src/lib/timezone.ts`, new), not free text.
+  Defaults to the browser's own detected zone (`Intl.DateTimeFormat().
+  resolvedOptions().timeZone`) the first time, satisfying "correct
+  according to the machine's timezone" out of the box, while staying
+  editable per-workspace after that. The real gap this closes: the field
+  previously saved to the DB but was never actually *read* by anything —
+  `dates.ts`'s `formatApiDate`/`formatApiDateOnly` (built for items 2/3)
+  always rendered in the browser's own local zone, full stop, regardless
+  of what was saved here. Both now read the configured zone via
+  `getStoredTimezone()`, applied through `toLocaleString(undefined,
+  {timeZone})`. Live-verified with a real fixture: set the workspace to
+  `America/New_York` (deliberately far from this machine's real zone,
+  confirmed via `Intl.DateTimeFormat().resolvedOptions().timeZone` →
+  `Asia/Calcutta`, so a match can't be coincidental), compared a real
+  pipeline run's raw DB timestamp (`2026-08-16 09:45:00`, naive/UTC)
+  against the Pipelines page's rendered value (`8/16/2026, 5:44:59 AM`) —
+  exactly the expected UTC-4 (EDT) offset. `(app)/layout.tsx` reconciles
+  the browser's cached value against the server's on every shell mount,
+  same pattern as the existing theme reconciliation.
+- **Item 23**: new **Profile** tab in Settings surfaces the real
+  `OnboardingProfile` row (role, industry, company size, use cases, data
+  stack, completion date) read-only via the existing, previously-unused
+  `GET /api/v1/onboarding/` endpoint — no backend changes needed, it
+  already returned everything needed. Not editable from here yet (not
+  asked for).
+- **Item 25**: two of the finding's three asks were built; the third was
+  investigated and deliberately deferred, not guessed at:
+  - **Slack webhook "double verification"**: new `POST /api/v1/settings/
+    test-slack-webhook` sends a real test message to the URL server-side
+    (host restricted to `hooks.slack.com` — posting to an arbitrary
+    caller-supplied URL from the backend is a textbook SSRF vector, closed
+    off since there's no legitimate reason this field needs to reach
+    anywhere else). The Notifications tab's **Save** button stays disabled
+    until a *changed* Slack URL has passed a real test — editing the field
+    after a successful test re-locks Save, since it's re-verifying that
+    specific value, not a one-time unlock. **A real bug was found and
+    fixed live during this verification**: the endpoint originally raised
+    an `HTTPException` for a non-Slack-domain URL, which the frontend's
+    generic `request()` helper throws as an `ApiError` on any non-2xx —
+    the Test button's error handler only had a path for the `{ok:false,
+    error}` 200-status shape every other failure uses, so a bad-domain URL
+    showed the same generic "couldn't reach the server" message as a
+    genuine dead connection, hiding the real reason. Fixed by making the
+    domain check return the same `{ok:false, error}` shape as every other
+    failure path. Live-verified all three states: a non-Slack URL (clean,
+    specific rejection), a well-formed-but-fake Slack URL (`/services/
+    FAKE/FAKE/FAKE` — real POST to Slack, Slack's own `404 no_team`
+    response correctly surfaced), and clearing the field back to empty
+    (Save re-enabled, no pending unverified change).
+  - **"Invalid email task... when the email not verified"**: new
+    **Profile** tab card shows an "Email not verified" badge + a
+    send-code/verify-code flow when `User.email_verified` is false —
+    reuses the *existing*, already-tested email-code login endpoints
+    (`POST /auth/email-code/request` + `/verify`) as the ownership proof,
+    rather than building new verification infrastructure; re-proving you
+    can receive mail at your own current address is functionally the same
+    check as logging in via a code. `GET /auth/me` was extended to return
+    `email_verified` (previously only `theme`). **A second real bug was
+    found live**: `sendCode()` didn't check the request endpoint's
+    `status` field, so a rate-limited request (real, pre-existing Redis
+    logic — 5/email/hour, 20/IP/hour) returned 200 with `{"status":
+    "rate_limited"}` and was shown as a false "code sent" success, leaving
+    the user staring at a code box that could never succeed with no
+    indication why. Fixed to check `status` and show a real "wait and try
+    again" message instead. Live-verified the full flow end-to-end
+    against a real DB fixture (a known code's hash inserted directly, to
+    avoid needing real inbox access) — code accepted, banner disappeared,
+    "Email verified." toast, `email_verified` flipped true via a direct
+    `GET /auth/me` check; then reverted the demo account back to
+    unverified afterward so the walkthrough account's real state isn't
+    artificially changed by this verification pass.
+  - **NOT built**: a flow to change your account email to a genuinely
+    *new* address. Investigated: no such endpoint exists today at all
+    (`PATCH /auth/me` only ever supported `theme`). Real design questions
+    with no obvious single right answer — does the JWT need reissuing
+    mid-session, is uniqueness checked across every tenant or just the
+    caller's own, does the *old* address get notified as a security
+    signal — make this a genuinely separate, larger, more security-
+    sensitive piece than "verify the email you already have," which is
+    all this pass built. Sized but not started; needs a design decision
+    before building.
+  - Two new items surfaced purely from this verification pass, both
+    pre-existing and unrelated to any of the above changes: item 47 (a
+    real test-suite fragility — the email-code rate limiter's Redis state
+    is shared across an entire pytest session with no per-file reset,
+    so a broad enough `-k` selection can spuriously fail two
+    `test_email_code_auth.py` tests that pass cleanly in isolation).
 
 ## Notes on screenshot correlation
 

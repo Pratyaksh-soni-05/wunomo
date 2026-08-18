@@ -864,6 +864,14 @@ export function getSettings(token: string): Promise<{ settings: TenantSettings }
   return authedRequest("/api/v1/settings/", token);
 }
 
+// Item 25: server-side test send, gating the Notifications tab's Save
+// button in the frontend until a changed Slack URL has passed this.
+export function testSlackWebhook(token: string, webhook_url: string): Promise<{ ok: boolean; error?: string }> {
+  return request("/api/v1/settings/test-slack-webhook", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ webhook_url }),
+  });
+}
+
 export function updateSettings(
   token: string,
   updates: Partial<{
@@ -879,6 +887,22 @@ export function updateSettings(
   });
 }
 
+// ---------- Onboarding (item 23: surfaced read-only in Settings) ----------
+
+export interface OnboardingProfileData {
+  completed: boolean;
+  role?: string | null;
+  industry?: string | null;
+  company_size?: string | null;
+  use_cases?: string[];
+  data_stack?: string[];
+  completed_at?: string | null;
+}
+
+export function getOnboardingProfile(token: string): Promise<OnboardingProfileData> {
+  return authedRequest("/api/v1/onboarding/", token);
+}
+
 // ---------- Auth /me — theme (Phase 17) ----------
 
 export interface MeInfo {
@@ -887,10 +911,38 @@ export interface MeInfo {
   email: string;
   role: string;
   theme: string | null;
+  email_verified: boolean;
 }
 
 export function getMe(token: string): Promise<MeInfo> {
   return authedRequest("/api/v1/auth/me", token);
+}
+
+// ---------- Email verification (item 25) ----------
+// Reuses the same request/verify endpoints the email-code login flow
+// already uses (services/auth_service.py) - "verify your current email"
+// and "log in via a code sent to your email" are the same proof of
+// ownership, so this deliberately doesn't duplicate that infrastructure.
+// verify's success response includes a fresh access_token (same shape as
+// login) since resolve_identity() always issues one on a match; the caller
+// should saveSession() it so the token backing future requests reflects
+// the (unchanged, but now re-proven) identity.
+
+export function requestEmailVerifyCode(email: string): Promise<{ status: string }> {
+  return request("/api/v1/auth/email-code/request", {
+    method: "POST", body: JSON.stringify({ email }),
+  });
+}
+
+// Typed as the full IdentityResult union (not just AuthSuccess) because the
+// endpoint is shared with login - a "choose_workspace"/"no_account" result
+// should never actually happen when re-verifying the email already backing
+// the caller's current session, but the type can't promise that, so callers
+// must narrow with isChoose()/isNoAccount() before trusting the token.
+export function verifyEmailVerifyCode(email: string, code: string): Promise<IdentityResult> {
+  return request("/api/v1/auth/email-code/verify", {
+    method: "POST", body: JSON.stringify({ email, code }),
+  });
 }
 
 export function updateMe(token: string, updates: { theme: string | null }): Promise<{ theme: string | null }> {

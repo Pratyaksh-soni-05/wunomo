@@ -1109,27 +1109,51 @@ screen — or AXIOM runs on your behalf in chat — appear here."*
 
 ---
 
-## 9. SETTINGS — five tabs, one real credential flow
+## 9. SETTINGS — six tabs, one real credential flow
 
-*(~10 minutes. Click* **Settings** *in the sidebar, bottom of the ADMIN
-section. All five tabs are enabled for you here since a fresh signup's
+*(~12 minutes. Click* **Settings** *in the sidebar, bottom of the ADMIN
+section. All six tabs are enabled for you here since a fresh signup's
 first user is always Owner — a non-owner/admin would see the same tabs
 with every field disabled and a "read-only" notice instead, which this
 guide doesn't walk through since it needs a second real member to test.)*
 
-Tabs across the top: **Workspace**, **Notifications**, **AI Model**,
-**Theme**, **API Keys**.
+Tabs across the top: **Workspace**, **Profile**, **Notifications**,
+**AI Model**, **Theme**, **API Keys**.
 
-**9.1 Workspace tab.** Fields: **Workspace name**, **Timezone** (try
-`Asia/Kolkata`), **Description**. Change one, click **Save**. **What you
-should see:** "Settings saved." toast.
+**9.1 Workspace tab.** Fields: **Workspace name**, **Timezone**, and
+**Description**. As of 2026-08-19 (item 22), Timezone is a real dropdown
+of IANA zone names, not free text — it defaults to your browser's own
+detected zone the first time (so it's already correct out of the box),
+and applies to every timestamp rendered anywhere in the app for everyone
+in this workspace, not just this screen. Pick a different zone (e.g.
+`America/New_York`), click **Save**. **What you should see:** "Settings
+saved." toast, and a moment later, any timestamp elsewhere in the app
+(try **Pipelines**) reflects the new zone — not your machine's local
+time.
 
-**9.2 Notifications tab.** Fields: **Slack webhook URL**, **Alert email**,
+**9.2 Profile tab (new, 2026-08-19, item 23/25).** Two cards. If your
+account's email isn't verified yet (true for every fresh signup), the
+first card shows an **Email not verified** badge with a **Send
+verification code** button — click it, a 6-digit code lands in your
+inbox (reuses the same code delivery as email-code login), enter it and
+click **Verify**. **What you should see:** the card disappears and a
+"Email verified." toast. If you've already verified, this card doesn't
+render at all. The second card shows the answers you gave during
+onboarding — role, industry, company size, use cases, data stack — as
+read-only reference; there's no edit control here yet.
+
+**9.3 Notifications tab.** Fields: **Slack webhook URL**, **Alert email**,
 and a checkbox group labeled **Notify on** with exactly four options:
 **Incident created**, **Pipeline failed**, **Deployment failed**,
-**Approval required**. Toggle a couple, click **Save**.
+**Approval required**. As of 2026-08-19 (item 25), a changed Slack URL
+must pass a real **Test** first — type a URL and click **Test** next to
+the field; a non-Slack URL is rejected immediately, a real Slack webhook
+gets an actual test message posted to it. **Save** stays disabled (with
+an inline note explaining why) until the current URL has passed a test —
+leaving the field unchanged from what's already saved never requires
+re-testing. Toggle a couple of the checkboxes, click **Save**.
 
-**9.3 AI Model tab.** A dropdown labeled **Model** with three options:
+**9.4 AI Model tab.** A dropdown labeled **Model** with three options:
 **Use plan default**, **Gemini 3.5 Flash**, **Llama 3.3 70B (Groq)**. Pick
 **Llama 3.3 70B (Groq)** and **Save** — this is a real per-tenant
 override; your next chat message or plan generation should show
@@ -1137,14 +1161,14 @@ override; your next chat message or plan generation should show
 afterward if you don't want every remaining AI call in this guide pinned
 to Groq.
 
-**9.4 Theme tab.** Three buttons: **Light**, **Dark**, **System** — click
+**9.5 Theme tab.** Three buttons: **Light**, **Dark**, **System** — click
 each, watch the page actually re-theme, and note the status line at the
 bottom (*"Currently rendering: Dark"* etc.) confirms which one is active.
 This setting follows your account across devices (different from the
 quick theme-toggle icon in the topbar, covered in Section 12, which is
 local-only and doesn't offer System).
 
-**9.5 API Keys tab — the one real credential flow in the app.** Read the
+**9.6 API Keys tab — the one real credential flow in the app.** Read the
 notice first: *"API keys are for reference and audit today — nothing in
 AXIOM currently accepts one as a request credential. Authenticating
 requests with a key is planned but not yet built."* Type a name (e.g.
@@ -1328,7 +1352,7 @@ the kind of thing worth writing down.
   will report every expected column as missing. This is real and current
   — if §11.3's Validate reports failures that don't make sense given a
   correctly profiled source, this is why, not a new bug.
-- **API keys (Section 9.5) don't authenticate anything** — the notice in
+- **API keys (Section 9.6) don't authenticate anything** — the notice in
   the UI already tells you this; it's the full CRUD lifecycle with no
   request-authentication path wired up yet, by design at this stage of
   the build.
