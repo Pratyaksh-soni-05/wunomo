@@ -41,7 +41,7 @@ for every item.
 | 10 | increase all button sizes make them more aesthetic easy to click and only text is written when cursor hovers on top then a greay button boundary appears just like claude or any other website | — | Design | image21.jpg, image18.jpg, image3.jpg | Open |
 | 11 | 'help' → should give error and not generate any plan in step 4.1 in self test guide but it is working and still appearing in the task list with plan approval | §4.1 | Bug | none identified | Open |
 | 12 | when rejected the assurance box is not appearing back again | — | Unclear | image22.jpg (uncertain — see note below) | Open |
-| 13 | Add re run buttons | — | Unclear | none identified | Open |
+| 13 | Add re run buttons | — | Unclear | none identified | Closed (2026-08-19) |
 | 14 | step 4.50 in self test guide Terminal response not correct | §4.50 (as written) | Unclear | image20.png | Open |
 | 15 | 4.54 check terminal output again | §4.54 (as written) | Unclear | image9.png | Open |
 | 16 | in step 6.1 in self test guide cards not reloading after refresh | §6.1 | Bug | none identified | Closed (2026-08-17) |
@@ -355,6 +355,37 @@ pending-only, not a blanket "ever had an approval" refusal. `npx tsc
     is shared across an entire pytest session with no per-file reset,
     so a broad enough `-k` selection can spuriously fail two
     `test_email_code_auth.py` tests that pass cleanly in isolation).
+
+## Batch 3, item 13 closed (2026-08-19) — re-run buttons on the Tasks list
+
+Per the user's own clarification before building: re-run buttons live on
+the Tasks list, per row, re-running a completed or failed task with the
+same goal to generate a fresh plan (not resuming the old one). Cost
+confirmed before building, as asked: `generate_plan()` is a real LLM call,
+normally exactly 1, up to 2 only if the model's first response is
+malformed JSON and needs the existing one-shot corrective retry already
+built into `task_planner.py` — identical cost profile to starting any new
+task via "+ Start a Task", since re-run calls the exact same
+`POST /tasks/` endpoint with the original task's `goal`/`task_shape`.
+
+Button only renders for `completed` / `completed_with_unconfirmed_steps`
+/ `failed` — any in-progress or paused status shows nothing. Per the
+user's explicit requirement that this not be "one click away from
+burning quota without the user knowing": clicking **Re-run** arms the
+button into **Confirm — 1 AI call** for 4 seconds (auto-reverts,
+nothing spent, if left alone); only the second click actually fires.
+No other costly/destructive action in this app uses a confirm step —
+this is the only one that spends real AI credits from a list-row click,
+which is why it gets one and they don't.
+
+Live-verified against a real completed task, spending one real Gemini
+call (12 real calls already logged today before this, well under any
+daily concern): confirmed the button is absent on Draft Plan/Paused
+rows and present on Completed rows; confirmed a single click arms
+without firing (URL/list unchanged); confirmed the arm reverts on its
+own after the timeout with nothing spent; confirmed the second click
+generates a real plan and navigates straight to the new task's detail
+page, landing in Draft Plan exactly like any other new task.
 
 ## Notes on screenshot correlation
 

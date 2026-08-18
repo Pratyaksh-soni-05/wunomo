@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import { Button, Card, Badge, Table, Thead, Tbody, Tr, Th, Td, Skeleton } from "@/components/ui";
-import { getToken, getTasks, TASK_SHAPES, type TaskSummary } from "@/lib/api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button, Card, Badge, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast } from "@/components/ui";
+import { getToken, getTasks, createTask, TASK_SHAPES, ApiError, type TaskSummary, type TaskShapeValue } from "@/lib/api";
 import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
 import { taskStatusVariant, taskStatusLabel } from "@/components/tasks/taskDisplay";
 import { formatApiDate } from "@/lib/dates";
@@ -13,6 +13,73 @@ const TASK_COUNTS_POLL_MS = 20000;
 
 function shapeLabel(shape: string): string {
   return TASK_SHAPES.find((s) => s.value === shape)?.label ?? shape;
+}
+
+// Item 13: re-run a completed/failed task with the same goal, generating a
+// fresh plan (a real generate_plan() call - same cost as any new task,
+// normally 1 LLM call, up to 2 if the model's first response needs the
+// existing one-shot corrective retry - see task_planner.py). Confirmed
+// with the user before building that this button must not be one click
+// away from spending that quota with no warning, hence the inline
+// click-to-arm-then-confirm pattern below instead of firing immediately
+// (no other destructive/costly action in this app uses a confirm dialog,
+// but none of them spend real AI credits either - this one does).
+const RERUNNABLE_STATUSES = new Set(["completed", "completed_with_unconfirmed_steps", "failed"]);
+const CONFIRM_ARM_MS = 4000;
+
+function RerunButton({ token, task }: { token: string; task: TaskSummary }) {
+  const toast = useToast();
+  const router = useRouter();
+  const qc = useQueryClient();
+  const [armed, setArmed] = useState(false);
+  const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (armTimer.current) clearTimeout(armTimer.current); }, []);
+
+  const rerunMut = useMutation({
+    mutationFn: () => createTask(token, { goal: task.goal, task_shape: task.task_shape as TaskShapeValue }),
+    onSuccess: (newTask) => {
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      toast.push("Fresh plan generated — review it before approving.", "success");
+      router.push(`/tasks/${newTask.id}`);
+    },
+    onError: (err: unknown) => {
+      const detail = err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Failed to generate a plan.";
+      toast.push(detail, "danger");
+    },
+  });
+
+  if (!RERUNNABLE_STATUSES.has(task.status)) return null;
+
+  if (!armed) {
+    return (
+      <Button
+        size="sm" variant="secondary"
+        onClick={(e) => {
+          e.stopPropagation();
+          setArmed(true);
+          armTimer.current = setTimeout(() => setArmed(false), CONFIRM_ARM_MS);
+        }}
+      >
+        Re-run
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      size="sm" variant="primary"
+      disabled={rerunMut.isPending}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (armTimer.current) clearTimeout(armTimer.current);
+        setArmed(false);
+        rerunMut.mutate();
+      }}
+    >
+      {rerunMut.isPending ? "Generating…" : "Confirm — 1 AI call"}
+    </Button>
+  );
 }
 
 export default function TasksPage() {
@@ -59,6 +126,7 @@ export default function TasksPage() {
                   <Th>Status</Th>
                   <Th>Plan</Th>
                   <Th>Created</Th>
+                  <Th>Actions</Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -73,6 +141,7 @@ export default function TasksPage() {
                     <Td><Badge variant={taskStatusVariant(t.status)}>{taskStatusLabel(t.status)}</Badge></Td>
                     <Td>{t.plan_edited ? <Badge variant="warning">Edited</Badge> : <span className="text-muted text-sm">Original</span>}</Td>
                     <Td><span className="text-sm text-muted">{formatApiDate(t.created_at)}</span></Td>
+                    <Td><RerunButton token={token} task={t} /></Td>
                   </Tr>
                 ))}
               </Tbody>

@@ -597,6 +597,20 @@ the identical button inside the empty state. It's the literal same
 component "+ Start a Task" in chat opens; nothing behaves differently
 depending on which entry point you used.)*
 
+**Re-run (new 2026-08-19, item 13).** Any task whose status is
+**Completed**, **Completed With Unconfirmed Steps**, or **Failed** shows
+a **Re-run** button in the **Actions** column — a fresh plan with the
+exact same goal, from scratch (not a resume of the old run). It's a real
+AI-credit spend (one `generate_plan()` call, the same cost as starting
+any new task), so clicking it once doesn't fire anything yet: the button
+becomes **Confirm — 1 AI call** for a few seconds — click that to
+actually generate the plan, or leave it alone and it reverts to
+**Re-run** with nothing spent. A row whose task is still in progress
+(Draft Plan, Queued, Running, any Paused state) has no Re-run button at
+all — only a genuinely finished task can be re-run. Confirming takes you
+straight to the new task's detail page, already in **Draft Plan** —
+review and approve it same as any other.
+
 ### Part D — Hitting an approval gate (AXIOM asking permission)
 
 Some actions are riskier than just *looking at* things — syncing a real
