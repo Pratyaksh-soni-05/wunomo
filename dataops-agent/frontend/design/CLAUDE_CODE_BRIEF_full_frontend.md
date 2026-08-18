@@ -71,6 +71,19 @@ Blue used in dark is `#2277FF` (**4.86:1** on `#0A0A0B` ✓), **not** `#0056FF`,
 which measures 3.56:1 there and fails AA. This distinction is load-bearing;
 do not collapse the two blues into one token.
 
+**Canonical token (Fix 1, 2026-08-19): `--brand-blue`** — `#0056FF` light /
+`#2277FF` dark, one theme-aware name for exactly this pair. "One token" here
+means one *name*, not one *value* — the two hexes above stay two hexes,
+switched by theme; nothing about this token collapses them. Both the
+monogram (`.sidebar-logo-icon`) and `--focus-ring` point at `--brand-blue`
+now, not at each other — `--focus-ring` used to hold the literal value and
+the monogram borrowed it, which meant an a11y-driven change to the ring
+would have silently recoloured the logo too. Use `--brand-blue` directly
+for anything that needs exactly this pair; don't reach for `--focus-ring`
+or `--accent-fill` as a stand-in for "the brand blue" — neither is that job
+(`--focus-ring` is a ring's job, `--accent-fill` inverts to near-white in
+dark mode per Decision 1, which is correct for buttons and wrong for a logo).
+
 ### Status colours survive in both themes — non-negotiable
 
 The greyscale rule is for **chrome only**. Semantic state must stay chromatic
@@ -183,6 +196,36 @@ on the standard tier palette so it still reads as *the thing to click*.
 
 ---
 
+## 4. The near-black ceiling — a general rule, not a sidebar note
+
+Found while designing the sidebar's active/hover state (Phase 5, 2026-08-19),
+but it applies everywhere a selection/active state sits on a near-black
+surface (`#061024`/`#0A0A0B`-class — `--deep-ground`, `--bg`): **no subtle
+background tint reaches 3:1 against them.** White at 25% alpha only hits
+2.14:1; `--accent-fill` at 50% alpha over `--deep-ground` only hits 1.71:1.
+Getting a *fill* to 3:1 here means it stops being subtle and starts being a
+visible box — that's not a bug in any one component's tokens, it's what the
+contrast math does this close to true black.
+
+**The answer is not to chase 3:1 on the fill.** Selection/active states on
+these surfaces rely on **a solid-colour border plus text brightening**,
+which both read clearly at this darkness even when the fill behind them
+doesn't:
+- Border: a *solid* colour (not alpha-tinted) at normal contrast — e.g.
+  `--accent-fill` solid measures 3.41:1 against `--deep-ground`, comfortably
+  clearing non-text AA.
+- Text: going from a muted token to a fully-bright one (e.g. `--text-primary`
+  at 15+:1) is the dominant, unambiguous signal.
+- The fill itself stays as a quiet reinforcement, not the thing carrying the
+  contrast requirement.
+
+This is decided once, here, because it will come up again: **Phase 6's table
+row selection, list selection, and card selection** all face the identical
+problem in dark mode, and should reuse this pattern (solid border + text
+brightening) rather than re-deriving it per screen.
+
+---
+
 ## PHASE 0 — Audit. Change nothing.
 
 Report back:
@@ -286,13 +329,23 @@ Phase 2/5 after all:**
   consumers that had a border (`--ocean-100` light / `--border` dark),
   otherwise a grey dark chip would’ve kept a blue-tinted edge.
 
-**Still deferred to Phase 5 (sidebar/shell), not forgotten:**
-- `Sidebar.tsx:120`'s `stroke="rgba(255,255,255,0.4)"` and `Sidebar.tsx:167`'s
-  `border: "1.5px solid rgba(255,255,255,0.2)"` — two inline JSX literals,
-  left alone on purpose since Phase 5 is already touching this file's markup.
-- `.sidebar-item.active`/`.badge-count.badge-live`/`.input:focus`'s shadow
-  still derive from `--ocean-500`, not the new accent blue — same reasoning,
-  Phase 5's to reconcile.
+**All closed in Phase 5 (2026-08-19):**
+- `Sidebar.tsx:120`/`:167`'s inline `rgba()` literals → `--sidebar-chevron`/
+  `--sidebar-avatar-border`, values unchanged.
+- `.sidebar-item.active` → the near-black-ceiling pattern (§4): solid border
+  + text brightening, not fill contrast — `--sidebar-active-bg/-border/-text`.
+- `.badge-count.badge-live` and `.input:focus`'s shadow → repointed off
+  `--ocean-500` (Fix 2). `badge-live` uses `--brand-blue` (sidebar chrome
+  blue, since it lives on the permanently-dark sidebar in both app themes,
+  not the main-content semantic-status system); `.input:focus`'s shadow now
+  tracks `--accent-border` (itself `--focus-ring` → `--brand-blue`) instead
+  of a hardcoded Ocean base, so it can't drift from the border it glows
+  around.
+- `--accent-fill-a35` removed — orphaned once `.sidebar-item.active` moved
+  off the overlay pattern entirely.
+- `.sidebar-back-link`/`.sidebar-workspace-sel` brought into the Tier 3
+  hover language (border + lift, not lift alone) — one hover treatment in
+  the sidebar, not two.
 
 **Chart-series distinctness — noted, not fixed (2026-08-19):** `--chart-accent`
 measures 1.05–1.30:1 against the new success/warning/danger text colours in

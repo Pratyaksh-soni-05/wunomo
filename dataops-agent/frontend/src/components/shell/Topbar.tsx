@@ -129,13 +129,20 @@ export function Topbar({
         <div style={{ height: 16, width: 1, background: "var(--border)" }} />
         <ThemeToggle />
         <div style={{ position: "relative" }} ref={accountRef}>
-          <div
+          {/* Item 51 (2026-08-19): was a <div onClick> — no role, no
+              accessible name, not keyboard-reachable. Real button now,
+              same 44px target its neighboring topbar icon buttons already
+              got in Phase 2. */}
+          <button
             className="topbar-avatar"
             onClick={() => setAccountOpen((v) => !v)}
             title={user?.email ?? "Account"}
+            aria-label={user?.email ? `Account menu for ${user.email}` : "Account menu"}
+            aria-haspopup="menu"
+            aria-expanded={accountOpen}
           >
             {initials}
-          </div>
+          </button>
           {accountOpen && (
             <div className="notif-panel" style={{ width: 220 }}>
               <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>

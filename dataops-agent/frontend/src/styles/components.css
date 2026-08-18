@@ -355,7 +355,12 @@ tr.selected td { background: var(--accent-subtle-bg) !important; }
   padding: 48px; gap: 16px;
   position: relative; overflow: hidden;
 }
-.auth-brand-wordmark { height: 22px; width: auto; color: var(--on-dark); flex-shrink: 0; }
+/* Fix 1 (2026-08-19): --brand-blue, not --on-dark — the wordmark is one of
+   dark mode's two allowed blues, same rule as the sidebar monogram.
+   Contrast against the light-mode mesh's brightest point is real and
+   worth flagging (see report): only 1.83:1 there, though 3.41:1 against
+   the mesh's dark base and 4.26:1 on the flat dark-mode panel. */
+.auth-brand-wordmark { height: 22px; width: auto; color: var(--brand-blue); flex-shrink: 0; }
 .auth-brand-copy {
   font-family: var(--font-display); font-size: 21px; line-height: 1.35; font-weight: 500;
   color: var(--on-accent-text); max-width: 320px;
@@ -434,21 +439,44 @@ tr.selected td { background: var(--accent-subtle-bg) !important; }
 
 .sidebar {
   width: var(--sidebar-w); min-height: 100vh; background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
   display: flex; flex-direction: column; flex-shrink: 0;
   position: fixed; top: 0; left: 0; bottom: 0; z-index: 40;
   transition: width var(--t-slow);
 }
 .sidebar.collapsed { width: var(--sidebar-w-collapsed); }
 .sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 16px 14px; }
-.sidebar-logo-icon { width: 28px; height: 28px; background: var(--midnight-500); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+/* The "tiled" treatment — a solid blue square with the mark in white on
+   top, same design as src/app/icon.svg (the favicon). Chosen over a bare
+   WunomoMark because a solid-fill tile stays legible smaller than a
+   transparent-background mark does. Background is --brand-blue (Fix 1,
+   2026-08-19) — the monogram's own canonical token, not borrowed from
+   --focus-ring (a change to the ring for a11y reasons shouldn't silently
+   recolour the logo) and NOT --accent-fill, which inverts to near-white in
+   dark mode (Decision 1, a rule for buttons, not the monogram) — caught
+   that exact bug live in the dark-theme screenshot before shipping it.
+   28px at rest; the collapsed floor below is separate and larger — below
+   32px the mark stops reading as "w" and looks like "u". */
+.sidebar-logo-icon {
+  width: 28px; height: 28px; background: var(--brand-blue); border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.sidebar-logo-icon svg { width: 60%; height: 60%; color: #FFFFFF; }
+.sidebar.collapsed .sidebar-logo-icon { width: 32px; height: 32px; }
 .sidebar-logo-text { color: var(--on-dark); font-size: 15px; font-weight: 700; letter-spacing: -0.3px; white-space: nowrap; }
 .sidebar-logo-text span { color: var(--midnight-300); }
 .sidebar-workspace { padding: 8px 12px; border-bottom: 1px solid var(--sidebar-hairline); }
+/* Both brought into the Tier 3 hover language (Fix 2, 2026-08-19) — one
+   hover treatment in the sidebar, not two. Was background-lift-only,
+   scoped out of Phase 5 as reasonable at the time; now that Tier 3 is
+   established everywhere else here, the inconsistency isn't. */
 .sidebar-workspace-sel {
   display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: var(--radius-sm);
-  color: var(--sidebar-text-subtle); font-size: 12px; font-weight: 500; cursor: pointer; transition: background var(--t-fast);
+  color: var(--sidebar-text-subtle); font-size: 12px; font-weight: 500; cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--t-slow), border-color var(--t-slow);
 }
-.sidebar-workspace-sel:hover { background: var(--sidebar-hover-bg-strong); }
+.sidebar-workspace-sel:hover { background: var(--sidebar-hover-bg-strong); border-color: var(--sidebar-hairline); }
 .sidebar-workspace-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* AXIOM-mode escape hatch (2026-08 IA restructure) - occupies the same slot
    as .sidebar-workspace-sel above, never both at once. Uses --on-dark, not
@@ -456,10 +484,12 @@ tr.selected td { background: var(--accent-subtle-bg) !important; }
    sidebar background (see the existing --on-dark gotcha in GOTCHAS.md). */
 .sidebar-back-link {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 9px;
-  border-radius: var(--radius-sm); background: none; border: none; cursor: pointer;
-  color: var(--on-dark); font-size: 12px; font-weight: 600; transition: background var(--t-fast);
+  border-radius: var(--radius-sm); background: none; cursor: pointer;
+  color: var(--on-dark); font-size: 12px; font-weight: 600;
+  border: 1px solid transparent;
+  transition: background var(--t-slow), border-color var(--t-slow);
 }
-.sidebar-back-link:hover { background: var(--sidebar-hover-bg-strong); }
+.sidebar-back-link:hover { background: var(--sidebar-hover-bg-strong); border-color: var(--sidebar-hairline); }
 .sidebar-back-link svg { flex-shrink: 0; }
 .sidebar.collapsed .sidebar-back-link span { display: none; }
 .sidebar.collapsed .sidebar-back-link { justify-content: center; padding: 7px; }
@@ -472,13 +502,26 @@ tr.selected td { background: var(--accent-subtle-bg) !important; }
 .sidebar-nav-content.fading { opacity: 0; }
 .sidebar-section { padding: 16px 12px 4px; }
 .sidebar-section-label { font-size: 10px; font-weight: 600; color: var(--sidebar-text-faint); text-transform: uppercase; letter-spacing: 0.08em; }
+/* Tier 3 (Phase 5, 2026-08-19): ghost at rest, bordered box on hover, same
+   language as .btn-icon/.topbar-icon-btn — border starts transparent so
+   the hover/active border doesn't shift layout. min-height matches the
+   44px floor; collapsed mode (below) adds min-width so the icon-only state
+   is a proper 44x44 target, not just tall. Active state is the
+   near-black-ceiling pattern (§4 of the brief) — see tokens.css for the
+   light/dark values. .badge-count.badge-live's bg was --ocean-500-derived
+   until Fix 2 — now --brand-blue-derived (tokens.css), same "sidebar chrome
+   blue" as the monogram rather than the main-content semantic-status
+   system, since it lives permanently on the dark sidebar in both app
+   themes, not on a surface that flips pale/dark with the theme. */
 .sidebar-item {
   display: flex; align-items: center; gap: 10px; padding: 8px 14px; margin: 1px 8px;
   border-radius: var(--radius-sm); color: var(--sidebar-text); font-size: 13px; font-weight: 500;
-  cursor: pointer; transition: all var(--t-fast); white-space: nowrap;
+  cursor: pointer; white-space: nowrap; min-height: 44px;
+  border: 1px solid transparent;
+  transition: background var(--t-slow), border-color var(--t-slow), color var(--t-slow);
 }
-.sidebar-item:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-hover); }
-.sidebar-item.active { background: var(--accent-fill-a35); color: var(--on-dark); }
+.sidebar-item:hover { background: var(--sidebar-hover-bg); border-color: var(--sidebar-hairline); color: var(--sidebar-text-hover); }
+.sidebar-item.active { background: var(--sidebar-active-bg); border-color: var(--sidebar-active-border); color: var(--sidebar-active-text); }
 .sidebar-item .badge-count { background: var(--sidebar-badge-bg); color: var(--sidebar-badge-text); padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: auto; }
 .sidebar-item .badge-count.badge-live { background: var(--accent-fill-a50); color: rgba(200,222,240,0.95); }
 .sidebar-item svg { flex-shrink: 0; }
@@ -486,8 +529,14 @@ tr.selected td { background: var(--accent-subtle-bg) !important; }
 .sidebar-footer-info { flex: 1; min-width: 0; overflow: hidden; }
 .sidebar-footer-name { font-size: 12px; font-weight: 600; color: var(--sidebar-footer-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-footer-sub { font-size: 10px; color: var(--sidebar-footer-text-muted); margin-top: 1px; text-transform: capitalize; }
-.sidebar-toggle-btn { background: none; border: none; cursor: pointer; padding: 6px; border-radius: var(--radius-sm); color: var(--sidebar-icon-muted); display: flex; }
-.sidebar-toggle-btn:hover { color: var(--sidebar-icon-muted-hover); background: var(--sidebar-hairline); }
+/* Same Tier 3 treatment as .sidebar-item — an icon-only button, same rules. */
+.sidebar-toggle-btn {
+  background: none; border: 1px solid transparent; cursor: pointer;
+  min-width: 44px; min-height: 44px; padding: 0; border-radius: var(--radius-sm);
+  color: var(--sidebar-icon-muted); display: flex; align-items: center; justify-content: center;
+  transition: background var(--t-slow), border-color var(--t-slow), color var(--t-slow);
+}
+.sidebar-toggle-btn:hover { color: var(--sidebar-icon-muted-hover); background: var(--sidebar-hover-bg); border-color: var(--sidebar-hairline); }
 .sidebar.collapsed .sidebar-logo-text,
 .sidebar.collapsed .sidebar-section-label,
 .sidebar.collapsed .sidebar-item > span,
@@ -495,6 +544,7 @@ tr.selected td { background: var(--accent-subtle-bg) !important; }
 .sidebar.collapsed .sidebar-workspace-name,
 .sidebar.collapsed .sidebar-workspace-sel > svg,
 .sidebar.collapsed .sidebar-footer-info { display: none; }
+.sidebar.collapsed .sidebar-item { min-width: 44px; }
 .sidebar.collapsed .sidebar-workspace { padding: 6px; }
 .sidebar.collapsed .sidebar-workspace-sel { justify-content: center; padding: 7px; }
 .sidebar.collapsed .sidebar-item { justify-content: center; padding: 8px; gap: 0; }
@@ -543,10 +593,13 @@ tr.selected td { background: var(--accent-subtle-bg) !important; }
    background (--accent-subtle-bg) flips to an opaque grey in dark mode, so
    a fixed dark-navy text color would go dark-on-dark. */
 .credits-badge { display: flex; align-items: center; gap: 5px; background: var(--accent-subtle-bg); border: 1px solid var(--accent-subtle-border); border-radius: var(--radius-sm); padding: 4px 10px; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+/* 44px (Phase 5, 2026-08-19) — was 30px, out of step with every other
+   topbar icon button since Phase 2. Colour unchanged, only the target size
+   and the real-button conversion (item 51) were asked for here. */
 .topbar-avatar {
-  width: 30px; height: 30px; background: var(--midnight-600); border-radius: 50%;
-  display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600;
-  color: var(--on-dark); cursor: pointer; border: 2px solid var(--midnight-200); flex-shrink: 0; transition: border-color var(--t-fast);
+  width: 44px; height: 44px; background: var(--midnight-600); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;
+  color: var(--on-dark); cursor: pointer; border: 2px solid var(--midnight-200); flex-shrink: 0; transition: border-color var(--t-slow);
 }
 .topbar-avatar:hover { border-color: var(--ocean-300); }
 .ai-status { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }

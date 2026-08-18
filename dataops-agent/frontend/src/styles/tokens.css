@@ -85,15 +85,33 @@
   --info-border: #a5f3fc;
   --info-fill: #0e7490;       /* on-dark: 5.293:1 — no current fill consumer, defined for symmetry with the other three */
 
-  /* Sidebar stays Midnight in both themes — constant "spine". Deliberately
-     aliased to the --midnight-700 PRIMITIVE, never to --accent-fill — the
-     two happened to share a value back when --accent-fill was itself just
-     var(--midnight-700) (Phase 1), but they were never the same reference,
-     and --accent-fill has pointed at an independent literal since Phase 1b.
-     Do not repoint this to --accent-fill: since Decision 1 (2026-08-19)
-     that token inverts to a light grey in dark mode, and the sidebar stays
-     as-is until Phase 5 restyles it on purpose. */
-  --sidebar-bg: var(--midnight-700);
+  /* Phase 5 (2026-08-19): the sidebar joins the Futurewave system. Light
+     uses --deep-ground — the same "dark brand chrome" navy as the auth
+     panel, deliberately NOT --accent-fill (a CTA blue, wrong job for a
+     non-interactive nav spine). Dark uses --bg itself, not --surface —
+     --surface is what cards sit on; matching it would make the shell read
+     flat. .sidebar gets its own border-right (below) so the two regions
+     stay visually distinct even where the fill is identical. */
+  --sidebar-bg: var(--deep-ground);
+
+  /* Active/hover, per the near-black-ceiling rule (§4 of the brief): no
+     fill reaches 3:1 this close to black, so these lean on a solid border
+     plus text brightening instead of fill contrast. Light stays in the
+     Futurewave blue direction (--accent-fill); dark is grey lift + grey
+     border, never a blue fill, per the brief's explicit rule for active
+     nav state. Hover (not active) stays the existing neutral white-alpha
+     wash in both themes — it was never blue, doesn't need this treatment. */
+  --sidebar-active-bg: color-mix(in srgb, var(--accent-fill) 40%, transparent);
+  --sidebar-active-border: var(--accent-fill);   /* solid: 3.41:1 vs --deep-ground */
+  --sidebar-active-text: var(--on-dark);
+
+  /* Two inline JSX rgba() literals folded into real tokens (Phase 5) —
+     Sidebar.tsx:120's workspace-selector chevron and :167's footer avatar
+     border. Values unchanged, just named. Theme-invariant, same as the
+     rest of the --sidebar-* family — the sidebar's own text/chrome doesn't
+     flip with the app theme, only its base fill does. */
+  --sidebar-chevron: rgba(255, 255, 255, 0.4);
+  --sidebar-avatar-border: rgba(255, 255, 255, 0.2);
 
   /* ==========================================
      JOB-SCOPED ACCENT TOKENS
@@ -148,22 +166,29 @@
      unrelated to this swap) keeps working unchanged. */
   --chart-accent: var(--ocean-600);
 
-  /* Focus ring — the light value tracks the new accent (no separate light
-     value was given, and focus-ring's job is "the accent, as a ring," so
-     #0056FF is the obvious fill-in); dark gets the brief's explicit
-     exception value in the dark blocks below. */
-  --focus-ring: #0056FF;
+  /* --brand-blue (Fix 1, 2026-08-19): the canonical token for "the two
+     places blue appears in dark mode" per the brief — the wordmark/
+     monogram and the focus ring. Both point HERE now, not at each other:
+     --focus-ring used to hold this value directly, and the monogram
+     pointed at --focus-ring, which meant "the logo is blue" was only true
+     as a side effect of "the focus ring happens to be blue" — an a11y
+     change to the ring would have silently recoloured the logo too. Same
+     two hexes as before, just named for what they actually are. */
+  --brand-blue: #0056FF;    /* light */
+  --focus-ring: var(--brand-blue);
 
-  /* Accent-tinted translucent overlays — still derived from --ocean-500,
-     not yet repointed to the new accent blue. Deferred to Phase 5 along
-     with the sidebar consumers below: .sidebar-item.active and
-     .badge-count.badge-live are both sidebar JSX/CSS, and .input:focus's
-     shadow tracks whatever --accent-border/--focus-ring end up being once
-     that's settled. Left alone on purpose, not forgotten. */
-  --accent-fill-a35: color-mix(in srgb, var(--ocean-500) 35%, transparent);
-  --accent-fill-a50: color-mix(in srgb, var(--ocean-500) 50%, transparent);
-  --accent-border-a15: color-mix(in srgb, var(--ocean-500) 15%, transparent);
-  --chart-accent-fill-a12: color-mix(in srgb, var(--ocean-500) 12%, transparent); /* was: rgba(91,136,178,0.12) — TrendCharts.tsx's QualityTrendChart area fill, the 4th ocean-500 literal */
+  /* Accent-tinted translucent overlays. Fix 2 (2026-08-19) repointed the
+     two the sidebar/input still use to the current palette — .sidebar-
+     item.active moved off this pattern entirely in Phase 5 (now
+     --sidebar-active-bg), so --accent-fill-a35 lost its only consumer and
+     is removed rather than left orphaned. --chart-accent-fill-a12 stays on
+     --ocean-500 on purpose — it's the QualityTrendChart area fill, paired
+     with --chart-accent, which is deliberately still Ocean (see that
+     token's comment: a chart line has no AA obligation and never shares a
+     canvas with a status colour today). */
+  --accent-fill-a50: color-mix(in srgb, var(--brand-blue) 50%, transparent);      /* was --ocean-500 — .badge-count.badge-live's bg. 7.39:1 (light) / 6.63:1 (dark) against its own text */
+  --accent-border-a15: color-mix(in srgb, var(--accent-border) 15%, transparent); /* was --ocean-500 — .input:focus's shadow. Tracks --accent-border (= --focus-ring = --brand-blue), so it can't drift from the border it's glowing around */
+  --chart-accent-fill-a12: color-mix(in srgb, var(--ocean-500) 12%, transparent); /* was: rgba(91,136,178,0.12) — TrendCharts.tsx's QualityTrendChart area fill, the 4th ocean-500 literal. Deliberately still Ocean, see above. */
 
   /* Modal/palette scrim — deliberately theme-invariant, see Phase 1's note:
      a scrim dimming the page behind a modal isn't "the text color," it
@@ -252,7 +277,7 @@
   --_dark-danger: #F87171;    /* 6.277:1 on --_dark-surface-hover */
   --_dark-info: #22D3EE;      /* 9.608:1 on --_dark-surface-hover */
 
-  --_dark-focus-ring: #2277FF;  /* the brief's explicit dark exception — 4.854:1 on --_dark-bg, 4.589:1 on --_dark-surface. #0056FF measures 3.558:1 here — fails, must not be used dark. */
+  --_dark-brand-blue: #2277FF;  /* the brief's explicit dark exception — 4.854:1 on --_dark-bg, 4.589:1 on --_dark-surface. #0056FF measures 3.558:1 here — fails, must not be used dark. Was --_dark-focus-ring; renamed for Fix 1 (2026-08-19) since --focus-ring is now just one of two consumers, not the owner. */
 
   --_dark-ocean-50: rgba(91,136,178,0.12);
   --_dark-ocean-100: rgba(91,136,178,0.2);
@@ -330,8 +355,10 @@
   --accent-text: var(--text-secondary);
   --accent-text-hover: var(--text-primary);
 
-  /* The other of the two allowed dark blues. */
-  --focus-ring: var(--_dark-focus-ring);
+  /* The canonical dark blue (Fix 1) — the monogram/wordmark and the focus
+     ring both point at this, not at each other. */
+  --brand-blue: var(--_dark-brand-blue);
+  --focus-ring: var(--brand-blue);
 
   /* Decision 1 (2026-08-19): primary fills go light-on-dark in dark mode —
      neither blue (reserved for the wordmark/focus-ring) nor grey-on-grey
@@ -360,6 +387,16 @@
      tint — the same defect class the badges just had. */
   --accent-subtle-bg: var(--surface-hover);  /* #1A1A1D, already dark-resolved above in this rule */
   --accent-subtle-border: var(--border);     /* #26262A — plain neutral, not a blue-tinted edge on a now-grey chip */
+
+  /* Phase 5 (2026-08-19): sidebar joins the greyscale-chrome rule. --bg, not
+     --surface — see this token's :root comment for why. Active state is the
+     near-black-ceiling pattern (§4): a solid grey border plus --text-primary
+     doing the work, not the fill (--surface-hover here only measures
+     1.14:1 against --bg — expected, not a bug, see §4). Never a blue fill. */
+  --sidebar-bg: var(--bg);
+  --sidebar-active-bg: var(--surface-hover);
+  --sidebar-active-border: var(--border-strong);
+  --sidebar-active-text: var(--text-primary);
 
   --shadow-xs: var(--_dark-shadow-xs);
   --shadow-sm: var(--_dark-shadow-sm);
@@ -408,7 +445,8 @@
 
     --accent-text: var(--text-secondary);
     --accent-text-hover: var(--text-primary);
-    --focus-ring: var(--_dark-focus-ring);
+    --brand-blue: var(--_dark-brand-blue);
+    --focus-ring: var(--brand-blue);
 
     --accent-fill: var(--text-primary);
     --on-accent-fill: var(--bg);
@@ -417,5 +455,10 @@
     --on-accent-text: var(--text-secondary);
     --accent-subtle-bg: var(--surface-hover);
     --accent-subtle-border: var(--border);
+
+    --sidebar-bg: var(--bg);
+    --sidebar-active-bg: var(--surface-hover);
+    --sidebar-active-border: var(--border-strong);
+    --sidebar-active-text: var(--text-primary);
   }
 }

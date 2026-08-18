@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { WORKSPACE_NAV_SECTIONS, AXIOM_NAV_SECTIONS, isAxiomDomain, type NavDomain } from "./navItems";
 import { useToast } from "@/components/ui";
 import { WorkspacePicker } from "@/components/auth/WorkspacePicker";
+import { WunomoMark } from "@/components/brand";
 import { getToken, getSettings, getMyWorkspaces, switchWorkspace, saveSession, type DecodedUser } from "@/lib/api";
 
 // Crossfade timing for the workspace<->AXIOM sidebar-content swap (2026-08
@@ -94,11 +95,7 @@ export function Sidebar({
     <aside className={["sidebar", collapsed ? "collapsed" : "", mobileOpen ? "mobile-open" : ""].filter(Boolean).join(" ")}>
       <div className="sidebar-logo">
         <div className="sidebar-logo-icon">
-          <svg width="17" height="17" viewBox="0 0 28 28" fill="none">
-            <path d="M14 2L26 9V19L14 26L2 19V9L14 2Z" fill="white" fillOpacity="0.15" stroke="white" strokeWidth="1.5" />
-            <path d="M14 7L22 12V18L14 23L6 18V12L14 7Z" fill="white" fillOpacity="0.1" stroke="white" strokeWidth="1.5" />
-            <circle cx="14" cy="15" r="3.5" fill="white" />
-          </svg>
+          <WunomoMark />
         </div>
         <div className="sidebar-logo-text">
           Wunomo<span> AI</span>
@@ -117,7 +114,7 @@ export function Sidebar({
         ) : (
           <div className="sidebar-workspace-sel" onClick={() => setPickerOpen(true)}>
             <span className="sidebar-workspace-name">{settingsQuery.data?.settings.name ?? "Workspace"}</span>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="2.5">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--sidebar-chevron)" strokeWidth="2.5">
               <path d="m6 9 6 6 6-6" />
             </svg>
           </div>
@@ -164,7 +161,7 @@ export function Sidebar({
       </nav>
 
       <div className="sidebar-footer">
-        <div className="avatar" style={{ background: "var(--midnight-500)", border: "1.5px solid rgba(255,255,255,0.2)" }}>
+        <div className="avatar" style={{ background: "var(--midnight-500)", border: "1.5px solid var(--sidebar-avatar-border)" }}>
           {initials}
         </div>
         <div className="sidebar-footer-info">
