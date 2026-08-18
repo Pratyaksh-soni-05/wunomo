@@ -98,12 +98,23 @@ region. Dark mode gets no gradient at all beyond a near-flat surface lift.
 
 ## 2. Typography
 
-- Display: **Instrument Serif** via `next/font/google`. **Regular and italic
-  only — no bold, no weight axis.** Never request 600 or 700; you'll get a
-  synthesised faux bold. Use at 28px and above only.
-- Body, UI, data: **Inter**. Everything under 28px, and anything needing weight
-  emphasis.
-- Numeric data keeps `font-variant-numeric: tabular-nums`.
+- Display: **Fraunces** (`--font-display`), throughout the product — every
+  page heading (`.page-title`), every KPI number (`.metric-value`), every
+  auth-screen `<h2>`, and the landing headline all share this face
+  (Correction 1, 2026-08-19). This section originally specified Instrument
+  Serif, confined to a single line, because that face has no bold and a
+  full-product rollout would have faux-bolded every 600-weight heading —
+  Fraunces has a real weight axis, so that constraint doesn't apply and the
+  confinement rule is gone with it. **If Instrument Serif is ever actually
+  adopted, it comes back as an *additive* hero-only face on top of Fraunces,
+  not a replacement** — and the "nowhere else" rule returns scoped to
+  Instrument Serif specifically, not to "the display font" in general.
+- Body, UI, data: **General Sans** (`--font`). This section originally said
+  Inter — General Sans has been the actual body font since before this
+  brief's Phase 0 (see `docs/context/`'s brand-swap history); noted here so
+  this section stops being the one place that still says otherwise.
+- Numeric data keeps `font-variant-numeric: tabular-nums` — landed on
+  `.metric-value` in Phase 4.
 
 ---
 
@@ -147,12 +158,25 @@ breaking their own container — the ✕ inside `.chat-context-chip` (a 4px-padd
 pill) and the hover-reveal ✕ on a chat session/saved-prompt row (would blow
 out every row in the list to fit it). Both are deliberate, reasoned
 exceptions, not oversights — do not "fix" them to 44×44 later. Instead they
-get a **minimum 24×24 hit area** via padding/a pseudo-element that extends the
-clickable region beyond the visible glyph, without changing visible layout —
+get a **minimum 24×24 hit area** via an absolutely-positioned `::before`
+(`content: ""; position: absolute; inset: -8px;`) rather than padding, which
+extends the clickable region out of document flow entirely — the surrounding
+chip/row genuinely cannot grow, not just "shouldn't."
 `.chat-context-chip button`/`.chat-session-delete`/`.chat-saved-prompt-remove`
-each carry `padding: 4px` (glyph is ~14-16px, so the hit area comes out to
-~22-24px) and `margin: -4px` to pull that padding out of the visual flow so
-the surrounding chip/row doesn't grow.
+all carry this.
+
+**Semantic fills are for the container, never for the action inside it
+(Correction 2, 2026-08-19):** `HealthBanner`'s "Investigate" button was a
+`--warning-fill` button sitting inside a warning-toned banner — same colour
+family as its own container, so it read as decoration rather than a CTA.
+Fixed to a plain Tier 1 button (`--accent-fill`); the banner keeps its
+warning tone, the action doesn't inherit it. Checked every other
+status/alert container in the product for the same shape
+(`.chat-approval-notice`, `.auth-nudge`) — neither has an action button
+living inside the coloured box, so this was the one live instance. Apply
+this rule to any future banner/notice/alert that gets an inline action:
+the container's semantic colour communicates the *state*; the button stays
+on the standard tier palette so it still reads as *the thing to click*.
 
 **All tiers:** visible 2px focus ring at 2px offset, on keyboard focus only
 (`:focus-visible`). In dark mode the focus ring is the one non-logo blue.
@@ -305,11 +329,22 @@ panel** carries the form.
 
 Left, light mode: the Futurewave mesh, deepening to `#061024` at the base. Left,
 dark mode: near-black with a subtle surface lift, no colour.
-Both: the wordmark top-left, and a short line of copy set in **Instrument
-Serif** — this is the only place in the product where the display serif appears,
-and it's what visually ties the app to the landing page.
+Both: the wordmark top-left, and a short line of copy set in `--font-display`
+(**Fraunces** — see §2, this is no longer the display face's only
+appearance, just its most brand-forward one) — it's what visually ties the
+app to the landing page.
 
-Right: `--surface`, form fields, primary CTA at Tier 1.
+Right: `--surface`, form fields, context headline/tagline in the body font
+(General Sans — the display face stays on the brand panel's line and the
+form's own `<h2>`, not this), primary CTA at Tier 1.
+
+**Unverified, recheck before Phase 7 screenshots:** the Quality Score KPI's
+sparkline (Phase 1's `chartColor` split) hasn't actually been seen rendering
+— the demo tenant currently has only one day of quality-trend data, and
+`KpiCard` correctly suppresses the sparkline below 2 points. The text half
+(`--accent-text`) is confirmed in both themes; the chart half is verified by
+code only. Once the tenant has a second trend day, look at it before
+trusting it in a screenshot.
 
 Write the copy line yourself from `docs/context/WUNOMO_MASTER_CONTEXT.md` — do
 not invent positioning claims, customer counts, or logos. If the reference shows

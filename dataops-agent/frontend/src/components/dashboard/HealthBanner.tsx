@@ -27,11 +27,12 @@ export function HealthBanner({ incident, onDismiss }: { incident: Incident; onDi
         <span className="font-medium text-sm">{incident.title}.</span>{" "}
         <span className="text-sm text-secondary">{incident.description}</span>
       </div>
-      <Button
-        size="sm"
-        style={{ background: "var(--warning-fill)", color: "var(--on-dark)", borderColor: "var(--warning-fill)" }}
-        onClick={() => router.push("/incidents")}
-      >
+      {/* Correction 2 (2026-08-19): an action inside a status banner must
+          contrast with the banner, not match it — a warning-filled button
+          on a warning-toned banner read as decoration, not a CTA. Default
+          Button is Tier 1 / --accent-fill; the banner keeps its warning
+          tone, the action doesn't inherit it. */}
+      <Button size="sm" onClick={() => router.push("/incidents")}>
         Investigate
       </Button>
       {onDismiss && (

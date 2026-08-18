@@ -367,14 +367,17 @@ tr.selected td { background: var(--accent-subtle-bg) !important; }
 /* Phase 3 (2026-08-19): the context headline/tagline login/signup have
    always passed to AuthShell, rendered for real above the form instead of
    hidden — see AuthShell.tsx's comment for why. Body font (General Sans,
-   inherited) on purpose: the display serif is confined to the single
-   brand-panel copy line, nowhere else — this h2 below used to use
-   --font-display too, which contradicted that; removed here rather than
-   left as a second, quieter violation of the same rule. */
+   inherited) here on purpose — this is a new element, not a heading that
+   ever used the display face, so there's nothing to revert. --font-display
+   on .auth-card h2 below IS correct, per Correction 1 (2026-08-19): Fraunces
+   is the established heading face across all 21 screens and the same face
+   as the landing headline, unlike Instrument Serif (no bold, would break
+   every 600-weight heading), which is what the original "nowhere else"
+   rule was actually written for. */
 .auth-context { margin-bottom: 28px; }
 .auth-context-headline { font-size: 19px; font-weight: 600; margin-bottom: 4px; }
 .auth-context-tagline { color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
-.auth-card h2 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+.auth-card h2 { font-family: var(--font-display); font-size: 22px; margin-bottom: 4px; }
 .auth-card .auth-subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
 .auth-divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--text-muted); font-size: 12px; }
 .auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
@@ -580,7 +583,22 @@ tr.selected td { background: var(--accent-subtle-bg) !important; }
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; text-align: center; gap: 12px; min-height: 60vh; }
 .empty-icon { width: 48px; height: 48px; background: var(--surface-hover); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center; color: var(--text-muted); margin: 0 auto 4px; }
 
-.page-header { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); background: var(--surface); }
+/* Phase 4 (2026-08-19): a bounded gradient is permitted on the header strip
+   in light mode only — the card region below it (.stats-grid and every
+   .card) stays flat in both themes, and dark mode gets no gradient here
+   either, same "no colour beyond a lift" rule as the auth panel. Default
+   rule is the light treatment; both dark entry points flatten it back to
+   --surface, same pattern as every other themed override in this file. */
+.page-header {
+  padding: 20px 24px 16px; border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(ellipse 520px 180px at 0% 0%, color-mix(in srgb, var(--accent-fill) 6%, transparent), transparent 75%),
+    var(--surface);
+}
+:root[data-theme="dark"] .page-header { background: var(--surface); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .page-header { background: var(--surface); }
+}
 .page-title { font-size: 20px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.3px; font-family: var(--font-display); }
 
 /* ==========================================
@@ -592,7 +610,7 @@ tr.selected td { background: var(--accent-subtle-bg) !important; }
    ========================================== */
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
 .metric-card { padding: 20px; }
-.metric-value { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; line-height: 1; font-family: var(--font-display); }
+.metric-value { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; line-height: 1; font-family: var(--font-display); font-variant-numeric: tabular-nums; }
 .metric-change { font-size: 11px; font-weight: 500; margin-top: 8px; color: var(--text-muted); }
 .metric-change.up { color: var(--success); }
 .metric-change.down { color: var(--danger); }
