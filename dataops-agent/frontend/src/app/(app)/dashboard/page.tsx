@@ -127,7 +127,8 @@ export default function DashboardPage() {
               <KpiCard
                 label="Quality Score"
                 value={o?.quality.avg_score != null ? `${o.quality.avg_score}/100` : "—"}
-                color="var(--ocean-600)"
+                color="var(--accent-text)"
+                chartColor="var(--chart-accent)"
                 sparklineData={qualityScores.length > 1 ? qualityScores : undefined}
               />
               <KpiCard

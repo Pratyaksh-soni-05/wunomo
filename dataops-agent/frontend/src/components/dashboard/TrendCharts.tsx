@@ -5,7 +5,12 @@ import { Line } from "react-chartjs-2";
 import { Card, CardHeader, CardBody, Badge } from "@/components/ui";
 import type { QualityTrendPoint } from "@/lib/api";
 
-const gridColor = "rgba(107,124,148,0.15)";
+// Sourced from the token layer at render time, same as every other color in
+// this file — was a hardcoded JS literal duplicating --text-muted's light-
+// mode RGB. Kept theme-invariant on purpose (see --chart-grid's comment in
+// tokens.css): unlike tickColor below, this never actually flipped with
+// theme even before this change.
+const gridColor = () => resolveToken("--chart-grid", "rgba(107,124,148,0.15)");
 
 // Canvas 2D silently rejects unresolved CSS var() strings (confirmed live -
 // assigning ctx.strokeStyle = "var(--x)" is a no-op, not an error, so the
@@ -29,7 +34,7 @@ function baseOptions() {
     plugins: { legend: { display: false } },
     scales: {
       x: { grid: { display: false }, ticks: { color: tickColor, font: { size: 10 } } },
-      y: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 10 } } },
+      y: { grid: { color: gridColor() }, ticks: { color: tickColor, font: { size: 10 } } },
     },
   };
 }
@@ -88,7 +93,7 @@ export function QualityTrendChart({ trends }: { trends: QualityTrendPoint[] }) {
                 {
                   label: "Avg quality score",
                   data: trends.map((t) => t.avg_quality_score),
-                  borderColor: resolveToken("--ocean-600", "#4C76A0"),
+                  borderColor: resolveToken("--chart-accent", "#4C76A0"),
                   backgroundColor: "rgba(91,136,178,0.12)",
                   fill: true,
                   tension: 0.3,

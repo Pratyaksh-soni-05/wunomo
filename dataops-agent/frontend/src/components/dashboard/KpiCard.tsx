@@ -10,6 +10,7 @@ export function KpiCard({
   subLabel,
   subLabelTone = "neutral",
   color = "var(--text-primary)",
+  chartColor = color,
   sparklineData,
 }: {
   label: string;
@@ -17,6 +18,12 @@ export function KpiCard({
   subLabel?: string;
   subLabelTone?: "up" | "down" | "neutral";
   color?: string;
+  /** Sparkline line color — separate from `color` (the metric-value text)
+   * since a chart series and body text answer different constraints (AA
+   * text contrast vs. just reading distinctly next to other series lines).
+   * Defaults to `color` so existing callers passing one value keep
+   * rendering both the same, as before this split. */
+  chartColor?: string;
   sparklineData?: number[];
 }) {
   return (
@@ -32,7 +39,7 @@ export function KpiCard({
                   datasets: [
                     {
                       data: sparklineData,
-                      borderColor: color,
+                      borderColor: chartColor,
                       borderWidth: 1.5,
                       pointRadius: 0,
                       tension: 0.35,

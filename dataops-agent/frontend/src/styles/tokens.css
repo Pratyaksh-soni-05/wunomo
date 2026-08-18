@@ -67,6 +67,95 @@
   /* Sidebar stays Midnight in both themes — constant "spine" */
   --sidebar-bg: var(--midnight-700);
 
+  /* ==========================================
+     JOB-SCOPED ACCENT TOKENS (Phase 1, 2026-08-19)
+     Phase 0's audit found --midnight-700, --midnight-100, --ocean-600 and
+     --ocean-500 each doing two or more unrelated jobs (a fill color reused
+     as a text color, a text/link color reused as a Chart.js series color, a
+     border color reused as the only global focus ring, plus raw rgba()
+     literals bypassing the token entirely). These are the same primitives,
+     renamed per job so a future change to one job (e.g. AA-tuning the link
+     color) can't silently move an unrelated one (e.g. the chart line next
+     to a success/danger series, which only needs to read as distinct, not
+     pass text contrast). Every value below is byte-identical to what it
+     replaces — this phase renames, it does not restyle. */
+
+  /* Fill — filled surface with a label on top */
+  --accent-fill: var(--midnight-700);          /* was: direct --midnight-700 fill (buttons, chips, avatars, bubbles) */
+  --badge-accent-bg: var(--midnight-100);      /* was: --midnight-100 used as .badge-midnight's fill */
+
+  /* Text / link — must satisfy AA against --surface and --bg. --ocean-600
+     itself measures 4.487:1 against --bg — rounds to 4.49, just under the
+     4.5:1 AA floor for body-size text. Nudged one rung darker to the
+     existing (previously unused) --ocean-650 step: 5.82:1 against --bg,
+     6.11:1 against --surface. --chart-accent below intentionally stays on
+     --ocean-600 unchanged — a chart line has no text-contrast obligation,
+     which is the entire reason this phase decoupled the two. */
+  --accent-text: #416487;                      /* = --ocean-650's hex, light mode only — see dark-mode override below */
+  --accent-text-hover: var(--ocean-700);       /* was: direct --ocean-700 (auth-link-btn:hover only consumer) */
+  --badge-accent-text: var(--midnight-700);    /* was: --midnight-700 used as .badge-midnight's text, on --badge-accent-bg */
+  --on-accent-text: var(--midnight-100);       /* was: --midnight-100 used as text on an --accent-fill surface (auth tagline) */
+
+  /* Border */
+  --accent-border: var(--ocean-500);           /* was: direct --ocean-500 border (input focus) */
+
+  /* Chart series — only needs to read distinctly next to success/warning/
+     danger lines; decoupled from --accent-text's AA-contrast constraint */
+  --chart-accent: var(--ocean-600);            /* was: direct --ocean-600 reused as a Chart.js line color */
+
+  /* Focus ring — was --ocean-500 also doing fill + border duty elsewhere;
+     now the only thing pointing at this name is :focus-visible */
+  --focus-ring: var(--ocean-500);
+
+  /* Accent-tinted translucent overlays — previously raw rgba(91,136,178,X)
+     literals (X = 91,136,178 is --ocean-500's RGB) hardcoded 3x, bypassing
+     the token layer entirely (Q4). color-mix() derives them from the real
+     token instead of a copy-pasted literal, so they can't drift from it. */
+  --accent-fill-a35: color-mix(in srgb, var(--ocean-500) 35%, transparent);  /* was: rgba(91,136,178,0.35) — .sidebar-item.active */
+  --accent-fill-a50: color-mix(in srgb, var(--ocean-500) 50%, transparent); /* was: rgba(91,136,178,0.5) — .badge-count.badge-live */
+  --accent-border-a15: color-mix(in srgb, var(--ocean-500) 15%, transparent); /* was: rgba(91,136,178,0.15) — .input:focus box-shadow */
+
+  /* Modal/palette scrim — was a raw rgba(22,35,58,X) literal (X = 22,35,58
+     happens to match --text-primary's light-mode RGB, but a scrim dimming
+     the page behind a modal is a deliberately theme-invariant idea, not
+     "the text color" — it must NOT flip to near-white in dark mode the way
+     --text-primary does, so it's its own fixed token, not color-mix'd from
+     a themed one. */
+  --scrim-a50: rgba(22, 35, 58, 0.5);   /* was: rgba(22,35,58,0.5) — .modal-backdrop */
+  --scrim-a35: rgba(22, 35, 58, 0.35);  /* was: rgba(22,35,58,0.35) — .cmd-palette-backdrop */
+
+  /* Toast warning fill — a genuinely distinct, uncatalogued hex (not a
+     duplicate of --warning: #b45309 vs --warning's #d97706). Tokenized as
+     found, value unchanged — whether it should actually just BE --warning
+     is a real question, flagged separately, not silently decided here. */
+  --toast-warning-bg: #b45309;
+
+  /* Chart gridlines — was a hardcoded rgba(107,124,148,0.15) JS literal in
+     TrendCharts.tsx (X = 107,124,148 matches --text-muted's light-mode
+     RGB). Kept theme-invariant on purpose: today it never actually flips
+     with theme (unlike the tick-label color in the same file, which does,
+     via resolveToken) — deriving it from --text-muted would silently
+     change dark-mode chart appearance, which this phase must not do. */
+  --chart-grid: rgba(107, 124, 148, 0.15);
+
+  /* Sidebar chrome overlays — the sidebar is always the Midnight spine
+     regardless of app theme, so these are fixed, not theme-varying. Each
+     replaces a raw rgba(255,255,255,X) literal in components.css (Q4);
+     values unchanged, one token per distinct alpha actually in use. */
+  --sidebar-text: rgba(255, 255, 255, 0.62);
+  --sidebar-text-hover: rgba(255, 255, 255, 0.9);
+  --sidebar-text-subtle: rgba(255, 255, 255, 0.75);
+  --sidebar-text-faint: rgba(255, 255, 255, 0.3);
+  --sidebar-icon-muted: rgba(255, 255, 255, 0.5);
+  --sidebar-icon-muted-hover: rgba(255, 255, 255, 0.7);
+  --sidebar-footer-text: rgba(255, 255, 255, 0.88);
+  --sidebar-footer-text-muted: rgba(255, 255, 255, 0.38);
+  --sidebar-hover-bg: rgba(255, 255, 255, 0.08);
+  --sidebar-hover-bg-strong: rgba(255, 255, 255, 0.1);
+  --sidebar-badge-bg: rgba(255, 255, 255, 0.15);
+  --sidebar-badge-text: rgba(255, 255, 255, 0.8);
+  --sidebar-hairline: rgba(255, 255, 255, 0.06);
+
   /* Shadows */
   --shadow-xs: 0 1px 2px rgba(22,35,58,0.05);
   --shadow-sm: 0 1px 4px rgba(22,35,58,0.08), 0 1px 2px rgba(22,35,58,0.04);
@@ -95,6 +184,45 @@
   --font-display: 'Fraunces', Georgia, serif;
   --font: 'General Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* ==========================================
+     Dark-mode literal values (Phase 1, 2026-08-19) — defined ONCE here.
+     Previously the two dark-mode entry points below (:root[data-theme=
+     "dark"] for the explicit toggle, and the @media block for the
+     OS-preference fallback) each hardcoded the same ~20 literal values
+     independently — two places that had to be hand-kept in sync, with
+     nothing catching a drift between them. Both now just re-point the
+     public token names at these private (--_dark-*) ones, so the actual
+     colors live in exactly one place; only a short list of name-to-name
+     mappings is still written twice, not any literal value. See the note
+     above the @media block below for why that short list can't also be
+     merged in plain CSS. */
+  --_dark-bg: #101015;
+  --_dark-surface: #1B1B21;
+  --_dark-surface-hover: #26262E;
+  --_dark-border: #303038;
+  --_dark-border-strong: #40404A;
+  --_dark-text-primary: #F1F0E1;
+  --_dark-text-secondary: #B4B4BE;
+  --_dark-text-muted: #9A9AA6;
+  --_dark-text-disabled: #5A5A66;
+  --_dark-success-bg: rgba(22,163,74,.15);
+  --_dark-success-border: rgba(22,163,74,.4);
+  --_dark-warning-bg: rgba(217,119,6,.15);
+  --_dark-warning-border: rgba(217,119,6,.4);
+  --_dark-danger-bg: rgba(220,38,38,.15);
+  --_dark-danger-border: rgba(220,38,38,.4);
+  --_dark-info-bg: rgba(8,145,178,.15);
+  --_dark-info-border: rgba(8,145,178,.4);
+  --_dark-ocean-50: rgba(91,136,178,0.12);
+  --_dark-ocean-100: rgba(91,136,178,0.2);
+  --_dark-ocean-600: #8FB0D0;
+  --_dark-ocean-700: #B8CFE3;
+  --_dark-shadow-xs: 0 1px 2px rgba(0,0,0,0.3);
+  --_dark-shadow-sm: 0 1px 4px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
+  --_dark-shadow-md: 0 4px 12px rgba(0,0,0,0.5), 0 2px 4px rgba(0,0,0,0.3);
+  --_dark-shadow-lg: 0 8px 24px rgba(0,0,0,0.55), 0 4px 8px rgba(0,0,0,0.3);
+  --_dark-shadow-xl: 0 16px 48px rgba(0,0,0,0.6), 0 8px 16px rgba(0,0,0,0.35);
 }
 
 /* Dark mode — Phase 19 redesign: warm near-black neutral surfaces, blue
@@ -105,32 +233,32 @@
    attribute the theme switcher (Phase 7) stamps on <html>;
    @media (prefers-color-scheme) is the unstyled default signal. */
 :root[data-theme="dark"] {
-  --bg: #101015; /* warm near-black, not pure Noir */
-  --surface: #1B1B21; /* elevated cards — a hair lighter than bg, near-neutral, not navy */
-  --surface-hover: #26262E;
-  --border: #303038;
-  --border-strong: #40404A;
+  --bg: var(--_dark-bg);
+  --surface: var(--_dark-surface);
+  --surface-hover: var(--_dark-surface-hover);
+  --border: var(--_dark-border);
+  --border-strong: var(--_dark-border-strong);
 
-  --text-primary: #F1F0E1; /* warm off-white */
-  --text-secondary: #B4B4BE; /* desaturated neutral grey, was blue-tinted */
-  --text-muted: #9A9AA6; /* desaturated neutral grey */
-  --text-disabled: #5A5A66;
+  --text-primary: var(--_dark-text-primary);
+  --text-secondary: var(--_dark-text-secondary);
+  --text-muted: var(--_dark-text-muted);
+  --text-disabled: var(--_dark-text-disabled);
 
-  --success-bg: rgba(22,163,74,.15);
-  --success-border: rgba(22,163,74,.4);
-  --warning-bg: rgba(217,119,6,.15);
-  --warning-border: rgba(217,119,6,.4);
-  --danger-bg: rgba(220,38,38,.15);
-  --danger-border: rgba(220,38,38,.4);
-  --info-bg: rgba(8,145,178,.15);
-  --info-border: rgba(8,145,178,.4);
+  --success-bg: var(--_dark-success-bg);
+  --success-border: var(--_dark-success-border);
+  --warning-bg: var(--_dark-warning-bg);
+  --warning-border: var(--_dark-warning-border);
+  --danger-bg: var(--_dark-danger-bg);
+  --danger-border: var(--_dark-danger-border);
+  --info-bg: var(--_dark-info-bg);
+  --info-border: var(--_dark-info-border);
 
   /* ocean-50/100 are light near-white tints in light mode (selected-row/
      hover backgrounds) — redefined here as translucent overlays instead of
      inheriting the light value, which rendered as a jarring white bar
      against the dark surfaces. */
-  --ocean-50: rgba(91,136,178,0.12);
-  --ocean-100: rgba(91,136,178,0.2);
+  --ocean-50: var(--_dark-ocean-50);
+  --ocean-100: var(--_dark-ocean-100);
 
   /* ocean-600/700 are used as literal link/text color in a few places
      (auth-link-btn, breadcrumb hover, notif footer link) — the light-mode
@@ -140,42 +268,62 @@
      --ocean-600/700 are untouched. Hover goes LIGHTER (--ocean-700), the
      correct direction on a dark background — the light-mode value darkens
      on hover, which is right for a light background but would reduce
-     contrast here. */
-  --ocean-600: #8FB0D0;
-  --ocean-700: #B8CFE3;
+     contrast here. --accent-text/--accent-text-hover/--chart-accent all
+     alias --ocean-600/700 (see above), so they flip for free here — no
+     extra dark-mode rule needed for any of them. */
+  --ocean-600: var(--_dark-ocean-600);
+  --ocean-700: var(--_dark-ocean-700);
 
-  --shadow-xs: 0 1px 2px rgba(0,0,0,0.3);
-  --shadow-sm: 0 1px 4px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.5), 0 2px 4px rgba(0,0,0,0.3);
-  --shadow-lg: 0 8px 24px rgba(0,0,0,0.55), 0 4px 8px rgba(0,0,0,0.3);
-  --shadow-xl: 0 16px 48px rgba(0,0,0,0.6), 0 8px 16px rgba(0,0,0,0.35);
+  /* --accent-text is a fixed light-mode literal above (see its comment in
+     :root), not a var(--ocean-600) alias, so it needs its own explicit
+     override here to still track ocean-600's dark treatment — otherwise
+     it would stay pinned to its light-mode hex in dark mode too. */
+  --accent-text: var(--ocean-600);
+
+  --shadow-xs: var(--_dark-shadow-xs);
+  --shadow-sm: var(--_dark-shadow-sm);
+  --shadow-md: var(--_dark-shadow-md);
+  --shadow-lg: var(--_dark-shadow-lg);
+  --shadow-xl: var(--_dark-shadow-xl);
 }
 
+/* OS-preference fallback for "System" theme mode — same values as
+   :root[data-theme="dark"] above, by construction: both rules just map
+   the public token names onto the same --_dark-* literals defined once in
+   :root, so there's nothing left for the two to drift on. Plain CSS has no
+   way to also merge this mapping list into the rule above (a selector list
+   can't span an @media boundary, and CSS has no mixin/include mechanism),
+   so this short list of name-to-name lines is still written twice — but a
+   mismatch here is now a glaring one-line typo (e.g. `--bg: var(--_dark-
+   surface)`), not a second independently-typed literal that could silently
+   diverge. If a build-time preprocessor is ever added to this project, this
+   is the one place worth collapsing further. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #101015;
-    --surface: #1B1B21;
-    --surface-hover: #26262E;
-    --border: #303038;
-    --border-strong: #40404A;
+    --bg: var(--_dark-bg);
+    --surface: var(--_dark-surface);
+    --surface-hover: var(--_dark-surface-hover);
+    --border: var(--_dark-border);
+    --border-strong: var(--_dark-border-strong);
 
-    --text-primary: #F1F0E1;
-    --text-secondary: #B4B4BE;
-    --text-muted: #9A9AA6;
-    --text-disabled: #5A5A66;
+    --text-primary: var(--_dark-text-primary);
+    --text-secondary: var(--_dark-text-secondary);
+    --text-muted: var(--_dark-text-muted);
+    --text-disabled: var(--_dark-text-disabled);
 
-    --success-bg: rgba(22,163,74,.15);
-    --success-border: rgba(22,163,74,.4);
-    --warning-bg: rgba(217,119,6,.15);
-    --warning-border: rgba(217,119,6,.4);
-    --danger-bg: rgba(220,38,38,.15);
-    --danger-border: rgba(220,38,38,.4);
-    --info-bg: rgba(8,145,178,.15);
-    --info-border: rgba(8,145,178,.4);
+    --success-bg: var(--_dark-success-bg);
+    --success-border: var(--_dark-success-border);
+    --warning-bg: var(--_dark-warning-bg);
+    --warning-border: var(--_dark-warning-border);
+    --danger-bg: var(--_dark-danger-bg);
+    --danger-border: var(--_dark-danger-border);
+    --info-bg: var(--_dark-info-bg);
+    --info-border: var(--_dark-info-border);
 
-    --ocean-50: rgba(91,136,178,0.12);
-    --ocean-100: rgba(91,136,178,0.2);
-    --ocean-600: #8FB0D0;
-    --ocean-700: #B8CFE3;
+    --ocean-50: var(--_dark-ocean-50);
+    --ocean-100: var(--_dark-ocean-100);
+    --ocean-600: var(--_dark-ocean-600);
+    --ocean-700: var(--_dark-ocean-700);
+    --accent-text: var(--ocean-600);
   }
 }
