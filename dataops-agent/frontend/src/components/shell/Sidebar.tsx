@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { WORKSPACE_NAV_SECTIONS, AXIOM_NAV_SECTIONS, isAxiomDomain, type NavDomain } from "./navItems";
 import { useToast } from "@/components/ui";
-import type { DecodedUser } from "@/lib/api";
+import { WorkspacePicker } from "@/components/auth/WorkspacePicker";
+import { getToken, getSettings, getMyWorkspaces, switchWorkspace, saveSession, type DecodedUser } from "@/lib/api";
 
 // Crossfade timing for the workspace<->AXIOM sidebar-content swap (2026-08
 // IA restructure): fade the old domain's items out, then the new domain's
@@ -30,6 +32,39 @@ export function Sidebar({
   const router = useRouter();
   const toast = useToast();
   const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : "?";
+
+  // Item 1: the sidebar's top row is now a real workspace switcher, not
+  // the hardcoded "Production" placeholder it used to be - real name via
+  // the existing settings fetch, real option list fetched lazily (only
+  // once the picker is actually opened, since most sessions never touch
+  // this) via the same shape login's own WorkspacePicker already uses.
+  const settingsQuery = useQuery({ queryKey: ["settings"], queryFn: () => getSettings(getToken() as string) });
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const workspacesQuery = useQuery({
+    queryKey: ["my-workspaces"],
+    queryFn: () => getMyWorkspaces(getToken() as string),
+    enabled: pickerOpen,
+  });
+
+  async function handleSwitch(tenantId: string) {
+    setSwitching(true);
+    try {
+      const result = await switchWorkspace(getToken() as string, tenantId);
+      saveSession(result.access_token, result.tenant_id, result.user_id);
+      // Full reload, not router.push - every React Query cache entry in
+      // this app is implicitly scoped to whichever tenant was active when
+      // it was fetched, and nothing reconciles that on a tenant change.
+      // A fresh load is the only way every already-mounted component is
+      // guaranteed to refetch under the new tenant instead of silently
+      // showing stale cross-tenant data for a few seconds.
+      window.location.href = "/dashboard";
+    } catch {
+      toast.push("Couldn't switch workspaces. Try again.", "danger");
+      setSwitching(false);
+      setPickerOpen(false);
+    }
+  }
 
   const domain: NavDomain = isAxiomDomain(pathname) ? "axiom" : "workspace";
 
@@ -80,17 +115,24 @@ export function Sidebar({
             <span>Back to Workspace</span>
           </button>
         ) : (
-          <div
-            className="sidebar-workspace-sel"
-            onClick={() => toast.push("Workspace switcher — coming in Phase 15", "default")}
-          >
-            <span className="sidebar-workspace-name">Production</span>
+          <div className="sidebar-workspace-sel" onClick={() => setPickerOpen(true)}>
+            <span className="sidebar-workspace-name">{settingsQuery.data?.settings.name ?? "Workspace"}</span>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="2.5">
               <path d="m6 9 6 6 6-6" />
             </svg>
           </div>
         )}
       </div>
+
+      <WorkspacePicker
+        open={pickerOpen}
+        options={workspacesQuery.data?.options ?? []}
+        currentTenantId={user?.tenant_id}
+        title="Switch workspace"
+        subtitle={switching ? "Switching…" : "Every workspace this email has an active account in."}
+        onClose={() => !switching && setPickerOpen(false)}
+        onPick={handleSwitch}
+      />
 
       <nav className="sidebar-nav">
         <div key={displayDomain} className={["sidebar-nav-content", fading ? "fading" : ""].filter(Boolean).join(" ")}>

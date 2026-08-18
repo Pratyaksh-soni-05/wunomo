@@ -8,9 +8,9 @@ from typing import Optional
 
 log = structlog.get_logger()
 from services.auth_service import (
-    hash_password, issue_token_for_user,
+    hash_password, issue_token_and_remember,
     create_new_tenant_and_user, find_existing_tenants_for_email,
-    resolve_password_login, resolve_identity,
+    resolve_password_login, resolve_identity, switch_workspace, WorkspaceSwitchRateLimited,
     check_email_code_request_allowed, send_login_code, verify_login_code,
     get_google_authorize_url, consume_oauth_state, exchange_google_code, verify_google_id_token,
     store_pending_identity, resolve_pending_identity,
@@ -110,7 +110,7 @@ async def register(req: RegisterRequest):
         tenant_name=req.tenant_name, email=req.email, auth_method="password",
         hashed_password=hash_password(req.password), full_name=req.full_name,
     )
-    token = issue_token_for_user(user, "password")
+    token = await issue_token_and_remember(user, "password")
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -189,7 +189,7 @@ async def verify_email_code(req: EmailCodeVerify):
             tenant_name=req.new_tenant_name, email=req.email, auth_method="email_code",
             email_verified=True,
         )
-        token = issue_token_for_user(user, "email_code")
+        token = await issue_token_and_remember(user, "email_code")
         return {
             "access_token": token, "token_type": "bearer",
             "user_id": user.id, "tenant_id": tenant.id,
@@ -255,7 +255,7 @@ async def google_callback(req: GoogleCallback):
             google_id=google_id, email_verified=provider_email_verified,
             full_name=claims.get("name"),
         )
-        token = issue_token_for_user(user, "google")
+        token = await issue_token_and_remember(user, "google")
         return {
             "access_token": token, "token_type": "bearer",
             "user_id": user.id, "tenant_id": tenant.id,
@@ -280,6 +280,36 @@ async def resolve_workspace(req: ResolveWorkspaceRequest):
         "access_token": result["token"], "token_type": "bearer",
         "user_id": result["user_id"], "tenant_id": result["tenant_id"],
     }
+
+
+@router.get("/my-workspaces")
+async def my_workspaces(user=Depends(get_current_user)):
+    """Item 1: backs the sidebar's real workspace switcher - every tenant
+    this authenticated email has an active account in, for the same
+    WorkspacePicker component login's choose_workspace step already uses."""
+    options = await find_existing_tenants_for_email(user["email"], active_only=True)
+    return {"options": options}
+
+
+class SwitchWorkspaceRequest(BaseModel):
+    tenant_id: str
+
+
+@router.post("/switch-workspace")
+async def switch_workspace_route(req: SwitchWorkspaceRequest, request: Request, user=Depends(get_current_user)):
+    """Item 1: re-issues a fresh token for a different tenant the caller
+    already has an active account in - no password re-entry, since
+    get_current_user already proved identity for this request. tenant_id
+    is baked into the JWT, so there is no way to "switch" without a new
+    token."""
+    client_ip = request.client.host if request.client else None
+    try:
+        result = await switch_workspace(user["email"], user["tenant_id"], req.tenant_id, ip=client_ip)
+    except WorkspaceSwitchRateLimited:
+        raise HTTPException(status_code=429, detail="Too many workspace switches recently — wait a bit and try again.")
+    if result is None:
+        raise HTTPException(status_code=403, detail="You don't have an active account in that workspace.")
+    return {"token_type": "bearer", **result}
 
 
 VALID_THEMES = ("light", "dark", "system")

@@ -16,7 +16,7 @@ from sqlalchemy import select
 
 from config import settings
 from database import AsyncSessionLocal
-from models.all_models import EmailLoginCode, Tenant, User
+from models.all_models import EmailLoginCode, Tenant, User, UserWorkspacePreference
 
 log = structlog.get_logger()
 
@@ -48,6 +48,16 @@ MAX_REQUESTS_PER_EMAIL_PER_HOUR = 5
 MAX_REQUESTS_PER_IP_PER_HOUR = 20
 LOCKOUT_MINUTES = 30
 CONSECUTIVE_EXHAUSTIONS_FOR_LOCKOUT = 3
+
+# Item 1's switch-workspace endpoint: not a guessing/brute-force target the
+# way login is (the caller must already hold a valid, authenticated session
+# and a real active membership in the target tenant - there's no secret to
+# guess), so these are generous compared to the OTP limits above, sized
+# against script/abuse volume rather than credential-stuffing. Reuses
+# _check_and_increment(), the same real Redis mechanism email-code login
+# already uses, rather than a new one-off scheme.
+MAX_WORKSPACE_SWITCHES_PER_EMAIL_PER_HOUR = 30
+MAX_WORKSPACE_SWITCHES_PER_IP_PER_HOUR = 60
 
 
 def utcnow() -> datetime:
@@ -83,6 +93,53 @@ def issue_token_for_user(user: User, auth_method: str) -> str:
     })
 
 
+async def issue_token_and_remember(user: User, auth_method: str) -> str:
+    """Item 1: wraps issue_token_for_user() with the "remember the last
+    workspace used" write, for the real login/signup/invite-accept/switch
+    call sites (6 of them, confirmed by grep, every one a genuine "a
+    session was just established" moment) -- kept as a separate async
+    function rather than making issue_token_for_user itself async so the
+    ~20 test files that call it directly as a plain synchronous "mint a
+    token for this seeded user" helper don't all need touching for
+    something they don't care about."""
+    token = issue_token_for_user(user, auth_method)
+    await _remember_workspace(user.email, user.tenant_id)
+    return token
+
+
+async def _remember_workspace(email: str, tenant_id: str) -> None:
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(UserWorkspacePreference).where(UserWorkspacePreference.email == email))
+        pref = r.scalars().first()
+        if pref is None:
+            db.add(UserWorkspacePreference(email=email, tenant_id=tenant_id, updated_at=utcnow()))
+        else:
+            pref.tenant_id = tenant_id
+            pref.updated_at = utcnow()
+        await db.commit()
+
+
+async def _remembered_workspace(email: str) -> Optional[str]:
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(UserWorkspacePreference.tenant_id).where(UserWorkspacePreference.email == email))
+        return r.scalar()
+
+
+async def _match_remembered(email: str, candidates: list[User]) -> Optional[User]:
+    """Item 1: when an email resolves to more than one active tenant
+    account, skip the choose-workspace picker if the remembered one is
+    still a valid, current candidate. If the remembered tenant was
+    deleted, or the user's own row there was deactivated/removed since
+    (no longer in `candidates`, which is already filtered to
+    is_active-only by both callers), this returns None and the caller
+    falls through to its existing "choose" behavior unchanged -- never a
+    hard failure, never a silently-wrong tenant."""
+    remembered = await _remembered_workspace(email)
+    if not remembered:
+        return None
+    return next((c for c in candidates if c.tenant_id == remembered), None)
+
+
 # ---------------------------------------------------------------------------
 # Tenant creation (shared by register(), email-code, and Google — all three
 # "create a new workspace" paths are otherwise identical)
@@ -114,16 +171,88 @@ async def create_new_tenant_and_user(
         return tenant, user
 
 
-async def find_existing_tenants_for_email(email: str) -> list[dict]:
+async def find_existing_tenants_for_email(email: str, active_only: bool = False) -> list[dict]:
     """Non-blocking signup nudge (Phase 3, approved): informs the client an
-    email already has a workspace elsewhere, without blocking registration."""
+    email already has a workspace elsewhere, without blocking registration.
+    active_only=True (item 1's workspace-switcher list) additionally
+    requires User.is_active, so a deactivated/removed membership never
+    shows up as a valid switch target -- the signup-nudge caller leaves
+    this False, unchanged from its original behavior."""
     async with AsyncSessionLocal() as db:
-        r = await db.execute(select(User).where(User.email == email))
+        query = select(User).where(User.email == email)
+        if active_only:
+            query = query.where(User.is_active.is_(True))
+        r = await db.execute(query)
         users = r.scalars().all()
         if not users:
             return []
         tr = await db.execute(select(Tenant).where(Tenant.id.in_([u.tenant_id for u in users])))
         return [{"tenant_id": t.id, "tenant_name": t.name} for t in tr.scalars().all()]
+
+
+class WorkspaceSwitchRateLimited(Exception):
+    """Raised, not returned, so the route can't accidentally treat a rate
+    limit the same as a 403-no-access - they need different status codes
+    and different messages."""
+
+
+async def switch_workspace(
+    email: str, from_tenant_id: str, target_tenant_id: str, ip: Optional[str] = None,
+) -> Optional[dict]:
+    """Item 1: re-issues a fresh token for a tenant the caller already has
+    an active account in -- no password re-entry required, since the
+    caller is already authenticated (get_current_user already proved
+    identity for this request) and is only re-selecting among tenants
+    that same proven email already has a real membership in, same trust
+    boundary as picking among choose_workspace's options during login.
+
+    The authorization check is the whole security of this endpoint, so it
+    is stated plainly: `target_tenant_id` comes from the request body (an
+    arbitrary tenant id the caller could type), but `email` comes from
+    get_current_user()'s JWT-decoded, freshly is_active/role-checked
+    identity -- never from the request. The query below only ever
+    succeeds if THAT authenticated email has a real, currently-active
+    User row in the target tenant; there is no code path that trusts the
+    caller's own claim about who they are or what they're allowed to
+    reach. Returns None (-> the route 403s) if it doesn't.
+
+    Rate-limited (per email and per IP, item 1 follow-up) using the same
+    real Redis mechanism email-code login already uses - raises rather
+    than returning, so a 429 can't be confused with the 403 no-access case.
+    Writes two AuditLog entries on success, one per tenant side of the
+    switch, so each tenant's own Audit Log independently shows a member
+    switching away vs. a member switching in."""
+    if ip and not await _check_and_increment(
+        f"wsswitch:ip:{ip}", MAX_WORKSPACE_SWITCHES_PER_IP_PER_HOUR, 3600,
+    ):
+        raise WorkspaceSwitchRateLimited()
+    if not await _check_and_increment(
+        f"wsswitch:email:{email}", MAX_WORKSPACE_SWITCHES_PER_EMAIL_PER_HOUR, 3600,
+    ):
+        raise WorkspaceSwitchRateLimited()
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(User).where(
+            User.email == email, User.tenant_id == target_tenant_id, User.is_active.is_(True),
+        ))
+        user = r.scalars().first()
+        if user is None:
+            return None
+        token = await issue_token_and_remember(user, "switch_workspace")
+
+    from modules.governance.audit_trail import AuditTrail
+    await AuditTrail(from_tenant_id).log_action(
+        actor=email, action="workspace.switched_away",
+        resource_type="tenant", resource_id=target_tenant_id,
+        payload={"to_tenant_id": target_tenant_id},
+    )
+    await AuditTrail(target_tenant_id).log_action(
+        actor=email, action="workspace.switched_into",
+        resource_type="tenant", resource_id=from_tenant_id,
+        payload={"from_tenant_id": from_tenant_id},
+    )
+
+    return {"access_token": token, "user_id": user.id, "tenant_id": user.tenant_id}
 
 
 # ---------------------------------------------------------------------------
@@ -149,8 +278,15 @@ async def resolve_password_login(email: str, password: str, tenant_id: Optional[
     if len(matches) == 1:
         user = matches[0]
         return {
-            "status": "single", "token": issue_token_for_user(user, "password"),
+            "status": "single", "token": await issue_token_and_remember(user, "password"),
             "user_id": user.id, "tenant_id": user.tenant_id,
+        }
+
+    remembered = await _match_remembered(email, matches)
+    if remembered:
+        return {
+            "status": "single", "token": await issue_token_and_remember(remembered, "password"),
+            "user_id": remembered.id, "tenant_id": remembered.tenant_id,
         }
 
     async with AsyncSessionLocal() as db:
@@ -192,6 +328,10 @@ async def resolve_identity(
         if len(users) == 1:
             return await _link_and_issue(db, users[0], auth_method, google_id, provider_email_verified)
 
+        remembered = await _match_remembered(email, users)
+        if remembered:
+            return await _link_and_issue(db, remembered, auth_method, google_id, provider_email_verified)
+
         tr = await db.execute(select(Tenant).where(Tenant.id.in_([u.tenant_id for u in users])))
         tenants = {t.id: t.name for t in tr.scalars().all()}
         return {
@@ -214,7 +354,7 @@ async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_
         await db.commit()
 
     return {
-        "status": "single", "token": issue_token_for_user(user, auth_method),
+        "status": "single", "token": await issue_token_and_remember(user, auth_method),
         "user_id": user.id, "tenant_id": user.tenant_id,
     }
 

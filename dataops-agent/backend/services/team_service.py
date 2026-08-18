@@ -20,7 +20,7 @@ from sqlalchemy import select
 from config import settings
 from database import AsyncSessionLocal
 from models.all_models import TeamInvite, Tenant, User
-from services.auth_service import hash_password, issue_token_for_user
+from services.auth_service import hash_password, issue_token_and_remember
 from services.rbac import ALL_ROLES
 
 log = structlog.get_logger()
@@ -156,7 +156,7 @@ async def accept_invite(*, token: str, password: str, full_name: str) -> dict:
         await db.commit()
         await db.refresh(user)
 
-        token_str = issue_token_for_user(user, "password")
+        token_str = await issue_token_and_remember(user, "password")
         return {
             "access_token": token_str, "token_type": "bearer",
             "tenant_id": user.tenant_id, "user_id": user.id, "role": user.role,

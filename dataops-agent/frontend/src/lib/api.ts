@@ -161,6 +161,18 @@ export async function resolveWorkspace(resolution_token: string, tenant_id: stri
   });
 }
 
+// ---------- Workspace switcher (item 1) ----------
+
+export function getMyWorkspaces(token: string): Promise<{ options: WorkspaceOption[] }> {
+  return authedRequest("/api/v1/auth/my-workspaces", token);
+}
+
+export function switchWorkspace(token: string, tenant_id: string): Promise<AuthSuccess> {
+  return request("/api/v1/auth/switch-workspace", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ tenant_id }),
+  });
+}
+
 // ---------- Onboarding ----------
 
 export interface OnboardingProfile {

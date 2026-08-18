@@ -29,7 +29,7 @@ for every item.
 
 | # | Finding (verbatim) | Guide section | Class | Screenshot(s) | Status |
 |---|---|---|---|---|---|
-| 1 | After first sign up of user or after every login it asks to choose workspace remove that whole thing i dont wanna choose a workspace we enter into the workspace of the last login and then in the dashboard we can toggle the workspaces but remove that pop up at the start of every login to choose workspace we directly login into the dashboard of last logged in workspace. | — | Feature | image16.jpg | Open |
+| 1 | After first sign up of user or after every login it asks to choose workspace remove that whole thing i dont wanna choose a workspace we enter into the workspace of the last login and then in the dashboard we can toggle the workspaces but remove that pop up at the start of every login to choose workspace we directly login into the dashboard of last logged in workspace. | — | Feature | image16.jpg | Closed (2026-08-19) |
 | 2 | in the backend; Date and time after profiling the data source is not correct. Add data source page closes sometimes own its own on tab switichin g | — | Bug | image5.jpg (first part only — no screenshot found for the "Add data source page closes on tab switching" part) | Closed (2026-08-19) — date/time part only, "closes on tab switching" not investigated this pass |
 | 3 | pipeline feature also date and time is wrong does not match the date and time of the machine or the pc. | — | Bug | image12.jpg | Closed (2026-08-19) |
 | 4 | In the axiom chat page there is no delete chat option for individual chat windows in the side panel | — | Feature | image15.jpg, image6.jpg | Closed (2026-08-19) |
@@ -76,6 +76,7 @@ for every item.
 | 45 | The API emits three different raw timestamp string shapes for the same conceptual "when did this happen" value, depending on which serialization path produced it: a bare naive string with microseconds (`"2026-08-16 09:46:54.933113"`), a bare Pydantic-serialized naive string (`"2026-08-16T09:46:54.933113"`), and a genuinely tz-aware ISO string with trailing `Z` (CI/CD models only, per Hard Rule 3's documented exception). The frontend now normalizes all three correctly via `frontend/src/lib/dates.ts` (built for items 2/3, closed 2026-08-19), but any consumer hitting the API directly — a script, an integration, a future mobile client — gets the raw inconsistency with no way to distinguish "naive, needs UTC assumed" from "already aware" except by knowing which endpoint it came from. Found while building items 2/3's fix, 2026-08-19. Not fixed — an API-contract problem, not urgent, explicitly out of scope for this session. | — | Bug | none | Open |
 | 46 | `Task.originating_session_id` (`models/all_models.py:465`) exists in the model and its own migration specifically to trace a task back to the chat session it was spawned from, but no code path ever sets it — confirmed by grepping the entire backend: `create_task()` (`api/v1/tasks.py:308`) never assigns it, and the frontend's "+ Start a Task" flow (`TaskCreateModal.tsx` → `createTask()`) never sends a session_id in the first place. Every task in this codebase has `originating_session_id = NULL` regardless of whether it was actually started from within a chat conversation. Found 2026-08-19 while investigating item 4 (delete-conversation) — needed to confirm whether deleting a session could orphan a task; it can't, because none are actually linked. Sized as small and tacked onto the end of batch 3 rather than left open, per review feedback. | — | Bug | none | Closed (2026-08-19) |
 | 47 | `services/auth_service.py`'s email-code rate limiter (`MAX_REQUESTS_PER_IP_PER_HOUR = 20`, key `otp:ip:{ip}`) is real Redis state shared across an entire pytest session with no per-test-file reset fixture found. Running a sufficiently broad `-k` selection that happens to pull in several files calling `POST /auth/email-code/request` (e.g. `-k "auth or settings"`) can exhaust the 20/hour budget purely from the suite's own combined request volume, then spuriously fail `test_email_code_auth.py::test_resend_cooldown_blocks_immediate_second_request` and `::test_rate_limit_bookkeeping_is_symmetric_for_nonexistent_emails` — both pass cleanly in isolation (`pytest tests/test_email_code_auth.py`, 11/11) and only fail when combined with enough sibling tests to burn the shared quota first; confirmed live by reading `otp:ip:127.0.0.1` from Redis directly after a failing run (23, over the 20 cap) and after a clean isolated run. Found 2026-08-19 while running the full auth/settings suite to verify item 25's changes. **Fixed 2026-08-19 (batch 4)** — see closure note below. | — | Bug | none | Closed (2026-08-19) |
+| 48 | `STATUS_TABLE.md`'s already-documented "Freshness checker creates duplicate open incidents" Known-broken row (`_check_freshness()` in `services/tasks.py`, runs every 15 min via Celery beat, creates a brand-new `Incident` row every tick a source is still stale instead of checking for an already-open one first) is not a stale historical note — it is live and actively still running right now. Found while investigating the "Email Code Verify Corp" QA tenant for possible deletion (2026-08-19): that tenant's one `DataSource` ("Sales_Data") has sat unprofiled since 2026-07-22, and `_check_freshness()` has generated one new "Stale data: Sales_Data (N.Nh overdue)" incident every ~15 minutes since — 329 rows and counting as of this check, still growing during this same session (confirmed: two live queries a few minutes apart returned 324 then 329). STATUS_TABLE's original note observed "7 near-duplicate incidents for one source" — this is the same bug, just with ~2.5 more weeks of uninterrupted accumulation on this one dead tenant. Root cause unchanged from the original entry: `services/tasks.py`'s `_check_freshness()`, unconditional `db.add(incident)` inside `if hours_since > sla_hours:`, no dedup query against existing open incidents for the same `affected_assets`. Not fixed — logged only, per instruction; the fix belongs with the original Known-broken row, not as new scope here. | — | Bug | none | Open |
 
 ---
 
@@ -429,6 +430,59 @@ surfaced them (not logged as separate findings, since they were bugs in
 code being actively written this session, not pre-existing product
 bugs): the Slack test endpoint's error shape mismatch, and the email
 verification flow's unhandled rate-limited response.
+
+## Item 1 closed (2026-08-19) — remember-last-workspace + real sidebar switcher
+
+Fix is remember, not delete: the choose-workspace picker still exists and
+still appears the first time an email resolves to more than one active
+tenant, but a successful resolution — however it happened, ambiguous
+auto-resolve, an explicit login pick, or an in-app switch — is now
+remembered server-side (new `user_workspace_preferences` table, keyed by
+email since the same email has a separate `User` row per tenant) and
+checked first on every subsequent login, before the picker would ever
+show. Written from one choke point (`issue_token_and_remember()`,
+wrapping the pre-existing `issue_token_for_user`) covering all 6 real
+login/signup/invite-accept/switch call sites, confirmed by grep. A stale
+remembered tenant (removed, deactivated) is never trusted blindly — it's
+checked against the caller's *current* active candidates on every login,
+and falls straight through to the pre-existing single-match/choose-picker
+behavior if it's no longer valid.
+
+The sidebar's dead "Production" row (`Sidebar.tsx`) is now a real
+switcher: shows the actual current workspace name via the existing
+settings fetch, and opens a **Switch workspace** modal (the same
+`WorkspacePicker` component login's own choose-workspace step uses,
+extended with optional title/subtitle/current-tenant-marking props)
+listing every workspace the email has an active account in. New
+`POST /api/v1/auth/switch-workspace` re-issues a fresh token — required
+since `tenant_id` is baked into the JWT, there is no way to switch
+without one — gated on a real DB lookup for an active `User` row
+matching the *authenticated* email (from `get_current_user`'s already
+freshly-checked identity, never from the request body) and the requested
+tenant; failing that lookup 403s. Rate-limited the same real Redis
+mechanism email-code login uses (30/email/hour, 60/IP/hour — more
+generous than login's OTP limits since this isn't a guessing/brute-force
+target, the caller must already hold a valid session and a real active
+membership). Writes two `AuditLog` entries per switch, one per tenant
+side (`workspace.switched_away` / `workspace.switched_into`), so each
+tenant's own audit trail independently shows the event from its own
+perspective.
+
+Live-verified against real, disposable fixture tenants (created via the
+real `/register` endpoint, cleaned up after — never the reviewer's own
+real multi-tenant account): the picker still appears with no remembered
+preference; picking a workspace and logging out/back in skips it on the
+next login; the sidebar shows the real name and opens a working switcher
+listing both workspaces with the current one marked; switching produces
+a real new token, a real full-page reload, and lands in the new
+workspace with its real name displayed; a stale (deactivated)
+remembered tenant falls through cleanly to the one remaining active
+membership with no error; an out-of-scope target tenant 403s; both
+`AuditLog` entries land with the correct tenant/action/payload; the rate
+limit fires a real 429 with a clear message once exceeded. Full backend
+suite (398 tests) passed clean both before and after the three review
+additions (server-side check confirmation, audit logging, rate
+limiting). `npx tsc --noEmit` and `npm run build` both clean.
 
 ## Batch 4 (2026-08-19) — propose-only, scope-only, deferred, and one real fix
 

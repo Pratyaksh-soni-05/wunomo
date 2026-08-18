@@ -323,6 +323,23 @@ class OnboardingProfile(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class UserWorkspacePreference(Base):
+    """Item 1 (2026-08 walkthrough): "log straight into the last workspace
+    used" instead of always showing the choose-workspace picker. Keyed by
+    email, not user_id -- the same email can have a separate User row per
+    tenant (see User.__table_args__'s (tenant_id, email) constraint), and
+    "which workspace did this person use last" is a cross-tenant, per-
+    person fact, not something any single tenant-scoped User row alone can
+    hold. Server-side (not localStorage) so it follows the person across
+    devices, per explicit decision. Written from exactly one place --
+    issue_token_for_user() -- so every real login/switch path updates it
+    without each call site needing its own write."""
+    __tablename__ = "user_workspace_preferences"
+    email = Column(String(255), primary_key=True)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class EmailLoginCode(Base):
     __tablename__ = "email_login_codes"
     id = Column(String, primary_key=True, default=gen_uuid)

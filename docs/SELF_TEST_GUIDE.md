@@ -188,6 +188,13 @@ it later (e.g. logging back in, or logging in as the Viewer in §4.4).
 signup nudge below): a modal titled **Choose a workspace** appears, body
 text *"This email is linked to more than one workspace. Pick which one to
 continue into."*, with one clickable card per workspace showing its name.
+**As of 2026-08-19 (item 1), this only appears the first time** — whichever
+workspace you pick (or the one you're already in, for a single-workspace
+login) is remembered server-side, so your next login on any device skips
+straight to it. You'll only see this picker again if you deliberately
+switch workspaces via the sidebar (§12) and it becomes the new
+remembered one, or if the remembered workspace stops being valid for you
+(removed, deactivated) and more than one other option remains.
 
 **Worth knowing, not something to test directly:** if you land back here
 with a URL ending in `?expired=1` (your session token aged out — JWTs on
@@ -1283,8 +1290,20 @@ before checking Section 14. Do this from any screen.)*
    **Escape**.
 2. Click the small collapse-icon at the bottom of the sidebar (no visible
    text, hover for a tooltip).
-3. Click the **Production** label near the top of the sidebar (below the
-   logo, with a chevron next to it — looks like a workspace switcher).
+3. Click the workspace name near the top of the sidebar (below the logo,
+   with a chevron next to it) — as of 2026-08-19 (item 1) this is a real
+   switcher, not a placeholder. It shows your actual current workspace
+   name (not a hardcoded label), and opens a **Switch workspace** modal
+   listing every workspace this email has an active account in, your
+   current one marked and disabled. Picking a different one re-logs you
+   into it (a full page reload — necessary since every screen's cached
+   data belongs to whichever workspace was active when it loaded) and
+   remembers it as your new default for next login. Server-side checked
+   against your real, active memberships (not client-trusted), rate-
+   limited the same way email-code login is, and each switch writes two
+   real `AuditLog` entries — one in the workspace you left, one in the
+   one you entered — visible on both tenants' own Governance → Audit Log
+   tab if you have access to both.
 4. Click your account avatar (top right of the topbar). A dropdown opens
    showing your email and role. Click **Log out** — only do this last,
    since it ends your session (you'll need to log back in for anything
@@ -1382,9 +1401,10 @@ the kind of thing worth writing down.
   by reading the component: the only keyboard handling wired up is
   Escape-to-close. Mouse click is the only way to actually select a
   result today.
-- **The sidebar's "Production" workspace switcher is not a real
-  switcher** — clicking it only fires a toast reading "Workspace switcher
-  — coming in Phase 15." There's nothing to switch to.
+- **The sidebar's workspace switcher is real as of 2026-08-19 (item 1)**
+  — no longer a "coming in Phase 15" placeholder. If you only have one
+  workspace, the modal it opens will just show that one workspace,
+  disabled — correct, not a bug, there's nothing else to switch to.
 - **Automations, Analytics, and Audit Logs (the sidebar item, not
   Governance's Audit Log tab — see Section 11's note) are all stub
   pages** — each renders a plain "this screen is a routable stub for now"
