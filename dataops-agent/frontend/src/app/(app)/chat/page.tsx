@@ -8,7 +8,7 @@ import { SessionList, MessageThread, ContextPanel, type LocalChatMessage } from 
 import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
 import {
   getToken, decodeUserFromToken, getChatSessions, getChatHistory, sendChatMessage, getSources,
-  ApiError, type ChatContext, type TaskItem,
+  deleteChatSession, ApiError, type ChatContext, type TaskItem,
 } from "@/lib/api";
 
 export default function ChatPage() {
@@ -72,6 +72,36 @@ export default function ChatPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Item 4: hard delete, tenant+user+session scoped server-side. A 409
+  // means a pending approval still traces back to this session (see
+  // chat.py's delete_session) - that gets a route forward (Approvals),
+  // not just a refusal, per finding 12's "dead end" lesson. Success
+  // invalidates ["chat-sessions"] so SessionList refreshes with no
+  // manual reload, and if the deleted session was the open thread, drops
+  // back to a blank "new chat" state since its history is now gone.
+  const deleteSession = async (id: string) => {
+    try {
+      await deleteChatSession(token, id);
+      qc.invalidateQueries({ queryKey: ["chat-sessions"] });
+      if (id === activeSessionId) {
+        chatGenerationRef.current += 1;
+        setActiveSessionId(null);
+        setMessages([]);
+        setSendError(null);
+      }
+      toast.push("Conversation deleted.", "default");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.push(typeof err.detail === "string" ? err.detail : err.message, "warning", {
+          label: "Go to Approvals",
+          onClick: () => router.push("/approvals"),
+        });
+      } else {
+        toast.push("Failed to delete conversation.", "danger");
+      }
+    }
+  };
 
   const newChat = () => {
     const alreadyEmpty = !activeSessionId && messages.length === 0 && !sending;
@@ -143,6 +173,7 @@ export default function ChatPage() {
         onSelectSession={selectSession}
         onNewChat={newChat}
         onInsertPrompt={setDraft}
+        onDeleteSession={deleteSession}
         draft={draft}
       />
       <MessageThread

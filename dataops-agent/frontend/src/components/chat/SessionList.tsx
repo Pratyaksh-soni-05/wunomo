@@ -26,6 +26,7 @@ export function SessionList({
   onSelectSession,
   onNewChat,
   onInsertPrompt,
+  onDeleteSession,
   draft,
 }: {
   tenantId: string | null;
@@ -35,6 +36,7 @@ export function SessionList({
   onSelectSession: (id: string) => void;
   onNewChat: () => void;
   onInsertPrompt: (text: string) => void;
+  onDeleteSession: (id: string) => void;
   draft: string;
 }) {
   const { prompts, addPrompt, removePrompt } = useSavedPrompts(tenantId);
@@ -64,7 +66,16 @@ export function SessionList({
               className={["chat-session-item", s.session_id === activeSessionId ? "active" : ""].join(" ")}
               onClick={() => onSelectSession(s.session_id)}
             >
-              <div className="chat-session-title">{s.title || "New conversation"}</div>
+              <div className="chat-session-row">
+                <div className="chat-session-title">{s.title || "New conversation"}</div>
+                <button
+                  className="chat-session-delete"
+                  title="Delete conversation"
+                  onClick={(e) => { e.stopPropagation(); onDeleteSession(s.session_id); }}
+                >
+                  ✕
+                </button>
+              </div>
               <div className="chat-session-meta">{timeAgo(s.last_activity)} · {s.message_count} msgs</div>
             </div>
           ))

@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from .auth import get_current_user, enforce_quota
 from agent.dataops_agent import run_agent
 from database import AsyncSessionLocal
 from models.all_models import ChatMessage
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from datetime import datetime
 import uuid
 from models.approval_model import ApprovalRequest, ApprovalStatus
@@ -240,3 +240,49 @@ async def get_history(session_id: str, user=Depends(get_current_user)):
         msgs = r.scalars().all()
         messages = await _resolve_blocked_call_statuses(db, user["tenant_id"], session_id, msgs)
         return {"session_id": session_id, "messages": messages}
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, user=Depends(get_current_user)):
+    """Item 4 (2026-08 walkthrough): hard-deletes every ChatMessage row for
+    this conversation. Tenant+user scoped, matching list_sessions' own
+    scoping (sessions are private per-user, not shared across a tenant).
+
+    There is no ChatSession table -- a "session" is purely the session_id
+    grouping key on ChatMessage, so there's nothing to cascade beyond that
+    one table. Investigated before building (see findings doc item 4):
+    Task.originating_session_id is never actually set by any code path
+    today (logged separately as item 46), so no task can be orphaned by
+    this. ApprovalRequest.session_id IS populated for chat-originated
+    approvals, but the row is fully self-contained (action_name/action_args/
+    reason all live on it) and nothing joins it back to chat_messages at
+    read time -- so a *resolved* approval survives its origin conversation
+    being deleted with no functional loss. A *pending* one is different:
+    it's a live gate a human still needs to act on, and deleting its only
+    context out from under it is a bad experience even though nothing
+    would technically break -- so that case alone is refused.
+    """
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(func.count()).select_from(ApprovalRequest).where(
+                ApprovalRequest.tenant_id == user["tenant_id"],
+                ApprovalRequest.session_id == session_id,
+                ApprovalRequest.status == ApprovalStatus.PENDING,
+            )
+        )
+        if r.scalar_one() > 0:
+            raise HTTPException(
+                status_code=409,
+                detail="This conversation has an approval waiting on your decision. Resolve it on the Approvals screen before deleting.",
+            )
+
+        result = await db.execute(delete(ChatMessage).where(
+            ChatMessage.session_id == session_id,
+            ChatMessage.tenant_id == user["tenant_id"],
+            ChatMessage.user_id == user["sub"],
+        ))
+        await db.commit()
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+
+    return {"deleted": True, "session_id": session_id}

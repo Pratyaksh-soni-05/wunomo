@@ -375,6 +375,15 @@ export function getChatHistory(token: string, sessionId: string): Promise<{ sess
   return authedRequest(`/api/v1/chat/sessions/${sessionId}/history`, token);
 }
 
+// Item 4: 409 (ApiError.status) means a pending approval still traces back
+// to this session -- see chat.py's delete_session for why that's refused
+// while a resolved one isn't.
+export function deleteChatSession(token: string, sessionId: string): Promise<{ deleted: boolean; session_id: string }> {
+  return request(`/api/v1/chat/sessions/${sessionId}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 // ---------- Sources (Phase 12) ----------
 
 export interface DataSourceItem {

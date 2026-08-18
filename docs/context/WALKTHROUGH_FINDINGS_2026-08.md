@@ -32,7 +32,7 @@ for every item.
 | 1 | After first sign up of user or after every login it asks to choose workspace remove that whole thing i dont wanna choose a workspace we enter into the workspace of the last login and then in the dashboard we can toggle the workspaces but remove that pop up at the start of every login to choose workspace we directly login into the dashboard of last logged in workspace. | — | Feature | image16.jpg | Open |
 | 2 | in the backend; Date and time after profiling the data source is not correct. Add data source page closes sometimes own its own on tab switichin g | — | Bug | image5.jpg (first part only — no screenshot found for the "Add data source page closes on tab switching" part) | Closed (2026-08-19) — date/time part only, "closes on tab switching" not investigated this pass |
 | 3 | pipeline feature also date and time is wrong does not match the date and time of the machine or the pc. | — | Bug | image12.jpg | Closed (2026-08-19) |
-| 4 | In the axiom chat page there is no delete chat option for individual chat windows in the side panel | — | Feature | image15.jpg, image6.jpg | Open |
+| 4 | In the axiom chat page there is no delete chat option for individual chat windows in the side panel | — | Feature | image15.jpg, image6.jpg | Closed (2026-08-19) |
 | 5 | remove the ask axiom button from the bottom left completely | — | Bug | image7.png | Closed (2026-08-19) |
 | 6 | Axiom -> view progress -> each task should have bigger box in which we can edit anf review at once in the edit plan tab. | — | Design | image10.png (uncertain — see note below) | Closed (2026-08-19) |
 | 7 | notification duration of every action or completion of the noptifications appearing on bottom left should be increased more smooth animation | — | Design | image4.png | Closed (2026-08-19) |
@@ -73,6 +73,8 @@ for every item.
 | 42 | `/billing`'s only cited live-verification (`docs/context/STATUS_TABLE.md`, Phase 17 step 3) describes an extensive Playwright pass against a plan-picker/upgrade-downgrade UI with a real `POST /change-plan` call — but the currently shipped `/billing` page (confirmed by direct file read, 2026-08-18) is a completely different, simpler read-only screen (a static "handled manually by the AXIOM team for now" notice, a usage-bars card, and a "Coming soon" checkout card) with no plan-picker, no Confirm button, and no `change-plan` call anywhere in the file. The only verification citation on record describes a feature that no longer exists in the shipped code; the current page has no verification event of its own. `docs/PRODUCT_AUDIT.md` (2026-08-04) already flagged this exact drift ("Billing (frontend): Fully working, but confirms doc drift"). Found independently during the 2026-08-18 audit (frontend-route subagent pass). Not fixed — a documentation-accuracy issue, not a product bug, but exactly the kind of stale "done" claim this audit exists to catch. | — | Design | `docs/PRODUCT_AUDIT.md` row "Billing (frontend)"; re-confirmed 2026-08-18 | Open |
 | 43 | `docs/SELF_TEST_GUIDE.md` §1.3 tells a first-time tester: "open a browser and go to `http://localhost:3000`. You should land on a login page." The current code (`frontend/src/app/page.tsx`) renders the public marketing landing page unconditionally at `/` — there is no redirect to `/login`; `useIsAuthed()` only swaps CTA button labels. A tester following the guide literally would be confused at the very first step. Found during the 2026-08-18 product status audit (frontend-route subagent pass). Not fixed — a guide-accuracy issue. | §1.3 | Design | 2026-08-18 audit | Open |
 | 44 | Two real, backend-wired frontend routes — `/cicd` and `/` (the marketing landing page) — have zero presence in `docs/SELF_TEST_GUIDE.md`, the only self-test walkthrough this product has; neither is mentioned even as a deliberate exclusion (contrast with Billing, which is explicitly named and reasoned about in §13). A tester who only ever follows the guide end to end would never be prompted to open either screen. Found during the 2026-08-18 product status audit (frontend-route subagent pass). Not fixed — a test-process gap, not a product bug. | — | Untested | 2026-08-18 audit | Open |
+| 45 | The API emits three different raw timestamp string shapes for the same conceptual "when did this happen" value, depending on which serialization path produced it: a bare naive string with microseconds (`"2026-08-16 09:46:54.933113"`), a bare Pydantic-serialized naive string (`"2026-08-16T09:46:54.933113"`), and a genuinely tz-aware ISO string with trailing `Z` (CI/CD models only, per Hard Rule 3's documented exception). The frontend now normalizes all three correctly via `frontend/src/lib/dates.ts` (built for items 2/3, closed 2026-08-19), but any consumer hitting the API directly — a script, an integration, a future mobile client — gets the raw inconsistency with no way to distinguish "naive, needs UTC assumed" from "already aware" except by knowing which endpoint it came from. Found while building items 2/3's fix, 2026-08-19. Not fixed — an API-contract problem, not urgent, explicitly out of scope for this session. | — | Bug | none | Open |
+| 46 | `Task.originating_session_id` (`models/all_models.py:465`) exists in the model and its own migration specifically to trace a task back to the chat session it was spawned from, but no code path ever sets it — confirmed by grepping the entire backend: `create_task()` (`api/v1/tasks.py:308`) never assigns it, and the frontend's "+ Start a Task" flow (`TaskCreateModal.tsx` → `createTask()`) never sends a session_id in the first place. Every task in this codebase has `originating_session_id = NULL` regardless of whether it was actually started from within a chat conversation. Found 2026-08-19 while investigating item 4 (delete-conversation) — needed to confirm whether deleting a session could orphan a task; it can't, because none are actually linked. Not fixed — logged only. | — | Bug | none | Open |
 
 ---
 
@@ -224,6 +226,43 @@ not just a green `tsc`/build.
   - it claimed real row-data results against a CSV source, which was
   never true. Corrected in place; no application code changed for this
   item.
+
+## Batch 3, item 4 closed (2026-08-19) — delete conversation
+
+Investigated before building, per instruction: there is no `ChatSession`
+table — a "session" is purely the `session_id` grouping key on
+`ChatMessage` rows, confirmed by grep. `Task.originating_session_id`
+exists in the schema for exactly this trace-back but is never actually
+set by any code path (logged separately as **item 46** — not fixed here).
+`ApprovalRequest.session_id` *is* populated for chat-originated approvals,
+but the row is fully self-contained (`action_name`/`action_args`/`reason`
+all live on it) and nothing joins it back to `chat_messages` at read time,
+so a *resolved* approval survives its conversation being deleted with no
+functional loss — only a *pending* one is refused.
+
+New `DELETE /api/v1/chat/sessions/{session_id}` (`api/v1/chat.py`): hard-
+deletes the `ChatMessage` rows for that session, scoped to tenant+user
+(matching `list_sessions`' own scoping). Returns 409 with a real message —
+*"This conversation has an approval waiting on your decision. Resolve it
+on the Approvals screen before deleting."* — if a `PENDING`
+`ApprovalRequest` still traces to that session; a bare refusal with no way
+forward would repeat finding 12's dead-end problem, so `Toast` gained an
+optional inline action button (`push(message, variant, { label, onClick
+})`), used here to link straight to `/approvals`. Delete control is a
+hover-revealed **✕** on each row in the AXIOM chat page's session list
+(`SessionList.tsx`), the exact location asked for.
+
+Live-verified end to end: created two real conversations via the chat UI,
+attached a real `PENDING` `ApprovalRequest` fixture row to one (inserted
+directly via SQL, same fixture pattern used for batch 2's CI/CD date
+check, deleted after); confirmed the plain conversation deleted instantly
+with the session list updating with no manual reload; confirmed the
+approval-blocked one produced the exact 409 message with a working **Go
+to Approvals** button that navigated to `/approvals`; confirmed that
+*after* resolving the fixture approval (`REJECTED`, not deleted), the same
+conversation then deleted cleanly — proving the block is genuinely
+pending-only, not a blanket "ever had an approval" refusal. `npx tsc
+--noEmit` and `npm run build` both clean.
 
 ## Notes on screenshot correlation
 

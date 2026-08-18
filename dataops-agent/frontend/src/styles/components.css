@@ -249,6 +249,11 @@ tr.selected td { background: var(--ocean-50) !important; }
 .toast.success { background: var(--success); }
 .toast.danger { background: var(--danger); }
 .toast.warning { background: #b45309; }
+.toast-action {
+  background: none; border: none; padding: 0; margin-left: auto;
+  color: inherit; font-weight: 600; font-size: inherit; font-family: inherit;
+  text-decoration: underline; cursor: pointer; flex-shrink: 0;
+}
 @keyframes toast-in { from { transform: translateX(110%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes toast-out { from { transform: translateX(0); opacity: 1; } to { transform: translateX(40px); opacity: 0; } }
 
@@ -534,6 +539,11 @@ tr.selected td { background: var(--ocean-50) !important; }
 .chat-session-item.active { background: var(--surface); border-color: var(--border); }
 .chat-session-title { font-size: 12px; font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-session-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.chat-session-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.chat-session-row .chat-session-title { flex: 1; min-width: 0; }
+.chat-session-delete { opacity: 0; color: var(--text-muted); background: none; border: none; cursor: pointer; line-height: 1; padding: 0 2px; flex-shrink: 0; font-size: 11px; }
+.chat-session-item:hover .chat-session-delete { opacity: 1; }
+.chat-session-delete:hover { color: var(--danger); }
 
 .chat-saved-prompts { padding: 10px 12px; border-top: 1px solid var(--border); }
 .chat-saved-prompt-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; font-size: 11px; color: var(--text-secondary); cursor: pointer; border-radius: 4px; }

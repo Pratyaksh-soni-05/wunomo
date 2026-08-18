@@ -448,6 +448,17 @@ sidebar item; it's now nested behind AI Employees like every other AI
 employee will be, and as of 2026-08-19 covers the operational screens
 above too, not just chat and Tasks.)
 
+**Deleting a conversation (new 2026-08-19, item 4):** in the **Recent**
+list on the left of the chat screen, hover any conversation row — a small
+**✕** appears on the right. Clicking it deletes that conversation
+permanently (no confirmation dialog, matching every other delete in this
+app) and the list updates immediately, no reload needed. If that
+conversation still has an approval waiting on a decision, you'll get a
+toast instead: *"This conversation has an approval waiting on your
+decision"* with a **Go to Approvals** link — the conversation is not
+deleted in that case. Once the approval is resolved (approved, rejected,
+or executed), the same conversation deletes normally.
+
 ![AXIOM chat screen with the "+ Start a Task" button](self_test_assets/01-chat-start-task-button.png)
 
 **3.13** In the top right of the chat panel, click **+ Start a Task**.

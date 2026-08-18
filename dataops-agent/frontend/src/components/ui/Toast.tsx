@@ -4,15 +4,25 @@ import { createContext, ReactNode, useCallback, useContext, useState } from "rea
 
 type ToastVariant = "default" | "success" | "danger" | "warning";
 
+interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface ToastItem {
   id: string;
   message: string;
   variant: ToastVariant;
   leaving: boolean;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
-  push: (message: string, variant?: ToastVariant) => void;
+  // action: an optional inline link for toasts that refuse an action rather
+  // than just report failure -- a bare "can't do that" is a dead end (see
+  // finding 12); this gives the toast a route forward, e.g. deleting a
+  // conversation with a pending approval links straight to Approvals.
+  push: (message: string, variant?: ToastVariant, action?: ToastAction) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -27,9 +37,9 @@ const EXIT_ANIM_MS = 260;
 export function ToastProvider({ children }: { children?: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  const push = useCallback((message: string, variant: ToastVariant = "default") => {
+  const push = useCallback((message: string, variant: ToastVariant = "default", action?: ToastAction) => {
     const id = crypto.randomUUID();
-    setToasts((prev) => [...prev, { id, message, variant, leaving: false }]);
+    setToasts((prev) => [...prev, { id, message, variant, leaving: false, action }]);
     setTimeout(() => {
       setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
       setTimeout(() => {
@@ -47,7 +57,12 @@ export function ToastProvider({ children }: { children?: ReactNode }) {
             key={t.id}
             className={["toast", t.variant !== "default" ? t.variant : "", t.leaving ? "leaving" : ""].filter(Boolean).join(" ")}
           >
-            {t.message}
+            <span>{t.message}</span>
+            {t.action && (
+              <button className="toast-action" onClick={t.action.onClick}>
+                {t.action.label}
+              </button>
+            )}
           </div>
         ))}
       </div>
