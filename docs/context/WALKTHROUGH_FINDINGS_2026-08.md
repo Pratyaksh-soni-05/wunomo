@@ -75,7 +75,7 @@ for every item.
 | 44 | Two real, backend-wired frontend routes — `/cicd` and `/` (the marketing landing page) — have zero presence in `docs/SELF_TEST_GUIDE.md`, the only self-test walkthrough this product has; neither is mentioned even as a deliberate exclusion (contrast with Billing, which is explicitly named and reasoned about in §13). A tester who only ever follows the guide end to end would never be prompted to open either screen. Found during the 2026-08-18 product status audit (frontend-route subagent pass). Not fixed — a test-process gap, not a product bug. | — | Untested | 2026-08-18 audit | Open |
 | 45 | The API emits three different raw timestamp string shapes for the same conceptual "when did this happen" value, depending on which serialization path produced it: a bare naive string with microseconds (`"2026-08-16 09:46:54.933113"`), a bare Pydantic-serialized naive string (`"2026-08-16T09:46:54.933113"`), and a genuinely tz-aware ISO string with trailing `Z` (CI/CD models only, per Hard Rule 3's documented exception). The frontend now normalizes all three correctly via `frontend/src/lib/dates.ts` (built for items 2/3, closed 2026-08-19), but any consumer hitting the API directly — a script, an integration, a future mobile client — gets the raw inconsistency with no way to distinguish "naive, needs UTC assumed" from "already aware" except by knowing which endpoint it came from. Found while building items 2/3's fix, 2026-08-19. Not fixed — an API-contract problem, not urgent, explicitly out of scope for this session. | — | Bug | none | Open |
 | 46 | `Task.originating_session_id` (`models/all_models.py:465`) exists in the model and its own migration specifically to trace a task back to the chat session it was spawned from, but no code path ever sets it — confirmed by grepping the entire backend: `create_task()` (`api/v1/tasks.py:308`) never assigns it, and the frontend's "+ Start a Task" flow (`TaskCreateModal.tsx` → `createTask()`) never sends a session_id in the first place. Every task in this codebase has `originating_session_id = NULL` regardless of whether it was actually started from within a chat conversation. Found 2026-08-19 while investigating item 4 (delete-conversation) — needed to confirm whether deleting a session could orphan a task; it can't, because none are actually linked. Sized as small and tacked onto the end of batch 3 rather than left open, per review feedback. | — | Bug | none | Closed (2026-08-19) |
-| 47 | `services/auth_service.py`'s email-code rate limiter (`MAX_REQUESTS_PER_IP_PER_HOUR = 20`, key `otp:ip:{ip}`) is real Redis state shared across an entire pytest session with no per-test-file reset fixture found. Running a sufficiently broad `-k` selection that happens to pull in several files calling `POST /auth/email-code/request` (e.g. `-k "auth or settings"`) can exhaust the 20/hour budget purely from the suite's own combined request volume, then spuriously fail `test_email_code_auth.py::test_resend_cooldown_blocks_immediate_second_request` and `::test_rate_limit_bookkeeping_is_symmetric_for_nonexistent_emails` — both pass cleanly in isolation (`pytest tests/test_email_code_auth.py`, 11/11) and only fail when combined with enough sibling tests to burn the shared quota first; confirmed live by reading `otp:ip:127.0.0.1` from Redis directly after a failing run (23, over the 20 cap) and after a clean isolated run. Found 2026-08-19 while running the full auth/settings suite to verify item 25's changes — not a regression from that work, and not fixed here (test-infrastructure fragility, not a product bug). | — | Bug | none | Open |
+| 47 | `services/auth_service.py`'s email-code rate limiter (`MAX_REQUESTS_PER_IP_PER_HOUR = 20`, key `otp:ip:{ip}`) is real Redis state shared across an entire pytest session with no per-test-file reset fixture found. Running a sufficiently broad `-k` selection that happens to pull in several files calling `POST /auth/email-code/request` (e.g. `-k "auth or settings"`) can exhaust the 20/hour budget purely from the suite's own combined request volume, then spuriously fail `test_email_code_auth.py::test_resend_cooldown_blocks_immediate_second_request` and `::test_rate_limit_bookkeeping_is_symmetric_for_nonexistent_emails` — both pass cleanly in isolation (`pytest tests/test_email_code_auth.py`, 11/11) and only fail when combined with enough sibling tests to burn the shared quota first; confirmed live by reading `otp:ip:127.0.0.1` from Redis directly after a failing run (23, over the 20 cap) and after a clean isolated run. Found 2026-08-19 while running the full auth/settings suite to verify item 25's changes. **Fixed 2026-08-19 (batch 4)** — see closure note below. | — | Bug | none | Closed (2026-08-19) |
 
 ---
 
@@ -429,6 +429,38 @@ surfaced them (not logged as separate findings, since they were bugs in
 code being actively written this session, not pre-existing product
 bugs): the Slack test endpoint's error shape mismatch, and the email
 verification flow's unhandled rate-limited response.
+
+## Batch 4 (2026-08-19) — propose-only, scope-only, deferred, and one real fix
+
+Item 20 (JWT refresh) and item 28 (chat upload → task) were proposed, not
+built, per instruction — full proposals live in this session's own
+conversation record, not reproduced here. Item 27 (CI/CD webhook) is
+re-marked `Blocked (deployment)` conceptually (kept `Open` in the table
+above, since this file has no separate blocked state) — needs a publicly
+reachable URL GitHub can reach, which local dev can't provide. Items
+17/26 remain `Open`/`Untested`, pending the user creating a second
+account via the invite flow.
+
+**Item 47 fixed.** Root cause confirmed precisely: `otp:ip:{ip}` (the
+email-code rate limiter's per-IP counter) is shared across every test in
+a pytest session with no reset between them, since all requests share
+one source "IP" through the ASGI test transport. Added an autouse,
+function-scoped fixture in `tests/conftest.py`
+(`_reset_email_code_rate_limits`) that clears every `otp:*` Redis key
+before each test — the suite no longer depends on what ran before it or
+how broad a `-k` selection pulls in.
+
+**Verified the fix actually neutralizes the failure mode, not just that
+tests pass by luck**: deliberately set `otp:ip:127.0.0.1` and
+`otp:ip:172.18.0.1` to `999` (10x over the real 20/hour cap) via
+`redis-cli` immediately before each run, with zero manual cleanup
+afterward relying on the new fixture alone —
+`pytest tests/test_email_code_auth.py` (11/11) and
+`pytest tests/ -k "auth or settings"` (40/40) both passed clean despite
+the poisoned starting state that previously caused exactly this failure.
+**Full backend suite re-run in full** (not just the affected file/
+selection) to confirm the new autouse fixture introduces no regressions
+anywhere else: **398 passed, 1 deselected, zero failures.**
 
 ## Notes on screenshot correlation
 
