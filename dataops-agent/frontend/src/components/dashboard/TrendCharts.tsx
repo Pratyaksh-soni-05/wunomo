@@ -94,7 +94,7 @@ export function QualityTrendChart({ trends }: { trends: QualityTrendPoint[] }) {
                   label: "Avg quality score",
                   data: trends.map((t) => t.avg_quality_score),
                   borderColor: resolveToken("--chart-accent", "#4C76A0"),
-                  backgroundColor: "rgba(91,136,178,0.12)",
+                  backgroundColor: resolveToken("--chart-accent-fill-a12", "rgba(91,136,178,0.12)"),
                   fill: true,
                   tension: 0.3,
                   spanGaps: true,

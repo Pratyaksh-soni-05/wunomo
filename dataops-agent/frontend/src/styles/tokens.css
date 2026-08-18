@@ -1,6 +1,10 @@
 /* ==========================================
    WUNOMO AI — Design Tokens
-   Midnight × Pearl Perfect × Noir × Ocean
+   Futurewave (2026-08-19) — light is the Futurewave blue direction, dark is
+   greyscale chrome. Replaces the Midnight × Pearl Perfect × Noir × Ocean
+   palette below, which stays only as the underlying primitive scales a few
+   still-untouched consumers (chart lines, the sidebar spine, deferred to
+   Phase 5) read from. See docs/context/... session log for the swap.
    Locked Phase 0 values — see /dataops-agent/DESIGN_TOKENS.md
    ========================================== */
 
@@ -50,106 +54,115 @@
      in dark mode. */
   --on-dark: #FFFEF5;
 
-  /* Semantic (unchanged hues in both themes) */
-  --success: #16a34a;
+  /* ==========================================
+     SEMANTIC STATUS — split by job (Phase 1b, 2026-08-19)
+     Phase 1b's contrast table found the single shared hue for each status
+     failed AA in at least one theme when used as plain text (light-mode
+     success/warning/info all measured 3.0-3.6:1 against --surface/--bg;
+     dark-mode danger measured 4.10:1) — and separately failed hard as a
+     *fill* holding --on-dark text (light on-dark/success 3.26:1, the exact
+     defect class .toast.warning's #b45309 already dodged by accident).
+     Split into a theme-varying text/icon token (tuned per theme against
+     --surface/--bg) and a theme-invariant fill token (tuned once against
+     --on-dark, same reasoning as --accent-fill/--accent-text below). A
+     fill and its text sibling landing on the same hex (success, info) is
+     fine — they're still two names, free to diverge later; danger's and
+     warning's fill deliberately don't match either theme's text value. */
+  --success: #15803d;         /* light: 4.955:1/surface, 4.722:1/bg (was #16a34a, which measured 3.256/3.103) */
   --success-bg: #EAF7EE;
   --success-border: #BFE5C9;
-  --warning: #d97706;
+  --success-fill: #15803d;    /* on-dark: 4.955:1 */
+  --warning: #92400e;         /* light: 7.005:1/surface, 6.676:1/bg (was #d97706, which measured 3.147/3.000) */
   --warning-bg: #FBF1E1;
   --warning-border: #F0D9AE;
-  --danger: #dc2626;
+  --warning-fill: #b45309;    /* on-dark: 4.961:1 — this is the value that used to live at .toast.warning as an uncatalogued literal; it was never drift, it was the fill/text split showing up before the split existed */
+  --danger: #c81e1e;          /* light: 5.668:1/surface, 5.402:1/bg (was #dc2626, kept below as --danger-fill instead) */
   --danger-bg: #FBEAEA;
   --danger-border: #F3C6C6;
-  --info: #0891b2;
+  --danger-fill: #dc2626;     /* on-dark: 4.771:1 — reuses the original --danger hex, which already satisfied the fill job even though it didn't satisfy light-mode text */
+  --info: #0e7490;            /* light: 5.293:1/surface, 5.045:1/bg (was #0891b2, which measured 3.638/3.467) */
   --info-bg: #ecfeff;
   --info-border: #a5f3fc;
+  --info-fill: #0e7490;       /* on-dark: 5.293:1 — no current fill consumer, defined for symmetry with the other three */
 
-  /* Sidebar stays Midnight in both themes — constant "spine" */
+  /* Sidebar stays Midnight in both themes — constant "spine". Untouched by
+     the Futurewave swap below on purpose: restyling the sidebar is Phase 5
+     (shell) work, not this phase's. */
   --sidebar-bg: var(--midnight-700);
 
   /* ==========================================
-     JOB-SCOPED ACCENT TOKENS (Phase 1, 2026-08-19)
-     Phase 0's audit found --midnight-700, --midnight-100, --ocean-600 and
-     --ocean-500 each doing two or more unrelated jobs (a fill color reused
-     as a text color, a text/link color reused as a Chart.js series color, a
-     border color reused as the only global focus ring, plus raw rgba()
-     literals bypassing the token entirely). These are the same primitives,
-     renamed per job so a future change to one job (e.g. AA-tuning the link
-     color) can't silently move an unrelated one (e.g. the chart line next
-     to a success/danger series, which only needs to read as distinct, not
-     pass text contrast). Every value below is byte-identical to what it
-     replaces — this phase renames, it does not restyle. */
+     JOB-SCOPED ACCENT TOKENS
+     Phase 1 (2026-08-19) split these by job — same computed colour, new
+     name. Phase 1b (2026-08-19) is what actually changes the colour: the
+     Futurewave palette lands here. Light is the blue direction; dark stays
+     greyscale except the wordmark/monogram and the focus ring, both of
+     which use #2277FF (4.86:1 on dark), never #0056FF (3.56:1 — fails). */
 
   /* Fill — filled surface with a label on top */
-  --accent-fill: var(--midnight-700);          /* was: direct --midnight-700 fill (buttons, chips, avatars, bubbles) */
-  --badge-accent-bg: var(--midnight-100);      /* was: --midnight-100 used as .badge-midnight's fill */
+  --accent-fill: #0056FF;              /* light. white label = 5.496:1. No dark override yet — see note below the dark blocks. */
+  --accent-fill-hover: #0047D6;        /* light hover. on-dark: 7.223:1 */
+  --badge-accent-bg: var(--midnight-100);
+  --accent-subtle-bg: #E3E7FC;         /* light. Defined, not yet wired to a call site — see report. */
+  --deep-ground: #061024;              /* light. Gradient terminus / footer — .landing-final-cta */
 
-  /* Text / link — must satisfy AA against --surface and --bg. --ocean-600
-     itself measures 4.487:1 against --bg — rounds to 4.49, just under the
-     4.5:1 AA floor for body-size text. Nudged one rung darker to the
-     existing (previously unused) --ocean-650 step: 5.82:1 against --bg,
-     6.11:1 against --surface. --chart-accent below intentionally stays on
-     --ocean-600 unchanged — a chart line has no text-contrast obligation,
-     which is the entire reason this phase decoupled the two. */
-  --accent-text: #416487;                      /* = --ocean-650's hex, light mode only — see dark-mode override below */
-  --accent-text-hover: var(--ocean-700);       /* was: direct --ocean-700 (auth-link-btn:hover only consumer) */
-  --badge-accent-text: var(--midnight-700);    /* was: --midnight-700 used as .badge-midnight's text, on --badge-accent-bg */
-  --on-accent-text: var(--midnight-100);       /* was: --midnight-100 used as text on an --accent-fill surface (auth tagline) */
+  /* Text / link — must satisfy AA against --surface and --bg */
+  --accent-text: #0056FF;              /* light: 5.496:1/surface, 5.238:1/bg. Replaces Phase 1's #416487 (--ocean-650) stopgap. */
+  --accent-text-hover: var(--ocean-700);
+  --badge-accent-text: var(--midnight-700);
+  --on-accent-text: var(--midnight-100);
 
   /* Border */
-  --accent-border: var(--ocean-500);           /* was: direct --ocean-500 border (input focus) */
+  --accent-border: var(--focus-ring);  /* tracks focus-ring so both stay in sync across themes */
 
-  /* Chart series — only needs to read distinctly next to success/warning/
-     danger lines; decoupled from --accent-text's AA-contrast constraint */
-  --chart-accent: var(--ocean-600);            /* was: direct --ocean-600 reused as a Chart.js line color */
+  /* Chart series — exempt from AA-vs-text reasoning (point 7): only needs
+     to read distinctly next to the success/warning/danger lines beside it.
+     Deliberately NOT repointed to the new accent blue — stays on the old
+     Ocean primitive so its dark-mode lightening (already established,
+     unrelated to this swap) keeps working unchanged. */
+  --chart-accent: var(--ocean-600);
 
-  /* Focus ring — was --ocean-500 also doing fill + border duty elsewhere;
-     now the only thing pointing at this name is :focus-visible */
-  --focus-ring: var(--ocean-500);
+  /* Focus ring — the light value tracks the new accent (no separate light
+     value was given, and focus-ring's job is "the accent, as a ring," so
+     #0056FF is the obvious fill-in); dark gets the brief's explicit
+     exception value in the dark blocks below. */
+  --focus-ring: #0056FF;
 
-  /* Accent-tinted translucent overlays — previously raw rgba(91,136,178,X)
-     literals (X = 91,136,178 is --ocean-500's RGB) hardcoded 3x, bypassing
-     the token layer entirely (Q4). color-mix() derives them from the real
-     token instead of a copy-pasted literal, so they can't drift from it. */
-  --accent-fill-a35: color-mix(in srgb, var(--ocean-500) 35%, transparent);  /* was: rgba(91,136,178,0.35) — .sidebar-item.active */
-  --accent-fill-a50: color-mix(in srgb, var(--ocean-500) 50%, transparent); /* was: rgba(91,136,178,0.5) — .badge-count.badge-live */
-  --accent-border-a15: color-mix(in srgb, var(--ocean-500) 15%, transparent); /* was: rgba(91,136,178,0.15) — .input:focus box-shadow */
+  /* Accent-tinted translucent overlays — still derived from --ocean-500,
+     not yet repointed to the new accent blue. Deferred to Phase 5 along
+     with the sidebar consumers below: .sidebar-item.active and
+     .badge-count.badge-live are both sidebar JSX/CSS, and .input:focus's
+     shadow tracks whatever --accent-border/--focus-ring end up being once
+     that's settled. Left alone on purpose, not forgotten. */
+  --accent-fill-a35: color-mix(in srgb, var(--ocean-500) 35%, transparent);
+  --accent-fill-a50: color-mix(in srgb, var(--ocean-500) 50%, transparent);
+  --accent-border-a15: color-mix(in srgb, var(--ocean-500) 15%, transparent);
+  --chart-accent-fill-a12: color-mix(in srgb, var(--ocean-500) 12%, transparent); /* was: rgba(91,136,178,0.12) — TrendCharts.tsx's QualityTrendChart area fill, the 4th ocean-500 literal */
 
-  /* Modal/palette scrim — was a raw rgba(22,35,58,X) literal (X = 22,35,58
-     happens to match --text-primary's light-mode RGB, but a scrim dimming
-     the page behind a modal is a deliberately theme-invariant idea, not
-     "the text color" — it must NOT flip to near-white in dark mode the way
-     --text-primary does, so it's its own fixed token, not color-mix'd from
-     a themed one. */
-  --scrim-a50: rgba(22, 35, 58, 0.5);   /* was: rgba(22,35,58,0.5) — .modal-backdrop */
-  --scrim-a35: rgba(22, 35, 58, 0.35);  /* was: rgba(22,35,58,0.35) — .cmd-palette-backdrop */
+  /* Modal/palette scrim — deliberately theme-invariant, see Phase 1's note:
+     a scrim dimming the page behind a modal isn't "the text color," it
+     must not flip to near-white in dark mode. */
+  --scrim-a50: rgba(22, 35, 58, 0.5);
+  --scrim-a35: rgba(22, 35, 58, 0.35);
 
-  /* Toast warning fill — a genuinely distinct, uncatalogued hex (not a
-     duplicate of --warning: #b45309 vs --warning's #d97706). Tokenized as
-     found, value unchanged — whether it should actually just BE --warning
-     is a real question, flagged separately, not silently decided here. */
-  --toast-warning-bg: #b45309;
-
-  /* Chart gridlines — was a hardcoded rgba(107,124,148,0.15) JS literal in
-     TrendCharts.tsx (X = 107,124,148 matches --text-muted's light-mode
-     RGB). Kept theme-invariant on purpose: today it never actually flips
-     with theme (unlike the tick-label color in the same file, which does,
-     via resolveToken) — deriving it from --text-muted would silently
-     change dark-mode chart appearance, which this phase must not do. */
+  /* Chart gridlines — theme-invariant on purpose, see Phase 1's note. */
   --chart-grid: rgba(107, 124, 148, 0.15);
 
   /* Sidebar chrome overlays — the sidebar is always the Midnight spine
-     regardless of app theme, so these are fixed, not theme-varying. Each
-     replaces a raw rgba(255,255,255,X) literal in components.css (Q4);
-     values unchanged, one token per distinct alpha actually in use. */
+     regardless of app theme, so these are fixed, not theme-varying.
+     -faint and -footer-text-muted were raised in Phase 1b (0.3→0.55,
+     0.38→0.6) after the contrast table found them at 2.58:1 and 3.30:1 —
+     both now clear 4.5:1 against --sidebar-bg (5.29:1, 5.99:1) with the
+     original relative ordering (-faint stays the more muted of the two)
+     preserved. This is a real, visible change to the section-label and
+     footer-role text, approved explicitly rather than deferred. */
   --sidebar-text: rgba(255, 255, 255, 0.62);
   --sidebar-text-hover: rgba(255, 255, 255, 0.9);
   --sidebar-text-subtle: rgba(255, 255, 255, 0.75);
-  --sidebar-text-faint: rgba(255, 255, 255, 0.3);
+  --sidebar-text-faint: rgba(255, 255, 255, 0.55);        /* was 0.3 (2.58:1) — now 5.29:1 */
   --sidebar-icon-muted: rgba(255, 255, 255, 0.5);
   --sidebar-icon-muted-hover: rgba(255, 255, 255, 0.7);
   --sidebar-footer-text: rgba(255, 255, 255, 0.88);
-  --sidebar-footer-text-muted: rgba(255, 255, 255, 0.38);
+  --sidebar-footer-text-muted: rgba(255, 255, 255, 0.6);  /* was 0.38 (3.30:1) — now 5.99:1 */
   --sidebar-hover-bg: rgba(255, 255, 255, 0.08);
   --sidebar-hover-bg-strong: rgba(255, 255, 255, 0.1);
   --sidebar-badge-bg: rgba(255, 255, 255, 0.15);
@@ -186,34 +199,34 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   /* ==========================================
-     Dark-mode literal values (Phase 1, 2026-08-19) — defined ONCE here.
-     Previously the two dark-mode entry points below (:root[data-theme=
-     "dark"] for the explicit toggle, and the @media block for the
-     OS-preference fallback) each hardcoded the same ~20 literal values
-     independently — two places that had to be hand-kept in sync, with
-     nothing catching a drift between them. Both now just re-point the
-     public token names at these private (--_dark-*) ones, so the actual
-     colors live in exactly one place; only a short list of name-to-name
-     mappings is still written twice, not any literal value. See the note
-     above the @media block below for why that short list can't also be
-     merged in plain CSS. */
-  --_dark-bg: #101015;
-  --_dark-surface: #1B1B21;
-  --_dark-surface-hover: #26262E;
-  --_dark-border: #303038;
-  --_dark-border-strong: #40404A;
-  --_dark-text-primary: #F1F0E1;
-  --_dark-text-secondary: #B4B4BE;
-  --_dark-text-muted: #9A9AA6;
-  --_dark-text-disabled: #5A5A66;
-  --_dark-success-bg: rgba(22,163,74,.15);
-  --_dark-success-border: rgba(22,163,74,.4);
-  --_dark-warning-bg: rgba(217,119,6,.15);
-  --_dark-warning-border: rgba(217,119,6,.4);
-  --_dark-danger-bg: rgba(220,38,38,.15);
-  --_dark-danger-border: rgba(220,38,38,.4);
-  --_dark-info-bg: rgba(8,145,178,.15);
-  --_dark-info-border: rgba(8,145,178,.4);
+     Dark-mode literal values — defined ONCE here (Phase 1 deduplication).
+     Both dark-mode entry points below (:root[data-theme="dark"] for the
+     explicit toggle, and the @media block for the OS-preference fallback)
+     just re-point the public token names at these private (--_dark-*)
+     ones, so the actual colors live in exactly one place. Values updated
+     to the Futurewave dark greyscale in Phase 1b (2026-08-19). */
+  --_dark-bg: #0A0A0B;
+  --_dark-surface: #121214;
+  --_dark-surface-hover: #1A1A1D;       /* = the brief's "surface-raised" */
+  --_dark-border: #26262A;
+  --_dark-border-strong: #3A3A40;       /* = the brief's "border-hover" */
+  --_dark-text-primary: #F2F2F3;        /* 17.689:1 on --_dark-bg */
+  --_dark-text-secondary: #9A9AA2;      /* 7.085:1 on --_dark-bg */
+  --_dark-text-muted: #6E6E76;          /* 3.916:1 on --_dark-bg — large text and NON-ESSENTIAL UI ONLY. Never body copy: this fails the 4.5:1 body floor on purpose, it's only AA-clear at large-text/UI-chrome size (3:1). */
+  --_dark-text-disabled: #5A5A66;       /* unchanged — not given a new value, still dimmer than the new --_dark-text-muted, ordering preserved */
+
+  /* Semantic status, dark — bright/saturated rather than the light-mode
+     hue directly, both for AA against --_dark-bg/--_dark-surface and so
+     they read against the new opaque badge background below (the same
+     hue, dimmed, sitting on a same-hue translucent tile is what was
+     producing ~1.1-1.2:1 before this phase). */
+  --_dark-success: #4ADE80;   /* 9.965:1 on --_dark-surface-hover (the badge bg) */
+  --_dark-warning: #FBBF24;   /* 10.401:1 on --_dark-surface-hover */
+  --_dark-danger: #F87171;    /* 6.277:1 on --_dark-surface-hover */
+  --_dark-info: #22D3EE;      /* 9.608:1 on --_dark-surface-hover */
+
+  --_dark-focus-ring: #2277FF;  /* the brief's explicit dark exception — 4.854:1 on --_dark-bg, 4.589:1 on --_dark-surface. #0056FF measures 3.558:1 here — fails, must not be used dark. */
+
   --_dark-ocean-50: rgba(91,136,178,0.12);
   --_dark-ocean-100: rgba(91,136,178,0.2);
   --_dark-ocean-600: #8FB0D0;
@@ -225,13 +238,10 @@
   --_dark-shadow-xl: 0 16px 48px rgba(0,0,0,0.6), 0 8px 16px rgba(0,0,0,0.35);
 }
 
-/* Dark mode — Phase 19 redesign: warm near-black neutral surfaces, blue
-   (Ocean) reserved strictly for accents/highlights, never a surface fill.
-   Replaces the original pure-black-page + Midnight-navy-card pairing, which
-   read as murky (see CLAUDE.md's Phase 19 dark-theme entry for the measured
-   contrast rationale and before/after table). Toggled by a `data-theme`
-   attribute the theme switcher (Phase 7) stamps on <html>;
-   @media (prefers-color-scheme) is the unstyled default signal. */
+/* Dark mode — Futurewave greyscale chrome (Phase 1b, 2026-08-19). Replaces
+   the prior "Phase 19" warm-near-black palette (see git history for that
+   rationale). Toggled by a `data-theme` attribute the theme switcher stamps
+   on <html>; @media (prefers-color-scheme) is the unstyled default signal. */
 :root[data-theme="dark"] {
   --bg: var(--_dark-bg);
   --surface: var(--_dark-surface);
@@ -244,41 +254,55 @@
   --text-muted: var(--_dark-text-muted);
   --text-disabled: var(--_dark-text-disabled);
 
-  --success-bg: var(--_dark-success-bg);
-  --success-border: var(--_dark-success-border);
-  --warning-bg: var(--_dark-warning-bg);
-  --warning-border: var(--_dark-warning-border);
-  --danger-bg: var(--_dark-danger-bg);
-  --danger-border: var(--_dark-danger-border);
-  --info-bg: var(--_dark-info-bg);
-  --info-border: var(--_dark-info-border);
+  /* Semantic text/icon — bright, saturated. */
+  --success: var(--_dark-success);
+  --warning: var(--_dark-warning);
+  --danger: var(--_dark-danger);
+  --info: var(--_dark-info);
+
+  /* Badge/status fills — OPAQUE now, not a translucent same-hue tint. That
+     translucency was the actual defect: dimmed status-colour text on a
+     same-hue translucent tile over a dark surface measured ~1.1-1.2:1,
+     effectively invisible. An opaque neutral chip + the bright text above
+     is the fix — verified against this exact background, not estimated. */
+  --success-bg: var(--_dark-surface-hover);
+  --warning-bg: var(--_dark-surface-hover);
+  --danger-bg: var(--_dark-surface-hover);
+  --info-bg: var(--_dark-surface-hover);
+  --success-border: rgba(22,163,74,.4);
+  --warning-border: rgba(217,119,6,.4);
+  --danger-border: rgba(220,38,38,.4);
+  --info-border: rgba(8,145,178,.4);
 
   /* ocean-50/100 are light near-white tints in light mode (selected-row/
      hover backgrounds) — redefined here as translucent overlays instead of
      inheriting the light value, which rendered as a jarring white bar
-     against the dark surfaces. */
+     against the dark surfaces. Still on the old Ocean primitive, not the
+     new accent blue — see --accent-subtle-bg's note above; nothing was
+     repointed to it, so this is unchanged from Phase 1. */
   --ocean-50: var(--_dark-ocean-50);
   --ocean-100: var(--_dark-ocean-100);
 
-  /* ocean-600/700 are used as literal link/text color in a few places
-     (auth-link-btn, breadcrumb hover, notif footer link) — the light-mode
-     values fail AA as text against any dark surface (a pre-existing bug,
-     not introduced by this redesign — confirmed 3.27-4.41:1 against the
-     old navy surfaces too). Lightened here, dark-mode only; light mode's
-     --ocean-600/700 are untouched. Hover goes LIGHTER (--ocean-700), the
-     correct direction on a dark background — the light-mode value darkens
-     on hover, which is right for a light background but would reduce
-     contrast here. --accent-text/--accent-text-hover/--chart-accent all
-     alias --ocean-600/700 (see above), so they flip for free here — no
-     extra dark-mode rule needed for any of them. */
+  /* --chart-accent (below, via --ocean-600) is the one accent-adjacent
+     token deliberately NOT moved to the new Futurewave blue — a chart line
+     has no AA obligation, and lightening the old Ocean hue for dark-mode
+     legibility was already correct before this phase touched anything. */
   --ocean-600: var(--_dark-ocean-600);
   --ocean-700: var(--_dark-ocean-700);
 
-  /* --accent-text is a fixed light-mode literal above (see its comment in
-     :root), not a var(--ocean-600) alias, so it needs its own explicit
-     override here to still track ocean-600's dark treatment — otherwise
-     it would stay pinned to its light-mode hex in dark mode too. */
-  --accent-text: var(--ocean-600);
+  /* Links go grey in dark, per the brief: "buttons, active nav state,
+     links, hover states — all grey" in dark mode; blue is reserved for
+     exactly the wordmark/monogram and the focus ring. Phase 1 had this
+     tracking --ocean-600 (a lightened blue) because that was the existing,
+     established convention at the time — correcting it now that the
+     brief's actual direction is known. Hover goes to the brighter
+     text-primary grey, the same "hover = lighter" direction Phase 1's
+     ocean-700 override used, just grey instead of blue now. */
+  --accent-text: var(--text-secondary);
+  --accent-text-hover: var(--text-primary);
+
+  /* The other of the two allowed dark blues. */
+  --focus-ring: var(--_dark-focus-ring);
 
   --shadow-xs: var(--_dark-shadow-xs);
   --shadow-sm: var(--_dark-shadow-sm);
@@ -288,16 +312,11 @@
 }
 
 /* OS-preference fallback for "System" theme mode — same values as
-   :root[data-theme="dark"] above, by construction: both rules just map
-   the public token names onto the same --_dark-* literals defined once in
-   :root, so there's nothing left for the two to drift on. Plain CSS has no
-   way to also merge this mapping list into the rule above (a selector list
-   can't span an @media boundary, and CSS has no mixin/include mechanism),
-   so this short list of name-to-name lines is still written twice — but a
-   mismatch here is now a glaring one-line typo (e.g. `--bg: var(--_dark-
-   surface)`), not a second independently-typed literal that could silently
-   diverge. If a build-time preprocessor is ever added to this project, this
-   is the one place worth collapsing further. */
+   :root[data-theme="dark"] above, by construction: both rules just map the
+   public token names onto the same --_dark-* literals defined once in
+   :root. Plain CSS can't also merge this mapping list into the rule above
+   (a selector list can't span an @media boundary, no mixin/include
+   mechanism) — see Phase 1's note for why. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: var(--_dark-bg);
@@ -311,19 +330,27 @@
     --text-muted: var(--_dark-text-muted);
     --text-disabled: var(--_dark-text-disabled);
 
-    --success-bg: var(--_dark-success-bg);
-    --success-border: var(--_dark-success-border);
-    --warning-bg: var(--_dark-warning-bg);
-    --warning-border: var(--_dark-warning-border);
-    --danger-bg: var(--_dark-danger-bg);
-    --danger-border: var(--_dark-danger-border);
-    --info-bg: var(--_dark-info-bg);
-    --info-border: var(--_dark-info-border);
+    --success: var(--_dark-success);
+    --warning: var(--_dark-warning);
+    --danger: var(--_dark-danger);
+    --info: var(--_dark-info);
+
+    --success-bg: var(--_dark-surface-hover);
+    --warning-bg: var(--_dark-surface-hover);
+    --danger-bg: var(--_dark-surface-hover);
+    --info-bg: var(--_dark-surface-hover);
+    --success-border: rgba(22,163,74,.4);
+    --warning-border: rgba(217,119,6,.4);
+    --danger-border: rgba(220,38,38,.4);
+    --info-border: rgba(8,145,178,.4);
 
     --ocean-50: var(--_dark-ocean-50);
     --ocean-100: var(--_dark-ocean-100);
     --ocean-600: var(--_dark-ocean-600);
     --ocean-700: var(--_dark-ocean-700);
-    --accent-text: var(--ocean-600);
+
+    --accent-text: var(--text-secondary);
+    --accent-text-hover: var(--text-primary);
+    --focus-ring: var(--_dark-focus-ring);
   }
 }

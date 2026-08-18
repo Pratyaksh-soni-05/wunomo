@@ -157,19 +157,79 @@ Report back:
 
 ---
 
-## PHASE 1 — Token layer only
+## PHASE 1 — Token layer, rename/split only. No palette values change.
 
-- Both palettes into both theme blocks.
-- Split accent into fill and text tokens if Phase 0 found them conflated.
-- Add the greyscale dark scale.
-- Add status tokens, chromatic in both themes.
-- Gradient tokens for permitted surfaces only.
-- Keep `--t-slow: 280ms` and existing easing — new motion must feel like it
-  belongs with the sidebar's workspace/AXIOM crossfade.
+Split by job — same computed colour, new name, so a future change to one job
+(e.g. retuning the link colour) can't silently move an unrelated one (e.g. the
+chart line beside it). This phase is a refactor, not a restyle: if a screen
+looks different after it, something went wrong.
 
-Produce a **contrast table**: every foreground/background pair, ratio in both
-themes, pass/fail against AA. Anything under 4.5:1 for body or 3:1 for large
-gets fixed now, not later.
+- Fill tokens (filled surface with a label on top)
+- Text/link tokens (will need to satisfy AA against `--surface`/`--bg` — that
+  check happens in 1b, once the real palette is in; don't chase it here)
+- Border tokens
+- Chart-series tokens (only need to read distinctly next to the
+  success/warning/danger lines beside them — a different constraint than
+  text/link, never conflate the two)
+- Focus-ring token
+- Fold in any hardcoded hex/rgba found in Phase 0's Q4 into a real token too,
+  same value, just named.
+- Collapse any hand-duplicated dark-mode block into a single source of
+  truth if the file has one (private tokens the two dark entry points both
+  reference, not two independently-typed literal lists).
+
+**Stop. Report the diff summary.**
+
+---
+
+## PHASE 1b — The actual palette, plus the accessibility fixes it surfaces
+
+*(Split out 2026-08-19 — the original Phase 1 above conflated "both palettes
+into both theme blocks" with "split accent into fill and text tokens," which
+are two different jobs done for two different reasons. Do 1 first, always;
+its whole value is that nothing visually changes. Then 1b lands the real
+Futurewave colours into the names 1 created, and now genuinely changes what
+things look like — that's expected here, not a sign 1 was done wrong.)*
+
+- Land the real palette (light: Futurewave blue direction; dark: greyscale
+  chrome, blue only on the wordmark/monogram and the focus ring, semantic
+  status stays chromatic in both themes) into the job-scoped tokens Phase 1
+  created.
+- Split each semantic status token (`--success`/`--warning`/`--danger`/
+  `--info`) into a **text/icon** value (4.5:1 against `--surface`/`--bg`) and
+  a **fill** value (4.5:1 against `--on-dark`, the label sitting on it) —
+  same reasoning as Phase 1's accent split, just applied to the semantic
+  scale instead of the brand scale. A fill/text pair that turns out to
+  already share one working value doesn't need two different hexes; a pair
+  that doesn't (e.g. `--warning` vs `.toast.warning`'s existing `#b45309`)
+  needs two names regardless.
+- Fix every AA failure the resulting contrast table finds **before** moving
+  on, not deferred to whichever later phase happens to touch that screen —
+  badges in particular, since dark mode's translucent badge fills measure
+  around 1.1–1.2:1 (effectively invisible text), the same defect class as
+  the dark-mode retokenisation this whole rollout started from.
+- Produce the **contrast table**: every foreground/background pair, ratio in
+  both themes, real composited value for anything translucent (not an
+  estimate), pass/fail against AA. Anything under 4.5:1 body / 3:1 large
+  gets fixed now.
+- Confirm status is never colour-only: every badge and status dot needs an
+  icon or text label riding alongside the colour, not instead of one.
+
+**Known deferred to Phase 5 (sidebar/shell), not forgotten:**
+- `Sidebar.tsx:120`'s `stroke="rgba(255,255,255,0.4)"` and `Sidebar.tsx:167`'s
+  `border: "1.5px solid rgba(255,255,255,0.2)"` — two inline JSX literals,
+  left alone on purpose since Phase 5 is already touching this file's markup.
+- Whether `--accent-fill`/`--accent-fill-hover` need an explicit **dark-mode**
+  override is a Phase 2/5 question, not 1b's — 1b intentionally leaves them
+  light-only, since "buttons go grey in dark" has no given hex and guessing
+  one on the single most visible filled surface in the product is a real
+  design decision, not a token rename. Until Phase 2/5 decides it, dark mode
+  will keep showing the light-mode blue fill on primary buttons/chips/chat
+  bubbles/toast/the sidebar-bg alias. `--accent-text`/`--accent-text-hover`
+  are different: their dark values are set to existing greys
+  (`--text-secondary`/`--text-primary`) in 1b, since "links go grey in dark"
+  has no invented-hex risk — it's just reusing a value this file already
+  defines for exactly that purpose.
 
 **Stop. Report the table.**
 

@@ -109,7 +109,7 @@ img { display: block; max-width: 100%; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .btn-primary { background: var(--accent-fill); color: var(--on-dark); border-color: var(--midnight-800); }
-.btn-primary:hover:not(:disabled) { background: var(--midnight-800); }
+.btn-primary:hover:not(:disabled) { background: var(--accent-fill-hover); }
 .btn-secondary { background: var(--surface); color: var(--text-primary); border-color: var(--border-strong); }
 .btn-secondary:hover:not(:disabled) { background: var(--surface-hover); }
 .btn-ghost { background: transparent; color: var(--text-secondary); }
@@ -246,9 +246,9 @@ tr.selected td { background: var(--ocean-50) !important; }
   animation: toast-in 0.32s cubic-bezier(0.16, 1, 0.3, 1); font-size: 13px;
 }
 .toast.leaving { animation: toast-out 0.26s cubic-bezier(0.4, 0, 1, 1) forwards; }
-.toast.success { background: var(--success); }
-.toast.danger { background: var(--danger); }
-.toast.warning { background: var(--toast-warning-bg); }
+.toast.success { background: var(--success-fill); }
+.toast.danger { background: var(--danger-fill); }
+.toast.warning { background: var(--warning-fill); }
 .toast-action {
   background: none; border: none; padding: 0; margin-left: auto;
   color: inherit; font-weight: 600; font-size: inherit; font-family: inherit;
@@ -275,9 +275,9 @@ tr.selected td { background: var(--ocean-50) !important; }
    ========================================== */
 .progress-bar { height: 4px; background: var(--surface-hover); border-radius: var(--radius-full); overflow: hidden; }
 .progress-fill { height: 100%; border-radius: var(--radius-full); background: var(--midnight-600); transition: width 0.3s ease; }
-.progress-fill.success { background: var(--success); }
-.progress-fill.danger { background: var(--danger); }
-.progress-fill.warning { background: var(--warning); }
+.progress-fill.success { background: var(--success-fill); }
+.progress-fill.danger { background: var(--danger-fill); }
+.progress-fill.warning { background: var(--warning-fill); }
 
 /* ==========================================
    SKELETON
@@ -692,7 +692,7 @@ tr.selected td { background: var(--ocean-50) !important; }
 }
 .landing-contact-card:hover { border-color: var(--ocean-400); color: var(--accent-text); }
 
-.landing-final-cta { padding: 72px 24px; text-align: center; background: var(--midnight-900); color: var(--on-dark); }
+.landing-final-cta { padding: 72px 24px; text-align: center; background: var(--deep-ground); color: var(--on-dark); }
 .landing-final-cta h2 { font-size: clamp(24px, 3vw, 32px); margin-bottom: 10px; color: var(--on-dark); }
 .landing-final-cta p { color: var(--midnight-300); margin-bottom: 28px; font-size: 15px; }
 

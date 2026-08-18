@@ -29,7 +29,7 @@ export function HealthBanner({ incident, onDismiss }: { incident: Incident; onDi
       </div>
       <Button
         size="sm"
-        style={{ background: "var(--warning)", color: "var(--on-dark)", borderColor: "var(--warning)" }}
+        style={{ background: "var(--warning-fill)", color: "var(--on-dark)", borderColor: "var(--warning-fill)" }}
         onClick={() => router.push("/incidents")}
       >
         Investigate
