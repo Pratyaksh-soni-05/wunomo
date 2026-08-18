@@ -30,8 +30,8 @@ for every item.
 | # | Finding (verbatim) | Guide section | Class | Screenshot(s) | Status |
 |---|---|---|---|---|---|
 | 1 | After first sign up of user or after every login it asks to choose workspace remove that whole thing i dont wanna choose a workspace we enter into the workspace of the last login and then in the dashboard we can toggle the workspaces but remove that pop up at the start of every login to choose workspace we directly login into the dashboard of last logged in workspace. | — | Feature | image16.jpg | Open |
-| 2 | in the backend; Date and time after profiling the data source is not correct. Add data source page closes sometimes own its own on tab switichin g | — | Bug | image5.jpg (first part only — no screenshot found for the "Add data source page closes on tab switching" part) | Open |
-| 3 | pipeline feature also date and time is wrong does not match the date and time of the machine or the pc. | — | Bug | image12.jpg | Open |
+| 2 | in the backend; Date and time after profiling the data source is not correct. Add data source page closes sometimes own its own on tab switichin g | — | Bug | image5.jpg (first part only — no screenshot found for the "Add data source page closes on tab switching" part) | Closed (2026-08-19) — date/time part only, "closes on tab switching" not investigated this pass |
+| 3 | pipeline feature also date and time is wrong does not match the date and time of the machine or the pc. | — | Bug | image12.jpg | Closed (2026-08-19) |
 | 4 | In the axiom chat page there is no delete chat option for individual chat windows in the side panel | — | Feature | image15.jpg, image6.jpg | Open |
 | 5 | remove the ask axiom button from the bottom left completely | — | Bug | image7.png | Closed (2026-08-19) |
 | 6 | Axiom -> view progress -> each task should have bigger box in which we can edit anf review at once in the edit plan tab. | — | Design | image10.png (uncertain — see note below) | Closed (2026-08-19) |
