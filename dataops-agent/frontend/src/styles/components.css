@@ -243,12 +243,14 @@ tr.selected td { background: var(--ocean-50) !important; }
   background: var(--midnight-700); color: var(--on-dark); padding: 12px 16px;
   border-radius: var(--radius-md); box-shadow: var(--shadow-xl);
   display: flex; align-items: center; gap: 10px; min-width: 280px;
-  animation: toast-in 0.2s ease; font-size: 13px;
+  animation: toast-in 0.32s cubic-bezier(0.16, 1, 0.3, 1); font-size: 13px;
 }
+.toast.leaving { animation: toast-out 0.26s cubic-bezier(0.4, 0, 1, 1) forwards; }
 .toast.success { background: var(--success); }
 .toast.danger { background: var(--danger); }
 .toast.warning { background: #b45309; }
 @keyframes toast-in { from { transform: translateX(110%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes toast-out { from { transform: translateX(0); opacity: 1; } to { transform: translateX(40px); opacity: 0; } }
 
 /* ==========================================
    MODAL
