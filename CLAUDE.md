@@ -24,6 +24,9 @@ by design. See "Deeper History" at the bottom.
 - **Frontend:** Next.js 15 App Router, React 19, Zustand, hand-written CSS design system
   (not Tailwind), JWT in `localStorage`. Runs via `npm run dev` in its own terminal — it is
   **not** a Docker service (commented out in `docker-compose.yml`).
+  Frontend visual work: see `design/CLAUDE_CODE_BRIEF_full_frontend.md`. Palette, button
+  tiers, and motion rules are specified there — do not improvise colours or add animation
+  libraries.
 - **Auth/tenancy:** JWT-based, multi-tenant **by convention, not enforcement** — every query
   against tenant-owned data must manually filter `WHERE tenant_id = ...`; nothing in the
   framework does this for you. Treat "did this query get tenant-scoped?" as a mandatory
@@ -34,7 +37,12 @@ by design. See "Deeper History" at the bottom.
 ```
 dataops-agent/
 ├── backend/           the FastAPI app — api/, agent/, models/, modules/, services/, migrations/, tests/
-├── frontend/           the Next.js app — src/app/(app)/<screen>/, src/components/, src/lib/api.ts
+├── frontend/           the Next.js app, src/-scoped except public/ and design/:
+│     ├── src/app/          root layout, icons, login/, signup/, onboarding/, invite/, api/,
+│     │                     and the (app)/ route group holding all authenticated screens
+│     ├── src/components/   auth, brand, chat, dashboard, shared, shell, tasks, ui
+│     ├── public/           frontend root, not inside src/
+│     └── design/           frontend root; committed, never imported, never bundled
 ├── docker-compose.yml   backend + postgres + redis + celery_worker + celery_beat (frontend is NOT here)
 ├── .env                  the real env file Docker actually reads (see Run & test commands below)
 └── backend/.env          a SECOND, slightly-drifted copy — Docker does not read this one
@@ -42,7 +50,6 @@ docs/
 ├── context/              engineering + product history that survives an account migration — read this first
 ├── SELF_TEST_GUIDE.md    beginner click-by-click product walkthrough
 ├── PRODUCT_AUDIT.md, PRODUCT_STATUS.md    deeper product-side references
-FRONTEND_BUILD_PLAN.md    authoritative frontend build plan — read before any frontend work
 ```
 Everything else at repo root (`Document/*.pdf`, `generate_dataops_project.py`, sample CSVs,
 `marketing-site/`) is scaffolding, sample data, or a separate product living on its own git
