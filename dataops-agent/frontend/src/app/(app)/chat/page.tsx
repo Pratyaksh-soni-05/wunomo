@@ -205,6 +205,7 @@ export default function ChatPage() {
         token={token}
         open={taskModalOpen}
         onClose={() => setTaskModalOpen(false)}
+        sessionId={activeSessionId ?? undefined}
         onCreated={(task: TaskItem) => {
           const taskCardMsg: LocalChatMessage = {
             role: "assistant", content: "", tool_calls: [], timestamp: new Date().toISOString(),

@@ -11,6 +11,7 @@ cached here).
 import json
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -36,6 +37,12 @@ DEFAULT_STEP_BUDGET_MAX = 20
 class CreateTaskRequest(BaseModel):
     goal: str
     task_shape: str
+    # Item 46: the chat session this task was started from, if any - was
+    # declared on the Task model/migration from the start but never
+    # actually wired up anywhere (found while investigating item 4).
+    # Optional because "+ New Task" on the bare Tasks list genuinely has
+    # no session to attribute.
+    originating_session_id: Optional[str] = None
 
 
 class StepInput(BaseModel):
@@ -313,6 +320,7 @@ async def create_task(body: CreateTaskRequest, current_user: dict = Depends(enfo
             task_shape=task_shape,
             status=TaskStatus.DRAFT_PLAN,
             step_budget_max=DEFAULT_STEP_BUDGET_MAX,
+            originating_session_id=body.originating_session_id,
         )
         db.add(task)
         await db.flush()

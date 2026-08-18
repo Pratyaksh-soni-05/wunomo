@@ -13,11 +13,16 @@ export function TaskCreateModal({
   open,
   onClose,
   onCreated,
+  sessionId,
 }: {
   token: string;
   open: boolean;
   onClose: () => void;
   onCreated: (task: TaskItem) => void;
+  // Item 46: only the chat entry point has a real session to attribute -
+  // the bare Tasks list's "+ New Task" has none, and omitting it there is
+  // correct, not a gap (see Task.originating_session_id's own comment).
+  sessionId?: string;
 }) {
   const toast = useToast();
   const [goal, setGoal] = useState("");
@@ -29,7 +34,7 @@ export function TaskCreateModal({
   };
 
   const createMut = useMutation({
-    mutationFn: () => createTask(token, { goal, task_shape: taskShape }),
+    mutationFn: () => createTask(token, { goal, task_shape: taskShape, originating_session_id: sessionId }),
     onSuccess: (task) => {
       toast.push("Plan generated — review it before approving.", "success");
       reset();

@@ -1177,7 +1177,10 @@ export function getTask(token: string, id: string): Promise<TaskItem> {
   return authedRequest(`/api/v1/tasks/${id}`, token);
 }
 
-export function createTask(token: string, params: { goal: string; task_shape: TaskShapeValue }): Promise<TaskItem> {
+export function createTask(
+  token: string,
+  params: { goal: string; task_shape: TaskShapeValue; originating_session_id?: string }
+): Promise<TaskItem> {
   return request("/api/v1/tasks/", {
     method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
   });

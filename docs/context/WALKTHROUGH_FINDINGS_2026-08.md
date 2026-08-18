@@ -74,7 +74,7 @@ for every item.
 | 43 | `docs/SELF_TEST_GUIDE.md` §1.3 tells a first-time tester: "open a browser and go to `http://localhost:3000`. You should land on a login page." The current code (`frontend/src/app/page.tsx`) renders the public marketing landing page unconditionally at `/` — there is no redirect to `/login`; `useIsAuthed()` only swaps CTA button labels. A tester following the guide literally would be confused at the very first step. Found during the 2026-08-18 product status audit (frontend-route subagent pass). Not fixed — a guide-accuracy issue. | §1.3 | Design | 2026-08-18 audit | Open |
 | 44 | Two real, backend-wired frontend routes — `/cicd` and `/` (the marketing landing page) — have zero presence in `docs/SELF_TEST_GUIDE.md`, the only self-test walkthrough this product has; neither is mentioned even as a deliberate exclusion (contrast with Billing, which is explicitly named and reasoned about in §13). A tester who only ever follows the guide end to end would never be prompted to open either screen. Found during the 2026-08-18 product status audit (frontend-route subagent pass). Not fixed — a test-process gap, not a product bug. | — | Untested | 2026-08-18 audit | Open |
 | 45 | The API emits three different raw timestamp string shapes for the same conceptual "when did this happen" value, depending on which serialization path produced it: a bare naive string with microseconds (`"2026-08-16 09:46:54.933113"`), a bare Pydantic-serialized naive string (`"2026-08-16T09:46:54.933113"`), and a genuinely tz-aware ISO string with trailing `Z` (CI/CD models only, per Hard Rule 3's documented exception). The frontend now normalizes all three correctly via `frontend/src/lib/dates.ts` (built for items 2/3, closed 2026-08-19), but any consumer hitting the API directly — a script, an integration, a future mobile client — gets the raw inconsistency with no way to distinguish "naive, needs UTC assumed" from "already aware" except by knowing which endpoint it came from. Found while building items 2/3's fix, 2026-08-19. Not fixed — an API-contract problem, not urgent, explicitly out of scope for this session. | — | Bug | none | Open |
-| 46 | `Task.originating_session_id` (`models/all_models.py:465`) exists in the model and its own migration specifically to trace a task back to the chat session it was spawned from, but no code path ever sets it — confirmed by grepping the entire backend: `create_task()` (`api/v1/tasks.py:308`) never assigns it, and the frontend's "+ Start a Task" flow (`TaskCreateModal.tsx` → `createTask()`) never sends a session_id in the first place. Every task in this codebase has `originating_session_id = NULL` regardless of whether it was actually started from within a chat conversation. Found 2026-08-19 while investigating item 4 (delete-conversation) — needed to confirm whether deleting a session could orphan a task; it can't, because none are actually linked. Not fixed — logged only. | — | Bug | none | Open |
+| 46 | `Task.originating_session_id` (`models/all_models.py:465`) exists in the model and its own migration specifically to trace a task back to the chat session it was spawned from, but no code path ever sets it — confirmed by grepping the entire backend: `create_task()` (`api/v1/tasks.py:308`) never assigns it, and the frontend's "+ Start a Task" flow (`TaskCreateModal.tsx` → `createTask()`) never sends a session_id in the first place. Every task in this codebase has `originating_session_id = NULL` regardless of whether it was actually started from within a chat conversation. Found 2026-08-19 while investigating item 4 (delete-conversation) — needed to confirm whether deleting a session could orphan a task; it can't, because none are actually linked. Sized as small and tacked onto the end of batch 3 rather than left open, per review feedback. | — | Bug | none | Closed (2026-08-19) |
 | 47 | `services/auth_service.py`'s email-code rate limiter (`MAX_REQUESTS_PER_IP_PER_HOUR = 20`, key `otp:ip:{ip}`) is real Redis state shared across an entire pytest session with no per-test-file reset fixture found. Running a sufficiently broad `-k` selection that happens to pull in several files calling `POST /auth/email-code/request` (e.g. `-k "auth or settings"`) can exhaust the 20/hour budget purely from the suite's own combined request volume, then spuriously fail `test_email_code_auth.py::test_resend_cooldown_blocks_immediate_second_request` and `::test_rate_limit_bookkeeping_is_symmetric_for_nonexistent_emails` — both pass cleanly in isolation (`pytest tests/test_email_code_auth.py`, 11/11) and only fail when combined with enough sibling tests to burn the shared quota first; confirmed live by reading `otp:ip:127.0.0.1` from Redis directly after a failing run (23, over the 20 cap) and after a clean isolated run. Found 2026-08-19 while running the full auth/settings suite to verify item 25's changes — not a regression from that work, and not fixed here (test-infrastructure fragility, not a product bug). | — | Bug | none | Open |
 
 ---
@@ -386,6 +386,49 @@ without firing (URL/list unchanged); confirmed the arm reverts on its
 own after the timeout with nothing spent; confirmed the second click
 generates a real plan and navigates straight to the new task's detail
 page, landing in Draft Plan exactly like any other new task.
+
+## Batch 3 closed (2026-08-19) — features and backend
+
+Items 4, 22, 23, 25 (partial), 13, and the sized-in tail item 46 — see
+each item's own closure note above for full detail. Summary:
+
+- **Item 4** (delete conversation): hard delete, tenant+user+session
+  scoped, refuses only on a genuinely pending approval with a route
+  forward to Approvals, not a bare refusal.
+- **Item 22** (timezone dropdown): real IANA-zone `<select>`, defaults to
+  the browser's detected zone, and — the actual gap — now genuinely
+  drives every rendered timestamp instead of sitting unread in the DB.
+- **Item 23** (onboarding answers in Settings): new read-only Profile
+  tab, no backend changes needed.
+- **Item 25** (double verification): Slack webhook changes gated behind
+  a real test send; an "email not verified" notice with a self-verify
+  flow reusing existing login infrastructure. Changing to a genuinely new
+  email was investigated and deliberately deferred — real, unresolved
+  design questions (JWT reissue, cross-tenant uniqueness, notifying the
+  old address), not guessed at.
+- **Item 13** (re-run buttons): per-row on the Tasks list for
+  completed/failed tasks, cost-confirmed before building, gated behind an
+  explicit two-click confirm so it's never a single accidental click away
+  from spending AI credits.
+- **Item 46** (dead `originating_session_id` column): wired up end to
+  end rather than left for later — confirmed live that a task started
+  from within a chat session now genuinely records that session's real
+  id, and a task started from the bare Tasks list correctly records
+  `NULL`.
+
+Three new findings surfaced purely from this batch's own verification
+work, all logged and left unfixed per instruction: item 45 (the API's
+three timestamp shapes are a real API-contract inconsistency for any
+direct API consumer), item 46 itself started as a find before becoming
+this batch's own tail fix, and item 47 (a real, pre-existing pytest
+fragility — the email-code rate limiter's Redis state has no per-file
+reset, so a broad `-k` selection can spuriously fail two otherwise-
+passing tests). Two real bugs were found and fixed live during this
+batch's own verification, inside the same commits as the features that
+surfaced them (not logged as separate findings, since they were bugs in
+code being actively written this session, not pre-existing product
+bugs): the Slack test endpoint's error shape mismatch, and the email
+verification flow's unhandled rate-limited response.
 
 ## Notes on screenshot correlation
 
