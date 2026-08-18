@@ -46,7 +46,7 @@ for every item.
 | 15 | 4.54 check terminal output again | §4.54 (as written) | Unclear | image9.png | Open |
 | 16 | in step 6.1 in self test guide cards not reloading after refresh | §6.1 | Bug | none identified | Closed (2026-08-17) |
 | 17 | 6.3 → 6.4 check from different accounts | §6.3–6.4 | Untested | image11.png | Open |
-| 18 | 6.6 → dosent go to the conversation when clicked | §6.6 | Bug | image1.png | Open |
+| 18 | 6.6 → dosent go to the conversation when clicked | §6.6 | Bug | image1.png | Closed (2026-08-19) |
 | 19 | 8.3 → SQL execute and dry run not running for csv but it should as per the sel;f test guide from claude | §8.3 | Bug | image13.png | Open |
 | 20 | got logged out randomly maybe after 1 hour | — | Bug | none identified | Open |
 | 21 | incidents banner does not go from dashboard notifications evenm after resolving and checking the incident. No clode button to clode the popup on investigate prompt tab | — | Bug | image2.png | Closed (2026-08-19) |
