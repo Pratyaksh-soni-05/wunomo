@@ -49,7 +49,7 @@ for every item.
 | 18 | 6.6 → dosent go to the conversation when clicked | §6.6 | Bug | image1.png | Open |
 | 19 | 8.3 → SQL execute and dry run not running for csv but it should as per the sel;f test guide from claude | §8.3 | Bug | image13.png | Open |
 | 20 | got logged out randomly maybe after 1 hour | — | Bug | none identified | Open |
-| 21 | incidents banner does not go from dashboard notifications evenm after resolving and checking the incident. No clode button to clode the popup on investigate prompt tab | — | Bug | image2.png | Open |
+| 21 | incidents banner does not go from dashboard notifications evenm after resolving and checking the incident. No clode button to clode the popup on investigate prompt tab | — | Bug | image2.png | Closed (2026-08-19) |
 | 22 | Settings page full customize it. The timezone should be a drop down menu instead of manually typing timezone and after setting timezone it should work and should be correct according to machines timezone | — | Unclear | image14.png | Open |
 | 23 | Onm first sign up some questionnaire is asked for more better understanding of user so store those answers in the user profile section in the setting tab | — | Feature | none identified | Open |
 | 24 | Main change very important; PUT AXIOM in a sub folder in the dashboard with all the other employees. The side panel make it free free up some space. Like first i click on ai employees then i choose axiom and then the side panel changes accordingly and all axiom chat features appear in the side panel. Axiom is not the main employee is just the first on to be built so put it with all the other employees yet to come in a sub section. | — | Feature | none identified | Closed (2026-08-19) |
