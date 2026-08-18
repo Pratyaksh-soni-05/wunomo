@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/components/ui";
@@ -52,6 +52,26 @@ export default function ChatPage() {
       toast.push("Failed to load conversation history.", "danger");
     }
   };
+
+  // Finding 18: clicking a conversation row in the Dashboard's AXIOM
+  // Activity card (or any other future "open this specific chat" link)
+  // carries the real session id as a ?session= query param - consume it
+  // once on mount, then strip it from the URL so a later refresh of /chat
+  // doesn't keep re-selecting it. Reads window.location.search directly
+  // rather than next/navigation's useSearchParams() - same reason the
+  // login page's own ?expired=1 marker does the same (see that file):
+  // useSearchParams() requires a <Suspense> boundary around the page or
+  // the production build fails, which nothing in this app's shell sets
+  // up today; window.location.search needs none and this only ever runs
+  // client-side anyway ("use client" at the top of this file).
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("session");
+    if (id) {
+      selectSession(id);
+      router.replace("/chat");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const newChat = () => {
     const alreadyEmpty = !activeSessionId && messages.length === 0 && !sending;

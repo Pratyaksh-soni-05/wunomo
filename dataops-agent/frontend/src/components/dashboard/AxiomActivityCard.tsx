@@ -36,7 +36,7 @@ export function AxiomActivityCard({ sessions }: { sessions: ChatSessionSummary[]
                 key={s.session_id}
                 className="flex items-center gap-2"
                 style={{ padding: 8, background: "var(--surface-hover)", borderRadius: "var(--radius-sm)", cursor: "pointer" }}
-                onClick={() => router.push("/chat")}
+                onClick={() => router.push(`/chat?session=${encodeURIComponent(s.session_id)}`)}
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--midnight-500)" strokeWidth="2" style={{ flexShrink: 0 }}>
                   <path d="M12 2a8 8 0 0 1 8 8v12l-4-4H4a8 8 0 0 1 0-16" />
