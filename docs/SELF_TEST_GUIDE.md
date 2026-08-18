@@ -235,7 +235,21 @@ instead of a check that just always passes and proves nothing.
 
 ### 2.2 Upload it as a Data Source
 
-1. In the left sidebar, under the **DATA** section, click **Data Sources**.
+*(As of 2026-08-19: Data Sources, Data Catalog, Pipelines, Transforms,
+Quality, Incidents, Governance, Automations, and CI/CD all live inside
+**AXIOM's own sidebar domain** now, not the default Workspace sidebar you
+land on after login — the same domain Chat and Tasks already used. To get
+there: click **AI Employees** in the sidebar, then click into **AXIOM**'s
+card (or just navigate to any of those screens directly — the first click
+into one of them swaps the sidebar automatically). A **← Back to
+Workspace** link appears at the top of the sidebar the whole time you're
+in this domain, replacing the **Production** row. Once you're in, all of
+the screens above stay in the same sidebar together — you won't need to
+repeat this for Pipelines/Quality right after Data Sources. Approvals
+stayed in the regular Workspace sidebar — it's not part of this domain.)*
+
+1. Click **AI Employees** in the sidebar, then click into **AXIOM**'s
+   card. In the sidebar that appears, click **Data Sources**.
 2. Click **+ Add Source** (top right).
 3. A window titled **Add Data Source** opens. The **Type** dropdown
    already says **CSV file** — leave it as is.
@@ -420,12 +434,19 @@ click **Open AXIOM →**.
 
 **What you should see now:** you land on the chat screen, and the sidebar
 itself changes — the full workspace nav list crossfades out and is
-replaced by just two items, **AXIOM** (with its **Live** badge) and
-**Tasks**. At the top of the sidebar, where **Production** used to sit, a
-**← Back to Workspace** link now appears — that's your way out of AXIOM's
-domain from anywhere inside it, not just from this screen. (This is a
-2026-08 change — AXIOM used to be a direct top-level sidebar item; it's
-now nested behind AI Employees like every other AI employee will be.)
+replaced by **AXIOM** (with its **Live** badge), **Tasks**, and (as of
+2026-08-19) the full set of DataOps operational screens too: **Data
+Sources**, **Data Catalog**, **Pipelines**, **Transforms**, **Quality**,
+**Incidents**, **Governance**, **Automations**, and **CI/CD** — this is
+the same expanded list §2.2 already had you click into for Data Sources,
+if you did Section 2 first. At the top of the sidebar, where
+**Production** used to sit, a **← Back to Workspace** link now appears —
+that's your way out of AXIOM's domain from anywhere inside it, not just
+from this screen. Approvals stays in the regular Workspace sidebar, not
+here. (This is a 2026-08 change — AXIOM used to be a direct top-level
+sidebar item; it's now nested behind AI Employees like every other AI
+employee will be, and as of 2026-08-19 covers the operational screens
+above too, not just chat and Tasks.)
 
 ![AXIOM chat screen with the "+ Start a Task" button](self_test_assets/01-chat-start-task-button.png)
 
@@ -924,7 +945,12 @@ are errors — they're the honest zero-data state.
 already waiting; on your own fresh account it'll mostly be empty states
 until you log one yourself.)*
 
-Click **Incidents** in the sidebar.
+Incidents lives inside AXIOM's sidebar domain (see the note in §2.2 if
+you haven't been there yet this session) — click **AI Employees** →
+**AXIOM**'s card if you're starting fresh from Dashboard, then click
+**Incidents** in the sidebar that appears. If you're continuing straight
+from an earlier section that already put you in that domain (Sources,
+Pipelines, Quality, etc.), it's already right there.
 
 **7.1 — If you're on the demo tenant:** you should already see one row —
 severity **HIGH**, titled **"HR Sync Pipeline failed — source file not
@@ -972,9 +998,11 @@ will show up here."*
 
 ## 8. TRANSFORMS — the screen this guide never used to mention
 
-*(~15 minutes — the largest single addition here. Click* **Transforms**
-*in the sidebar. Do this after §2.3 so a profiled source exists to work
-against.)*
+*(~15 minutes — the largest single addition here. Transforms lives inside
+AXIOM's sidebar domain, same as Data Sources/Pipelines/Quality/Incidents
+— see the note in §2.2 if this is your first time there this session.
+Click* **Transforms** *in that sidebar. Do this after §2.3 so a profiled
+source exists to work against.)*
 
 At the top: a **Data source** dropdown — select **Sales Orders**. Below
 it, four tabs: **Natural Language**, **SQL Editor**, **Python Editor**,
@@ -1129,7 +1157,10 @@ deployments that need a human sign-off will show up here."*
 
 ## 11. GOVERNANCE — Lineage, Contracts, Audit Log
 
-*(~10 minutes. Click* **Governance** *in the sidebar. Three tabs:*
+*(~10 minutes. Governance lives inside AXIOM's sidebar domain, same as
+Data Sources/Pipelines/Quality/Incidents/Transforms — see the note in
+§2.2 if this is your first time there this session. Click*
+**Governance** *in that sidebar. Three tabs:*
 **Lineage**, **Contracts**, **Audit Log**. *One naming trap worth flagging
 up front: this screen's* **Audit Log** *tab is real, live data — it is a
 completely different thing from the sidebar's separate* **Audit Logs**

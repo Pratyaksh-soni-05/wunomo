@@ -33,9 +33,9 @@ for every item.
 | 2 | in the backend; Date and time after profiling the data source is not correct. Add data source page closes sometimes own its own on tab switichin g | — | Bug | image5.jpg (first part only — no screenshot found for the "Add data source page closes on tab switching" part) | Open |
 | 3 | pipeline feature also date and time is wrong does not match the date and time of the machine or the pc. | — | Bug | image12.jpg | Open |
 | 4 | In the axiom chat page there is no delete chat option for individual chat windows in the side panel | — | Feature | image15.jpg, image6.jpg | Open |
-| 5 | remove the ask axiom button from the bottom left completely | — | Bug | image7.png | Open |
-| 6 | Axiom -> view progress -> each task should have bigger box in which we can edit anf review at once in the edit plan tab. | — | Design | image10.png (uncertain — see note below) | Open |
-| 7 | notification duration of every action or completion of the noptifications appearing on bottom left should be increased more smooth animation | — | Design | image4.png | Open |
+| 5 | remove the ask axiom button from the bottom left completely | — | Bug | image7.png | Closed (2026-08-19) |
+| 6 | Axiom -> view progress -> each task should have bigger box in which we can edit anf review at once in the edit plan tab. | — | Design | image10.png (uncertain — see note below) | Closed (2026-08-19) |
+| 7 | notification duration of every action or completion of the noptifications appearing on bottom left should be increased more smooth animation | — | Design | image4.png | Closed (2026-08-19) |
 | 8 | in step #3.30 in self test guide. After running the completion button is not coming back | §3.30 | Bug | image17.jpg (shared with item 9) | Closed (2026-08-17) |
 | 9 | 3.30 → 3.32 steps in self test guide are not working | §3.30–3.32 | Bug | image17.jpg (shared with item 8) | Closed (2026-08-17) |
 | 10 | increase all button sizes make them more aesthetic easy to click and only text is written when cursor hovers on top then a greay button boundary appears just like claude or any other website | — | Design | image21.jpg, image18.jpg, image3.jpg | Open |
@@ -52,7 +52,7 @@ for every item.
 | 21 | incidents banner does not go from dashboard notifications evenm after resolving and checking the incident. No clode button to clode the popup on investigate prompt tab | — | Bug | image2.png | Open |
 | 22 | Settings page full customize it. The timezone should be a drop down menu instead of manually typing timezone and after setting timezone it should work and should be correct according to machines timezone | — | Unclear | image14.png | Open |
 | 23 | Onm first sign up some questionnaire is asked for more better understanding of user so store those answers in the user profile section in the setting tab | — | Feature | none identified | Open |
-| 24 | Main change very important; PUT AXIOM in a sub folder in the dashboard with all the other employees. The side panel make it free free up some space. Like first i click on ai employees then i choose axiom and then the side panel changes accordingly and all axiom chat features appear in the side panel. Axiom is not the main employee is just the first on to be built so put it with all the other employees yet to come in a sub section. | — | Feature | none identified | Open |
+| 24 | Main change very important; PUT AXIOM in a sub folder in the dashboard with all the other employees. The side panel make it free free up some space. Like first i click on ai employees then i choose axiom and then the side panel changes accordingly and all axiom chat features appear in the side panel. Axiom is not the main employee is just the first on to be built so put it with all the other employees yet to come in a sub section. | — | Feature | none identified | Closed (2026-08-19) |
 | 25 | double verification for changing the mail or slack url anbd invalid email task should be there when the email not verified. | — | Feature | image8.png | Open |
 | 26 | approvals: check from different accounts for cicd action/ agent action | — | Untested | image19.png | Open |
 | 27 | The self test guide has nothing on testing the CICD and automations feature please see into that too. | — | Feature | none identified | Open |
@@ -123,6 +123,52 @@ for both a read-only shape (re-ran the exact item-32 repro, now fails
 honestly) and a mutating shape (`sync_source` against a nonexistent
 source with 2 real candidates in the pool — confirmed via direct DB read
 that neither real source was touched).
+
+## Batch 1 closed (2026-08-19) — navigation and removals
+
+Items 24, 5, 6, 7, worked in that order per an explicit 4-batch plan
+covering all remaining Open items (batches 2-4 not yet started as of this
+note). All frontend-only, live-verified via Playwright against the real
+running dev server, no backend touched.
+
+- **Item 24**: completed the 2026-08 IA restructure that previously only
+  moved Chat/Tasks into AXIOM's own sidebar domain — Data Sources, Data
+  Catalog, Pipelines, Transforms, Quality, Incidents, Governance,
+  Automations, and CI/CD now move there too. Approvals deliberately stays
+  in the Workspace sidebar (CI/CD deployment approvals are webhook-driven,
+  not AXIOM-initiated — burying them behind an AI employee would make them
+  unreachable for their main use case), a correction to the original
+  finding's own literal request. `isAxiomDomain()`'s route list expanded
+  to match; live-verified a hard-reload deep link into `/sources` and
+  `/cicd` both paint the correct sidebar immediately, `/approvals` stays
+  Workspace-mode.
+- **Item 5**: `AxiomFab.tsx` deleted entirely (component, its export, its
+  render site in the app shell layout, both CSS rule blocks) — not hidden.
+  Confirmed a 0 count for the element on a real logged-in page.
+- **Item 6**: the plan-edit view's step-description field is now a
+  multi-line textarea (was a single-line input) and the tool_args box
+  grew from a 60px to a 160px minimum height. Live-verified against a
+  real Draft Plan task with a deliberately long description — wraps
+  across multiple visible lines instead of being cut off.
+- **Item 7**: toast auto-dismiss raised 4000ms → 6000ms, entrance
+  animation switched to a smoother cubic-bezier curve, and toasts now get
+  a real fade+slide exit transition instead of an instant unmount (only
+  the entrance had any animation before). The finding's own text says
+  "bottom left" — the toast container is and always has been bottom-
+  *right* (confirmed in code and screenshot); read as a misremembering in
+  the original notes, not a real position bug, and not moved.
+
+The dead "Production" workspace-selector row (a related `docs/PRODUCT_AUDIT.md`
+finding, never given its own number here) was explicitly folded into item 1
+rather than fixed here — item 1 is being proposed, not built, before any
+change to that row.
+
+`docs/SELF_TEST_GUIDE.md` updated alongside: §2.2, §3.12, §7, §8, and §11
+now correctly describe entering AXIOM's domain to reach the 9 relocated
+screens, instead of the stale "in the left sidebar, click X" instructions
+that assumed the old, narrower Chat/Tasks-only domain. Screenshots
+deliberately not retaken (deferred to the post-restyle pass, per explicit
+instruction) — only the text describing what to click was corrected.
 
 ## Notes on screenshot correlation
 
