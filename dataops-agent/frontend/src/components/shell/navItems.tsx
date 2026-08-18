@@ -102,7 +102,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "sources",
         label: "Data Sources",
         phase: 12,
-        domain: "workspace",
+        domain: "axiom",
         icon: icon(
           <>
             <ellipse cx="12" cy="5" rx="9" ry="3" />
@@ -115,7 +115,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "catalog",
         label: "Data Catalog",
         phase: 14,
-        domain: "workspace",
+        domain: "axiom",
         icon: icon(
           <>
             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -127,14 +127,14 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "pipelines",
         label: "Pipelines",
         phase: 12,
-        domain: "workspace",
+        domain: "axiom",
         icon: icon(<polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />),
       },
       {
         slug: "transforms",
         label: "Transforms",
         phase: 14,
-        domain: "workspace",
+        domain: "axiom",
         icon: icon(
           <>
             <polyline points="16 18 22 12 16 6" />
@@ -151,14 +151,14 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "quality",
         label: "Quality",
         phase: 12,
-        domain: "workspace",
+        domain: "axiom",
         icon: icon(<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />),
       },
       {
         slug: "incidents",
         label: "Incidents",
         phase: 12,
-        domain: "workspace",
+        domain: "axiom",
         icon: icon(
           <>
             <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
@@ -171,7 +171,7 @@ export const NAV_SECTIONS: NavSection[] = [
         slug: "governance",
         label: "Governance",
         phase: 12,
-        domain: "workspace",
+        domain: "axiom",
         icon: icon(
           <>
             <circle cx="12" cy="5" r="2" />
@@ -186,13 +186,13 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         slug: "automations",
         label: "Automations",
-        domain: "workspace",
+        domain: "axiom",
         icon: icon(<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />),
       },
       {
         slug: "cicd",
         label: "CI / CD",
-        domain: "workspace",
+        domain: "axiom",
         icon: icon(
           <>
             <circle cx="18" cy="18" r="3" />
@@ -311,11 +311,23 @@ export const AXIOM_NAV_SECTIONS: NavSection[] = sectionsForDomain("axiom");
 
 /**
  * Route -> sidebar-domain mapping (2026-08 IA restructure). Single source
- * of truth - Sidebar.tsx and AxiomFab.tsx both call this rather than each
- * hand-rolling their own path check, so the two can't drift out of sync.
- * Prefix match (not exact), so /tasks/[id] deep links count as AXIOM's
- * domain the same as the /tasks list itself.
+ * of truth - Sidebar.tsx calls this rather than hand-rolling its own path
+ * check. Prefix match (not exact), so /tasks/[id] deep links count as
+ * AXIOM's domain the same as the /tasks list itself.
+ *
+ * Expanded (2026-08-19) to cover every route whose nav item now carries
+ * domain: "axiom" above - keep this list and the domain assignments on
+ * those items in sync; nothing derives one from the other automatically.
+ * Approvals deliberately stays out of this list (and domain: "workspace"
+ * on its own item) - CI/CD deployment approvals are webhook-driven, not
+ * AXIOM-initiated, and burying them behind an AI employee would make them
+ * unreachable for their main use case.
  */
+const AXIOM_DOMAIN_PREFIXES = [
+  "/chat", "/tasks", "/sources", "/catalog", "/pipelines", "/transforms",
+  "/quality", "/incidents", "/governance", "/automations", "/cicd",
+];
+
 export function isAxiomDomain(pathname: string): boolean {
-  return pathname.startsWith("/chat") || pathname.startsWith("/tasks");
+  return AXIOM_DOMAIN_PREFIXES.some((p) => pathname.startsWith(p));
 }
