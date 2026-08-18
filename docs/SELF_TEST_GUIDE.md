@@ -1033,17 +1033,38 @@ code already loaded in the editor.
 
 ### 8.3 SQL Editor tab
 
-With code loaded from 8.2 (or type your own, e.g.
-`SELECT * FROM sales_orders LIMIT 5`):
+**Correction, 2026-08-19 (finding 19): this section previously claimed
+Dry Run/Execute against Sales Orders return real row data — they don't,
+and that was a guide error, not a product bug.** `SqlRunner` (the module
+behind both buttons) only supports `postgres`/`mysql` source types by
+design — a CSV source like Sales Orders (the only kind this guide's
+credentials-free walkthrough can give you, see §13) hits a clean,
+honest, explicit rejection, not real execution. Confirmed live: typing
+any query and clicking Execute against Sales Orders shows the plain
+error text `SqlRunner does not support source type 'csv'.` — no crash,
+no silent wrong result, no AI cost. That error message *is* the correct
+thing to see here; treat seeing it as this step passing, not failing.
 
-1. Click **Dry Run**. **What you should see:** a **Query Plan** section
-   appears — this validates/plans the query without actually running it
-   against real data.
-2. Click **Execute**. **What you should see:** a **Result Preview**
-   section with real row data and a stats line, e.g. `` 4 rows · 82ms ``.
+With code loaded from 8.2 (or type your own, e.g.
+`SELECT * FROM sales_orders LIMIT 5`), with **Sales Orders** selected as
+the data source:
+
+1. Click **Dry Run**. **What you should see:** the same
+   `SqlRunner does not support source type 'csv'.` message (dry-run hits
+   the identical source-type check before it ever gets to planning
+   anything).
+2. Click **Execute**. **What you should see:** the same message again.
+
+**If you have real Postgres/MySQL credentials of your own** (this guide
+can't hand you any, see §13's "Non-CSV source types" note) and connect
+one as a source instead, this is where you'd actually see the original
+behavior this section used to describe: a real **Query Plan** on Dry Run,
+and a real **Result Preview** with row data and a stats line (e.g.
+`` 4 rows · 82ms ``) on Execute — not tested as part of this guide.
 
 **If you haven't picked a data source at the top:** both buttons toast
-`Select a data source first.` instead of running — expected, not a bug.
+`Select a data source first.` instead of showing the source-type error —
+expected, not a bug.
 
 ### 8.4 Python Editor tab
 

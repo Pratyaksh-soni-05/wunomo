@@ -47,7 +47,7 @@ for every item.
 | 16 | in step 6.1 in self test guide cards not reloading after refresh | §6.1 | Bug | none identified | Closed (2026-08-17) |
 | 17 | 6.3 → 6.4 check from different accounts | §6.3–6.4 | Untested | image11.png | Open |
 | 18 | 6.6 → dosent go to the conversation when clicked | §6.6 | Bug | image1.png | Closed (2026-08-19) |
-| 19 | 8.3 → SQL execute and dry run not running for csv but it should as per the sel;f test guide from claude | §8.3 | Bug | image13.png | Open |
+| 19 | 8.3 → SQL execute and dry run not running for csv but it should as per the sel;f test guide from claude | §8.3 | Bug | image13.png | Closed (2026-08-19) — diagnosed as a guide error, not a product bug; see closure note |
 | 20 | got logged out randomly maybe after 1 hour | — | Bug | none identified | Open |
 | 21 | incidents banner does not go from dashboard notifications evenm after resolving and checking the incident. No clode button to clode the popup on investigate prompt tab | — | Bug | image2.png | Closed (2026-08-19) |
 | 22 | Settings page full customize it. The timezone should be a drop down menu instead of manually typing timezone and after setting timezone it should work and should be correct according to machines timezone | — | Unclear | image14.png | Open |
@@ -169,6 +169,61 @@ screens, instead of the stale "in the left sidebar, click X" instructions
 that assumed the old, narrower Chat/Tasks-only domain. Screenshots
 deliberately not retaken (deferred to the post-restyle pass, per explicit
 instruction) — only the text describing what to click was corrected.
+
+## Batch 2 closed (2026-08-19) — display bugs
+
+Items 2/3, 21, 18, 19, worked in that order. All frontend-only except
+item 19 (a documentation-only fix, no code changed). Every code fix
+live-verified via Playwright against the real running dev server and app,
+not just a green `tsc`/build.
+
+- **Items 2/3**: root-caused to the API emitting three distinct raw
+  timestamp shapes (see the new `docs/context/GOTCHAS.md` entry for the
+  full detail) with no UTC marker on two of them - 17 of 22 frontend
+  `new Date(...)` call sites silently read a UTC value as local time.
+  New `frontend/src/lib/dates.ts` (`parseApiDate`/`formatApiDate`/
+  `formatApiDateOnly`), wired into all 20 real call sites (2 were
+  deliberately out of scope - `chat/page.tsx`'s optimistic local
+  timestamps, not parsed API strings). Verified via a plain assertion
+  script (no test framework exists for this frontend) - 13/13 passed,
+  including that the two genuinely timezone-aware CI/CD fields do not
+  get corrupted by a second appended `Z`. Live-verified one site per
+  shape against real DB values, all exactly the expected IST (+5:30)
+  offset, including a real CI/CD commit inserted and removed purely for
+  this check.
+- **Item 21**: two independent bugs. `getOpenIncidents()` sent no
+  `status` filter despite its name, so a resolved incident could sit at
+  the front of "open incidents" data and the Dashboard's health banner
+  never cleared even after resolving it - fixed with a real
+  `status=open` param, and the Incidents screen (which genuinely needs
+  full history) switched to the new unfiltered `getIncidents()` instead.
+  The Dashboard/Incidents query-key split ("open-incidents" vs
+  "incidents") turned out to be *correct* once the underlying bug was
+  fixed, not itself the landmine - the two screens now legitimately want
+  different data; what needed fixing was that resolving an incident on
+  one screen didn't invalidate the other's cache, now fixed. Added a
+  dismiss (X) control to the banner, persisted per-incident-id via
+  localStorage, independent of actually resolving the incident.
+  Live-verified: resolved a real incident, confirmed the Dashboard
+  banner correctly moved to the next genuinely-open one (matching a
+  direct API call exactly); confirmed the Incidents screen still shows
+  resolved incidents (no regression); confirmed dismiss hides the banner
+  and survives a hard reload.
+- **Item 18**: the Dashboard's AXIOM Activity rows navigated to a bare
+  `/chat` with no session context, always landing on a blank new thread.
+  Now navigates with `?session=<real id>`, consumed once on mount by the
+  existing `selectSession()` (already used by the in-chat session list -
+  no new selection logic), then stripped from the URL. Live-verified
+  with a real chat session: clicking the row loaded the correct real
+  conversation history, not a blank thread.
+- **Item 19**: diagnosed, not a product bug - `SqlRunner` only supports
+  `postgres`/`mysql` source types by design; a CSV source (the only kind
+  this guide's credentials-free walkthrough can provide) correctly gets
+  a clean, honest rejection (`SqlRunner does not support source type
+  'csv'.`), confirmed live. `SELF_TEST_GUIDE.md` §8.3 was the actual bug
+  - it claimed real row-data results against a CSV source, which was
+  never true. Corrected in place; no application code changed for this
+  item.
 
 ## Notes on screenshot correlation
 
