@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sidebar, Topbar, CommandPalette, AxiomFab } from "@/components/shell";
+import { Sidebar, Topbar, CommandPalette } from "@/components/shell";
 import { getToken, decodeUserFromToken, getMe, type DecodedUser } from "@/lib/api";
 import { QueryProvider } from "@/lib/queryClient";
 import { applyTheme, getStoredTheme, type ThemePreference } from "@/lib/theme";
@@ -68,7 +68,6 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
           />
           <main className="page-content">{children}</main>
         </div>
-        <AxiomFab />
         <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
       </div>
     </QueryProvider>
