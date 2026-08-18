@@ -8,7 +8,7 @@ import {
 } from "@/components/ui";
 import { formatApiDate } from "@/lib/dates";
 import {
-  getToken, getOpenIncidents, createIncident, resolveIncident, getPipelines,
+  getToken, getIncidents, createIncident, resolveIncident, getPipelines,
   type Incident,
 } from "@/lib/api";
 
@@ -43,10 +43,20 @@ export default function IncidentsPage() {
   const [pipelineId, setPipelineId] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
 
-  const incidents = useQuery({ queryKey: ["incidents"], queryFn: () => getOpenIncidents(token) });
+  // This screen needs the full history (it renders a Resolve button
+  // conditionally per row, including already-resolved ones) - genuinely
+  // different data from the Dashboard's open-only health banner query, not
+  // a duplicate of it (finding 21). Unfiltered on purpose.
+  const incidents = useQuery({ queryKey: ["incidents"], queryFn: () => getIncidents(token) });
   const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => getPipelines(token) });
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["incidents"] });
+  // Resolving/logging an incident here changes what the Dashboard's
+  // open-incidents query should return too - invalidate both, not just
+  // this screen's own key.
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["incidents"] });
+    qc.invalidateQueries({ queryKey: ["open-incidents"] });
+  };
 
   const createMut = useMutation({
     mutationFn: () => createIncident(token, {

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { Button, Skeleton, useToast } from "@/components/ui";
@@ -39,6 +40,20 @@ export default function DashboardPage() {
 
   const o = overview.data;
   const mostRecentIncident = incidents.data?.incidents?.[0];
+
+  // Dismissing the health banner (finding 21) hides it for this specific
+  // incident only, persisted so it survives a reload - it does not resolve
+  // the incident (that's still a real, separate action via "Investigate").
+  // Once the incident actually gets resolved, getOpenIncidents() (now
+  // correctly filtered server-side) stops returning it at all, so the
+  // banner disappears on its own regardless of this dismissed state - this
+  // is purely for "I've seen this, stop showing it to me for now."
+  const DISMISS_KEY = "axiom_dismissed_incident_id";
+  const [dismissedId, setDismissedId] = useState<string | null>(null);
+  useEffect(() => {
+    setDismissedId(localStorage.getItem(DISMISS_KEY));
+  }, []);
+  const bannerIncident = mostRecentIncident && mostRecentIncident.id !== dismissedId ? mostRecentIncident : undefined;
 
   function refresh() {
     overview.refetch();
@@ -85,7 +100,15 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-            {mostRecentIncident && <HealthBanner incident={mostRecentIncident} />}
+            {bannerIncident && (
+              <HealthBanner
+                incident={bannerIncident}
+                onDismiss={() => {
+                  localStorage.setItem(DISMISS_KEY, bannerIncident.id);
+                  setDismissedId(bannerIncident.id);
+                }}
+              />
+            )}
 
             <div className="stats-grid">
               <KpiCard

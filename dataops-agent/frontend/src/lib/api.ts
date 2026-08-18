@@ -277,8 +277,22 @@ export function rejectRequest(token: string, approvalId: string): Promise<unknow
   });
 }
 
+// getOpenIncidents used to call this same route with no status param at
+// all - despite its name, it returned every incident regardless of status,
+// which is why a resolved incident could sit in "open incidents" data and
+// keep showing on the Dashboard's health banner indefinitely (finding 21).
+// getIncidents() is the real general-purpose fetch (used by the Incidents
+// screen, which genuinely needs the full history - it renders a Resolve
+// button conditionally per row); getOpenIncidents() is now a thin wrapper
+// that actually passes status=open, matching what its name has always
+// implied and what the health banner actually needs.
+export function getIncidents(token: string, status?: string): Promise<{ incidents: Incident[]; count: number }> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  return authedRequest(`/api/v1/incidents/${qs}`, token);
+}
+
 export function getOpenIncidents(token: string): Promise<{ incidents: Incident[]; count: number }> {
-  return authedRequest("/api/v1/incidents/", token);
+  return getIncidents(token, "open");
 }
 
 export interface ChatSessionSummary {
