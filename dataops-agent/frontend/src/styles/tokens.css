@@ -85,9 +85,14 @@
   --info-border: #a5f3fc;
   --info-fill: #0e7490;       /* on-dark: 5.293:1 — no current fill consumer, defined for symmetry with the other three */
 
-  /* Sidebar stays Midnight in both themes — constant "spine". Untouched by
-     the Futurewave swap below on purpose: restyling the sidebar is Phase 5
-     (shell) work, not this phase's. */
+  /* Sidebar stays Midnight in both themes — constant "spine". Deliberately
+     aliased to the --midnight-700 PRIMITIVE, never to --accent-fill — the
+     two happened to share a value back when --accent-fill was itself just
+     var(--midnight-700) (Phase 1), but they were never the same reference,
+     and --accent-fill has pointed at an independent literal since Phase 1b.
+     Do not repoint this to --accent-fill: since Decision 1 (2026-08-19)
+     that token inverts to a light grey in dark mode, and the sidebar stays
+     as-is until Phase 5 restyles it on purpose. */
   --sidebar-bg: var(--midnight-700);
 
   /* ==========================================
@@ -98,18 +103,24 @@
      greyscale except the wordmark/monogram and the focus ring, both of
      which use #2277FF (4.86:1 on dark), never #0056FF (3.56:1 — fails). */
 
-  /* Fill — filled surface with a label on top */
-  --accent-fill: #0056FF;              /* light. white label = 5.496:1. No dark override yet — see note below the dark blocks. */
-  --accent-fill-hover: #0047D6;        /* light hover. on-dark: 7.223:1 */
+  /* Fill — filled surface with a label on top. Dark values (Decision 1,
+     2026-08-19) live in the dark blocks below: primary buttons go
+     light-on-dark there (--text-primary fill + --bg label), not blue and
+     not grey — blue stays reserved for exactly the wordmark and focus
+     ring, per the brief. */
+  --accent-fill: #0056FF;              /* light. */
+  --accent-fill-hover: #0047D6;        /* light hover. */
+  --on-accent-fill: var(--on-dark);    /* light: the label sitting on --accent-fill. 5.496:1. */
   --badge-accent-bg: var(--midnight-100);
-  --accent-subtle-bg: #E3E7FC;         /* light. Defined, not yet wired to a call site — see report. */
+  --accent-subtle-bg: #E3E7FC;         /* light. Wired to tr.selected, .cmd-item hover/selected, .notif-item.unread, .credits-badge, .chat-context-chip (Decision 2, 2026-08-19) — were --ocean-50. Dark value in the dark blocks. */
+  --accent-subtle-border: var(--ocean-100);  /* light — .credits-badge/.chat-context-chip's border, paired with --accent-subtle-bg. Dark override in the dark blocks, so a grey dark chip doesn't keep a blue-tinted edge. */
   --deep-ground: #061024;              /* light. Gradient terminus / footer — .landing-final-cta */
 
   /* Text / link — must satisfy AA against --surface and --bg */
   --accent-text: #0056FF;              /* light: 5.496:1/surface, 5.238:1/bg. Replaces Phase 1's #416487 (--ocean-650) stopgap. */
   --accent-text-hover: var(--ocean-700);
   --badge-accent-text: var(--midnight-700);
-  --on-accent-text: var(--midnight-100);
+  --on-accent-text: var(--midnight-100);  /* light — .auth-brand p's secondary text on --accent-fill. Dark override in the dark blocks, since --accent-fill inverts there and this must still read against whatever it becomes. */
 
   /* Border */
   --accent-border: var(--focus-ring);  /* tracks focus-ring so both stay in sync across themes */
@@ -274,19 +285,21 @@
   --danger-border: rgba(220,38,38,.4);
   --info-border: rgba(8,145,178,.4);
 
-  /* ocean-50/100 are light near-white tints in light mode (selected-row/
-     hover backgrounds) — redefined here as translucent overlays instead of
-     inheriting the light value, which rendered as a jarring white bar
-     against the dark surfaces. Still on the old Ocean primitive, not the
-     new accent blue — see --accent-subtle-bg's note above; nothing was
-     repointed to it, so this is unchanged from Phase 1. */
+  /* ocean-50/100 no longer have a light-mode consumer as of Decision 2
+     (2026-08-19) — tr.selected/.cmd-item/.notif-item.unread/.credits-badge/
+     .chat-context-chip were repointed to --accent-subtle-bg below. Kept
+     defined and dark-overridden anyway: --chart-accent (via --ocean-600
+     just below) still needs its own dark lightening, unrelated to this. */
   --ocean-50: var(--_dark-ocean-50);
   --ocean-100: var(--_dark-ocean-100);
 
   /* --chart-accent (below, via --ocean-600) is the one accent-adjacent
      token deliberately NOT moved to the new Futurewave blue — a chart line
      has no AA obligation, and lightening the old Ocean hue for dark-mode
-     legibility was already correct before this phase touched anything. */
+     legibility was already correct before this phase touched anything. It
+     never shares a canvas with a success/warning/danger line today (see
+     Phase 1b's chart-distinctness note), so the 1.05-1.30:1 luminance
+     separation between them is latent, not live. */
   --ocean-600: var(--_dark-ocean-600);
   --ocean-700: var(--_dark-ocean-700);
 
@@ -303,6 +316,26 @@
 
   /* The other of the two allowed dark blues. */
   --focus-ring: var(--_dark-focus-ring);
+
+  /* Decision 1 (2026-08-19): primary fills go light-on-dark in dark mode —
+     neither blue (reserved for the wordmark/focus-ring) nor grey-on-grey
+     (would read as disabled). --text-primary/--bg are both already
+     dark-resolved above in this same rule, so referencing them here picks
+     up their dark values, not the light ones. Applies to every current
+     --accent-fill consumer: .btn-primary, .chip-selected, .chat-avatar,
+     .chat-bubble-user-inner, the base .toast, and .auth-brand (whose
+     heading uses --on-accent-fill directly and whose secondary tagline
+     uses --on-accent-text, overridden separately below since a light fill
+     needs a dark-enough secondary text, not another light one). */
+  --accent-fill: var(--text-primary);       /* #F2F2F3 */
+  --on-accent-fill: var(--bg);              /* #0A0A0B — 17.7:1 on the above */
+  --accent-fill-hover: #FFFFFF;
+  --on-accent-text: var(--border-strong);   /* #3A3A40 — 10.1:1 on --accent-fill's #F2F2F3; --midnight-100 (light mode's value) would be near-invisible on a light fill */
+
+  /* Decision 2 (2026-08-19): opaque low-lift grey, not a translucent blue
+     tint — the same defect class the badges just had. */
+  --accent-subtle-bg: var(--surface-hover);  /* #1A1A1D, already dark-resolved above in this rule */
+  --accent-subtle-border: var(--border);     /* #26262A — plain neutral, not a blue-tinted edge on a now-grey chip */
 
   --shadow-xs: var(--_dark-shadow-xs);
   --shadow-sm: var(--_dark-shadow-sm);
@@ -352,5 +385,12 @@
     --accent-text: var(--text-secondary);
     --accent-text-hover: var(--text-primary);
     --focus-ring: var(--_dark-focus-ring);
+
+    --accent-fill: var(--text-primary);
+    --on-accent-fill: var(--bg);
+    --accent-fill-hover: #FFFFFF;
+    --on-accent-text: var(--border-strong);
+    --accent-subtle-bg: var(--surface-hover);
+    --accent-subtle-border: var(--border);
   }
 }

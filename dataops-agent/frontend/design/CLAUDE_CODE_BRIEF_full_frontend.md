@@ -215,21 +215,47 @@ things look like — that's expected here, not a sign 1 was done wrong.)*
 - Confirm status is never colour-only: every badge and status dot needs an
   icon or text label riding alongside the colour, not instead of one.
 
-**Known deferred to Phase 5 (sidebar/shell), not forgotten:**
+**Resolved after the table was reported (2026-08-19 decisions), not left to
+Phase 2/5 after all:**
+- `--accent-fill` in dark mode goes **light-on-dark**, not blue and not grey:
+  `--text-primary` fill (`#F2F2F3`) with `--on-accent-fill` (`--bg`, `#0A0A0B`,
+  17.7:1) as the label, `--accent-fill-hover` → `#FFFFFF`. Applies to every
+  consumer: `.btn-primary`, `.chip-selected`, `.chat-avatar`,
+  `.chat-bubble-user-inner`, the base `.toast`, `.auth-brand` (whose secondary
+  tagline text — `--on-accent-text` — gets its own dark override,
+  `--border-hover`/`#3A3A40`, 10.1:1 on the now-light fill; the light-mode
+  `--midnight-100` value would be near-invisible there). `--sidebar-bg` was
+  never actually aliased to `--accent-fill` (it's `var(--midnight-700)`,
+  independent since before Phase 1) — confirmed and commented defensively in
+  the token file so a future edit doesn't accidentally wire them together;
+  the sidebar stays untouched until Phase 5 regardless.
+- `--accent-subtle-bg` is now wired: `tr.selected`, `.cmd-item:hover/.selected`,
+  `.notif-item.unread`, `.credits-badge`, `.chat-context-chip` (were
+  `--ocean-50`/`--ocean-100`). Dark value is an opaque low-lift grey
+  (`--surface-hover`), not a translucent blue tint — the same fix class as
+  the badges. A paired `--accent-subtle-border` was added for the two
+  consumers that had a border (`--ocean-100` light / `--border` dark),
+  otherwise a grey dark chip would’ve kept a blue-tinted edge.
+
+**Still deferred to Phase 5 (sidebar/shell), not forgotten:**
 - `Sidebar.tsx:120`'s `stroke="rgba(255,255,255,0.4)"` and `Sidebar.tsx:167`'s
   `border: "1.5px solid rgba(255,255,255,0.2)"` — two inline JSX literals,
   left alone on purpose since Phase 5 is already touching this file's markup.
-- Whether `--accent-fill`/`--accent-fill-hover` need an explicit **dark-mode**
-  override is a Phase 2/5 question, not 1b's — 1b intentionally leaves them
-  light-only, since "buttons go grey in dark" has no given hex and guessing
-  one on the single most visible filled surface in the product is a real
-  design decision, not a token rename. Until Phase 2/5 decides it, dark mode
-  will keep showing the light-mode blue fill on primary buttons/chips/chat
-  bubbles/toast/the sidebar-bg alias. `--accent-text`/`--accent-text-hover`
-  are different: their dark values are set to existing greys
-  (`--text-secondary`/`--text-primary`) in 1b, since "links go grey in dark"
-  has no invented-hex risk — it's just reusing a value this file already
-  defines for exactly that purpose.
+- `.sidebar-item.active`/`.badge-count.badge-live`/`.input:focus`'s shadow
+  still derive from `--ocean-500`, not the new accent blue — same reasoning,
+  Phase 5's to reconcile.
+
+**Chart-series distinctness — noted, not fixed (2026-08-19):** `--chart-accent`
+measures 1.05–1.30:1 against the new success/warning/danger text colours in
+both themes — similar luminance, different hue. Fine for typical colour
+vision, a problem for colourblind viewers or a greyscale render. Not fixed
+because `--chart-accent` doesn't currently share a canvas with any status
+colour — `RunHistoryChart` pairs success+danger together (no blue line),
+`QualityTrendChart` uses `--chart-accent` alone, `KpiCard` sparklines are
+isolated single-series widgets. Whoever builds a chart that combines them
+should pick a chart-accent hue with a real luminance gap from whichever
+status colour rides beside it, not just a different hue at the same
+lightness — this is waiting for them, not decided here.
 
 **Stop. Report the table.**
 

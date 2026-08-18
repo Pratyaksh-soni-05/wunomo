@@ -5,6 +5,13 @@ import { Card, CardHeader, CardBody, Button } from "@/components/ui";
 import type { RecentRun } from "@/lib/api";
 import { parseApiDate } from "@/lib/dates";
 
+function statusLabel(status: string): string {
+  if (status === "success") return "Succeeded";
+  if (status === "failed") return "Failed";
+  if (status === "running") return "Running";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 function timeAgo(iso: string | null): string {
   const d = parseApiDate(iso);
   if (!d) return "—";
@@ -42,6 +49,17 @@ export function RecentRunsCard({ runs }: { runs: RecentRun[] }) {
               <span
                 className={`status-dot ${r.status === "success" ? "success" : r.status === "failed" ? "danger" : "info"} ${r.status === "running" ? "pulse" : ""}`}
               />
+              {/* Status must never be color-only (item 50) — the dot's
+                  color is reinforcement, this label is the actual signal. */}
+              <span
+                className="text-xs"
+                style={{
+                  color: r.status === "success" ? "var(--success)" : r.status === "failed" ? "var(--danger)" : "var(--info)",
+                  flexShrink: 0,
+                }}
+              >
+                {statusLabel(r.status)}
+              </span>
               <span className="truncate font-medium" style={{ flex: 1 }}>
                 {r.pipeline_name}
               </span>

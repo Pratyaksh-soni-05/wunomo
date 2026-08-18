@@ -145,7 +145,7 @@ export function Topbar({
               <button
                 className="flex items-center gap-2"
                 style={{
-                  color: "var(--text-secondary)", width: "100%", padding: "10px 16px",
+                  color: "var(--text-secondary)", width: "100%", minHeight: 44, padding: "0 16px",
                   fontSize: 13, textAlign: "left", background: "none", border: "none", cursor: "pointer",
                 }}
                 onClick={() => {

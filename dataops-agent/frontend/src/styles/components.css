@@ -98,29 +98,61 @@ img { display: block; max-width: 100%; }
 /* ==========================================
    BUTTON
    ========================================== */
+/* Three tiers (Phase 2, 2026-08-19 — the direct answer to item 10: "increase
+   all button sizes... only text is written when cursor hovers on top then a
+   grey button boundary appears"). Tier 1 = primary/danger/success, solid
+   fill, 52px. Tier 2/3 = secondary/ghost, transparent at rest, a border and
+   a subtle lift appear on hover, never a colour shift — the literal
+   ghost-to-bordered pattern item 10 asked for. Tier 3 (icon-only, `.btn-icon`)
+   shares Tier 2's hover behaviour but enforces a 44x44 target regardless of
+   how small the glyph inside it is. See the brief's Phase 2 mapping report
+   for which existing variant became which tier, and where the resulting
+   44px/52px floor collides with an existing dense layout (several table row
+   actions and the chat composer) rather than fixing it here. */
 .btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 14px; border-radius: var(--radius-sm);
-  font-size: 13px; font-weight: 500; line-height: 1;
-  transition: all var(--t-fast);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 0 20px; border-radius: var(--radius-sm);
+  font-size: 14px; font-weight: 500; line-height: 1;
+  transition: background var(--t-slow), border-color var(--t-slow), box-shadow var(--t-slow), color var(--t-slow);
   white-space: nowrap; cursor: pointer;
   border: 1px solid transparent;
+  min-height: 44px; /* Tier 2/3 floor; Tier 1 below raises it to 52px */
 }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.btn-primary { background: var(--accent-fill); color: var(--on-dark); border-color: var(--midnight-800); }
-.btn-primary:hover:not(:disabled) { background: var(--accent-fill-hover); }
-.btn-secondary { background: var(--surface); color: var(--text-primary); border-color: var(--border-strong); }
-.btn-secondary:hover:not(:disabled) { background: var(--surface-hover); }
-.btn-ghost { background: transparent; color: var(--text-secondary); }
-.btn-ghost:hover:not(:disabled) { background: var(--surface-hover); color: var(--text-primary); }
-.btn-danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger-border); }
-.btn-danger:hover:not(:disabled) { background: var(--danger-border); }
-.btn-success { background: var(--success-bg); color: var(--success); border-color: var(--success-border); }
-.btn-sm { padding: 4px 10px; font-size: 12px; }
-.btn-lg { padding: 10px 20px; font-size: 14px; }
-.btn-icon { padding: 6px; }
-.btn-icon.btn-sm { padding: 4px; }
+
+/* Tier 1 — PRIMARY: solid fill, 52px, hover deepens the fill and adds a
+   soft shadow. Danger/success keep their own semantic fill (their real
+   --X-fill token, not the pale --X-bg tile the pre-tier-system version
+   used) but the same sizing/hover shape as primary. */
+.btn-primary, .btn-danger, .btn-success { min-height: 52px; border-color: transparent; }
+.btn-primary { background: var(--accent-fill); color: var(--on-accent-fill); }
+.btn-primary:hover:not(:disabled) { background: var(--accent-fill-hover); box-shadow: var(--shadow-md); }
+.btn-danger { background: var(--danger-fill); color: var(--on-dark); }
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger-fill) 85%, black); box-shadow: var(--shadow-md); }
+.btn-success { background: var(--success-fill); color: var(--on-dark); }
+.btn-success:hover:not(:disabled) { background: color-mix(in srgb, var(--success-fill) 85%, black); box-shadow: var(--shadow-md); }
+
+/* Tier 2/3 — SECONDARY / TERTIARY: transparent at rest, label (or icon)
+   only. Hover reveals a 1px border and a subtle background lift — no
+   colour shift on the label itself. .btn-secondary and .btn-ghost are two
+   variant names sharing one visual treatment on purpose (see the Phase 2
+   mapping report — neither the old "visible border at rest" secondary nor
+   a colour-shifting ghost matched the brief's actual Tier 2 spec, so both
+   converge here rather than picking one arbitrarily). */
+.btn-secondary, .btn-ghost {
+  background: transparent; color: var(--text-secondary); border-color: transparent;
+}
+.btn-secondary:hover:not(:disabled), .btn-ghost:hover:not(:disabled) {
+  background: var(--surface-hover); border-color: var(--border-strong); color: var(--text-primary);
+}
+
+.btn-sm { padding: 0 14px; font-size: 13px; }
+.btn-lg { padding: 0 26px; font-size: 15px; }
+/* Tier 3: 44x44 minimum target regardless of size modifier or how small the
+   glyph inside actually is — "even where the glyph is 16px" is explicit in
+   the brief, so .btn-icon.btn-sm does NOT get an escape hatch. */
+.btn-icon, .btn-icon.btn-sm { padding: 0; min-width: 44px; min-height: 44px; }
 
 /* ==========================================
    CARD
@@ -233,14 +265,14 @@ th { padding: 8px 12px; text-align: left; font-weight: 500; color: var(--text-mu
 td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 tr:last-child td { border-bottom: none; }
 tbody tr:hover td { background: var(--surface-hover); }
-tr.selected td { background: var(--ocean-50) !important; }
+tr.selected td { background: var(--accent-subtle-bg) !important; }
 
 /* ==========================================
    TOAST
    ========================================== */
 .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
 .toast {
-  background: var(--accent-fill); color: var(--on-dark); padding: 12px 16px;
+  background: var(--accent-fill); color: var(--on-accent-fill); padding: 12px 16px;
   border-radius: var(--radius-md); box-shadow: var(--shadow-xl);
   display: flex; align-items: center; gap: 10px; min-width: 280px;
   animation: toast-in 0.32s cubic-bezier(0.16, 1, 0.3, 1); font-size: 13px;
@@ -298,7 +330,7 @@ tr.selected td { background: var(--ocean-50) !important; }
    ========================================== */
 .auth-shell { display: flex; min-height: 100vh; }
 .auth-brand {
-  flex: 0 0 40%; background: var(--accent-fill); color: var(--on-dark);
+  flex: 0 0 40%; background: var(--accent-fill); color: var(--on-accent-fill);
   display: flex; flex-direction: column; justify-content: center;
   padding: 48px; gap: 12px;
 }
@@ -343,7 +375,7 @@ tr.selected td { background: var(--ocean-50) !important; }
   transition: all var(--t-fast);
 }
 .chip:hover { background: var(--surface-hover); }
-.chip.chip-selected { background: var(--accent-fill); color: var(--on-dark); border-color: var(--midnight-800); }
+.chip.chip-selected { background: var(--accent-fill); color: var(--on-accent-fill); border-color: var(--midnight-800); }
 .onboarding-actions { display: flex; justify-content: space-between; margin-top: 32px; }
 
 @media (max-width: 860px) {
@@ -437,8 +469,16 @@ tr.selected td { background: var(--ocean-50) !important; }
   display: flex; align-items: center; gap: 10px; padding: 0 20px; flex-shrink: 0;
   position: sticky; top: 0; z-index: 30;
 }
-.topbar-icon-btn { background: none; border: none; cursor: pointer; padding: 6px; border-radius: var(--radius-sm); color: var(--text-secondary); display: flex; align-items: center; transition: all var(--t-fast); position: relative; }
-.topbar-icon-btn:hover { background: var(--surface-hover); color: var(--text-primary); }
+/* Tier 3 shape (Phase 2), same reasoning as .btn-icon: transparent at rest,
+   border + lift on hover, 44x44 minimum target. */
+.topbar-icon-btn {
+  background: none; border: 1px solid transparent; cursor: pointer;
+  min-width: 44px; min-height: 44px; padding: 0 10px; border-radius: var(--radius-sm);
+  color: var(--text-secondary); display: flex; align-items: center; justify-content: center;
+  transition: background var(--t-slow), border-color var(--t-slow), color var(--t-slow);
+  position: relative;
+}
+.topbar-icon-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--text-primary); }
 .breadcrumb { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); flex-shrink: 0; white-space: nowrap; }
 .breadcrumb a:hover { color: var(--accent-text); }
 .breadcrumb-sep { color: var(--border-strong); }
@@ -457,10 +497,10 @@ tr.selected td { background: var(--ocean-50) !important; }
   background-repeat: no-repeat; background-position: right 8px center;
 }
 .env-select:focus { outline: none; border-color: var(--ocean-400); }
-/* Text stays --text-primary (theme-aware) rather than a fixed ocean shade —
-   the background tint (--ocean-50/100) flips to a translucent dark overlay
-   in dark mode, so a fixed dark-navy text color would go dark-on-dark. */
-.credits-badge { display: flex; align-items: center; gap: 5px; background: var(--ocean-50); border: 1px solid var(--ocean-100); border-radius: var(--radius-sm); padding: 4px 10px; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+/* Text stays --text-primary (theme-aware) rather than a fixed shade — the
+   background (--accent-subtle-bg) flips to an opaque grey in dark mode, so
+   a fixed dark-navy text color would go dark-on-dark. */
+.credits-badge { display: flex; align-items: center; gap: 5px; background: var(--accent-subtle-bg); border: 1px solid var(--accent-subtle-border); border-radius: var(--radius-sm); padding: 4px 10px; font-size: 12px; font-weight: 600; color: var(--text-primary); }
 .topbar-avatar {
   width: 30px; height: 30px; background: var(--midnight-600); border-radius: 50%;
   display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600;
@@ -482,7 +522,7 @@ tr.selected td { background: var(--ocean-50) !important; }
 .cmd-results { max-height: 360px; overflow-y: auto; }
 .cmd-section-label { padding: 8px 14px 4px; font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .cmd-item { display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; color: var(--text-secondary); font-size: 13px; }
-.cmd-item:hover, .cmd-item.selected { background: var(--ocean-50); color: var(--text-primary); }
+.cmd-item:hover, .cmd-item.selected { background: var(--accent-subtle-bg); color: var(--text-primary); }
 .cmd-kbd { font-size: 10px; color: var(--text-muted); background: var(--surface-hover); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; margin-left: auto; font-family: var(--font-mono); }
 
 .notif-panel {
@@ -493,7 +533,7 @@ tr.selected td { background: var(--ocean-50) !important; }
 .notif-panel-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .notif-list { max-height: 400px; overflow-y: auto; }
 .notif-item { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; cursor: pointer; }
-.notif-item.unread { background: var(--ocean-50); }
+.notif-item.unread { background: var(--accent-subtle-bg); }
 .notif-item-body { flex: 1; min-width: 0; }
 .notif-panel-footer { padding: 10px 16px; text-align: center; }
 .notif-panel-footer a { font-size: 12px; color: var(--accent-text); cursor: pointer; }
@@ -555,12 +595,12 @@ tr.selected td { background: var(--ocean-50) !important; }
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .chat-header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--surface); flex-shrink: 0; gap: 12px; flex-wrap: wrap; }
 .chat-header-identity { display: flex; align-items: center; gap: 8px; }
-.chat-avatar { width: 28px; height: 28px; background: var(--accent-fill); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; color: var(--on-dark); flex-shrink: 0; }
+.chat-avatar { width: 28px; height: 28px; background: var(--accent-fill); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; color: var(--on-accent-fill); flex-shrink: 0; }
 .chat-header-controls { display: flex; gap: 8px; align-items: center; }
 
 .chat-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
 .chat-bubble-user { display: flex; justify-content: flex-end; }
-.chat-bubble-user-inner { background: var(--accent-fill); color: var(--on-dark); border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg); padding: 10px 14px; max-width: 70%; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.chat-bubble-user-inner { background: var(--accent-fill); color: var(--on-accent-fill); border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg); padding: 10px 14px; max-width: 70%; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
 .chat-bubble-assistant { display: flex; gap: 10px; align-items: flex-start; }
 .chat-bubble-assistant-inner { max-width: 75%; min-width: 0; }
 .chat-bubble-assistant-text { padding: 12px 14px; font-size: 13px; line-height: 1.6; }
@@ -581,7 +621,7 @@ tr.selected td { background: var(--ocean-50) !important; }
 .chat-composer-box textarea { width: 100%; border: none; outline: none; background: transparent; font-family: inherit; font-size: 13px; resize: none; min-height: 40px; max-height: 120px; color: var(--text-primary); }
 .chat-composer-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; gap: 8px; }
 .chat-quick-prompts { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-.chat-context-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--ocean-50); border: 1px solid var(--ocean-100); border-radius: var(--radius-full); padding: 4px 10px; font-size: 11px; color: var(--text-primary); margin-bottom: 8px; }
+.chat-context-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-subtle-bg); border: 1px solid var(--accent-subtle-border); border-radius: var(--radius-full); padding: 4px 10px; font-size: 11px; color: var(--text-primary); margin-bottom: 8px; }
 .chat-context-chip button { background: none; border: none; color: var(--text-muted); cursor: pointer; line-height: 1; padding: 0; }
 .chat-thinking { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); padding: 4px 0 4px 36px; }
 

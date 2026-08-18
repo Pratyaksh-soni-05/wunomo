@@ -36,12 +36,10 @@ export function HealthBanner({ incident, onDismiss }: { incident: Incident; onDi
       </Button>
       {onDismiss && (
         <button
+          className="btn btn-ghost btn-icon"
           aria-label="Dismiss"
           onClick={onDismiss}
-          style={{
-            background: "none", border: "none", cursor: "pointer", padding: 4,
-            color: "var(--text-muted)", display: "flex", alignItems: "center",
-          }}
+          style={{ color: "var(--text-muted)" }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="18" y1="6" x2="6" y2="18" />
