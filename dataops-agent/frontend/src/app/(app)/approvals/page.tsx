@@ -6,6 +6,7 @@ import {
   getToken, getMergedApprovals, approveRequest, rejectRequest, approveCommit, rejectCommit,
   type MergedApproval,
 } from "@/lib/api";
+import { formatApiDate } from "@/lib/dates";
 
 function riskVariant(level: string): "success" | "warning" | "danger" | "gray" {
   switch (level) {
@@ -81,7 +82,7 @@ export default function ApprovalsPage() {
                     </Td>
                     <Td><Badge variant="info">{sourceLabel(a.source)}</Badge></Td>
                     <Td><Badge variant={riskVariant(a.risk_level)}>{a.risk_level}</Badge></Td>
-                    <Td>{a.created_at ? new Date(a.created_at).toLocaleString() : "—"}</Td>
+                    <Td>{formatApiDate(a.created_at)}</Td>
                     <Td>
                       <div className="flex gap-2">
                         <Button size="sm" variant="success" disabled={approveMut.isPending} onClick={() => approveMut.mutate(a)}>Approve</Button>

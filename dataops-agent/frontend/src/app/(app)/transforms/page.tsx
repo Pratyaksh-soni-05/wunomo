@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Badge, Button, Input, Select, Tabs, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast } from "@/components/ui";
+import { formatApiDate } from "@/lib/dates";
 import {
   getToken, getSources, getTransformRuns,
   generateSqlTransform, generatePandasTransform,
@@ -329,7 +330,7 @@ export default function TransformsPage() {
                           : <Badge variant="danger" title={r.error_message ?? undefined}>Failed</Badge>}
                       </Td>
                       <Td className="text-sm text-secondary">{r.row_count ?? "—"}</Td>
-                      <Td className="text-sm text-muted">{r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</Td>
+                      <Td className="text-sm text-muted">{formatApiDate(r.created_at)}</Td>
                       <Td><Button size="sm" variant="ghost" onClick={() => replay(r)}>Replay</Button></Td>
                     </Tr>
                   ))}

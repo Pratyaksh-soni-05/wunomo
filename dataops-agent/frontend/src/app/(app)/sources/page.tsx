@@ -6,6 +6,7 @@ import {
   Button, Card, Badge, Modal, Input, Select,
   Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
 } from "@/components/ui";
+import { formatApiDate } from "@/lib/dates";
 import {
   getToken, getSources, createSource, deleteSource, syncSource, profileSource,
   uploadAndRegisterSource, type DataSourceItem,
@@ -138,7 +139,7 @@ export default function SourcesPage() {
                     <Td><Badge variant="info">{s.source_type}</Badge></Td>
                     <Td>{statusBadge(s.is_active)}</Td>
                     <Td>{s.owner || "—"}</Td>
-                    <Td>{s.last_profiled_at ? new Date(s.last_profiled_at).toLocaleString() : "Never"}</Td>
+                    <Td>{formatApiDate(s.last_profiled_at, "Never")}</Td>
                     <Td>
                       <div className="flex gap-2">
                         <Button size="sm" variant="secondary" disabled={syncMut.isPending} onClick={() => syncMut.mutate(s.id)}>Sync</Button>

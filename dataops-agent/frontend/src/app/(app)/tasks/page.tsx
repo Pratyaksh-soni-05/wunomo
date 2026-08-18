@@ -7,6 +7,7 @@ import { Button, Card, Badge, Table, Thead, Tbody, Tr, Th, Td, Skeleton } from "
 import { getToken, getTasks, TASK_SHAPES, type TaskSummary } from "@/lib/api";
 import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
 import { taskStatusVariant, taskStatusLabel } from "@/components/tasks/taskDisplay";
+import { formatApiDate } from "@/lib/dates";
 
 const TASK_COUNTS_POLL_MS = 20000;
 
@@ -71,7 +72,7 @@ export default function TasksPage() {
                     <Td><span className="text-sm text-muted">{shapeLabel(t.task_shape)}</span></Td>
                     <Td><Badge variant={taskStatusVariant(t.status)}>{taskStatusLabel(t.status)}</Badge></Td>
                     <Td>{t.plan_edited ? <Badge variant="warning">Edited</Badge> : <span className="text-muted text-sm">Original</span>}</Td>
-                    <Td><span className="text-sm text-muted">{t.created_at ? new Date(t.created_at).toLocaleString() : "—"}</span></Td>
+                    <Td><span className="text-sm text-muted">{formatApiDate(t.created_at)}</span></Td>
                   </Tr>
                 ))}
               </Tbody>

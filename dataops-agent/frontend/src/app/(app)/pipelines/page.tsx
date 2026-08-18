@@ -6,6 +6,7 @@ import {
   Button, Card, Badge, Modal, Input, Select,
   Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
 } from "@/components/ui";
+import { formatApiDate } from "@/lib/dates";
 import {
   getToken, getPipelines, createPipeline, deletePipeline, triggerPipelineRun,
   pausePipeline, activatePipeline, getPipelineRuns, getSources,
@@ -139,7 +140,7 @@ export default function PipelinesPage() {
                     <Td>
                       <div className="flex flex-col gap-1" style={{ fontSize: 12 }}>
                         {p.next_run_at ? (
-                          <span className="text-muted">Next: {new Date(p.next_run_at).toLocaleString()}</span>
+                          <span className="text-muted">Next: {formatApiDate(p.next_run_at)}</span>
                         ) : p.schedule_cron ? (
                           <span className="text-muted">Not scheduled (paused)</span>
                         ) : null}
@@ -147,7 +148,7 @@ export default function PipelinesPage() {
                           <span className="flex items-center gap-1">
                             Last:
                             <Badge variant={runStatusVariant(p.last_run.status)}>{p.last_run.status}</Badge>
-                            <span className="text-muted">{new Date(p.last_run.created_at).toLocaleString()}</span>
+                            <span className="text-muted">{formatApiDate(p.last_run.created_at)}</span>
                           </span>
                         ) : (
                           <span className="text-muted">Never run</span>
@@ -216,7 +217,7 @@ export default function PipelinesPage() {
                   <Td><Badge variant={runStatusVariant(r.status)}>{r.status}</Badge></Td>
                   <Td>{r.rows_processed ?? "—"}</Td>
                   <Td>{r.duration_seconds != null ? `${r.duration_seconds}s` : "—"}</Td>
-                  <Td>{r.created_at ? new Date(r.created_at).toLocaleString() : "—"}</Td>
+                  <Td>{formatApiDate(r.created_at)}</Td>
                 </Tr>
               ))}
             </Tbody>

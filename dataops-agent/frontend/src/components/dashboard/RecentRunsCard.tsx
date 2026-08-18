@@ -3,10 +3,12 @@
 import { useRouter } from "next/navigation";
 import { Card, CardHeader, CardBody, Button } from "@/components/ui";
 import type { RecentRun } from "@/lib/api";
+import { parseApiDate } from "@/lib/dates";
 
 function timeAgo(iso: string | null): string {
-  if (!iso) return "—";
-  const diffMs = Date.now() - new Date(iso + "Z").getTime();
+  const d = parseApiDate(iso);
+  if (!d) return "—";
+  const diffMs = Date.now() - d.getTime();
   const mins = Math.floor(diffMs / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;

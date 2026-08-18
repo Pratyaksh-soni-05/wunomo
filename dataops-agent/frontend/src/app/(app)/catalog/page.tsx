@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Badge, Button, Input, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast } from "@/components/ui";
+import { formatApiDate } from "@/lib/dates";
 import { getToken, getCatalog, profileSource, type CatalogEntry } from "@/lib/api";
 
 function matches(entry: CatalogEntry, query: string): boolean {
@@ -107,7 +108,7 @@ export default function CatalogPage() {
                           ))}
                     </Td>
                     <Td className="text-xs text-muted">
-                      {e.last_profiled_at ? new Date(e.last_profiled_at).toLocaleString() : "Never"}
+                      {formatApiDate(e.last_profiled_at, "Never")}
                     </Td>
                   </Tr>
                 ))}

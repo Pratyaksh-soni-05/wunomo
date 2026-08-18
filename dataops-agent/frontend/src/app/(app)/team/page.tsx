@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Card, Badge, Button, Modal, Input, Select, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
 } from "@/components/ui";
+import { formatApiDateOnly } from "@/lib/dates";
 import {
   getToken, decodeUserFromToken,
   getTeamMembers, changeMemberRole, removeTeamMember,
@@ -147,7 +148,7 @@ export default function TeamPage() {
                         )}
                       </Td>
                       <Td>{m.is_active ? <Badge variant="success">Active</Badge> : <Badge variant="gray">Removed</Badge>}</Td>
-                      <Td>{new Date(m.created_at).toLocaleDateString()}</Td>
+                      <Td>{formatApiDateOnly(m.created_at)}</Td>
                       {canManage && (
                         <Td>
                           {m.is_active && (
@@ -187,7 +188,7 @@ export default function TeamPage() {
                         <Td>{i.email}</Td>
                         <Td>{roleLabel(i.role)}</Td>
                         <Td><Badge variant={inviteStatusVariant(i.status)}>{i.status}</Badge></Td>
-                        <Td>{new Date(i.expires_at).toLocaleDateString()}</Td>
+                        <Td>{formatApiDateOnly(i.expires_at)}</Td>
                         <Td>
                           {i.status === "pending" && (
                             <Button size="sm" variant="secondary" disabled={revokeMut.isPending} onClick={() => revokeMut.mutate(i.id)}>Revoke</Button>

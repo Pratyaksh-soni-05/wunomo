@@ -11,6 +11,7 @@ import {
   type NotifyOn, type ApiKeyItem,
 } from "@/lib/api";
 import { applyTheme, getStoredTheme, resolveEffectiveTheme, type ThemePreference } from "@/lib/theme";
+import { formatApiDateOnly } from "@/lib/dates";
 
 // Kept in sync manually with backend/services/llm_service.py's
 // SUPPORTED_MODEL_OVERRIDES - there's no list endpoint to fetch this from
@@ -359,8 +360,8 @@ function ApiKeysTab({ token, canManage }: { token: string; canManage: boolean })
                   <div>
                     <div className="text-sm" style={{ fontWeight: 600 }}>{k.name}</div>
                     <div className="text-muted text-sm">
-                      <code>{k.key_prefix}…</code> · created {new Date(k.created_at).toLocaleDateString()}
-                      {k.last_used_at ? ` · last used ${new Date(k.last_used_at).toLocaleDateString()}` : " · never used"}
+                      <code>{k.key_prefix}…</code> · created {formatApiDateOnly(k.created_at)}
+                      {k.last_used_at ? ` · last used ${formatApiDateOnly(k.last_used_at)}` : " · never used"}
                     </div>
                   </div>
                   {k.revoked_at ? (

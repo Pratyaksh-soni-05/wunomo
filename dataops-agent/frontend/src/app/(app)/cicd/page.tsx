@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Card, Badge, Button, Tabs, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
 } from "@/components/ui";
+import { formatApiDate } from "@/lib/dates";
 import {
   getToken, getCommits, getDeployments, getCicdStatusSummary, approveCommit, rejectCommit,
   type CommitItem, type DeploymentItem,
@@ -138,7 +139,7 @@ export default function CicdPage() {
                       <Td><Badge variant={ciStatusVariant(c.ci_status)}>{c.ci_status}</Badge></Td>
                       <Td><Badge variant={gateVariant(c.gate_decision)}>{c.gate_decision || "—"}</Badge></Td>
                       <Td>{Math.round(c.risk_score)}</Td>
-                      <Td>{c.trigger_time ? new Date(c.trigger_time).toLocaleString() : "—"}</Td>
+                      <Td>{formatApiDate(c.trigger_time)}</Td>
                       <Td>
                         {c.gate_decision === "pending_approval" ? (
                           <div className="flex gap-2">
@@ -181,7 +182,7 @@ export default function CicdPage() {
                     <Td>{d.monitoring_active ? "Active" : "Closed"}</Td>
                     <Td>{d.post_deploy_run_count}</Td>
                     <Td>{d.post_deploy_failure_count}</Td>
-                    <Td>{d.deployed_at ? new Date(d.deployed_at).toLocaleString() : "—"}</Td>
+                    <Td>{formatApiDate(d.deployed_at)}</Td>
                   </Tr>
                 ))}
               </Tbody>

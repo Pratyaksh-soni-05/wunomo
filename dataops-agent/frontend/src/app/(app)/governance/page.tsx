@@ -6,6 +6,7 @@ import {
   Card, Badge, Button, Modal, Input, Select, Tabs,
   Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
 } from "@/components/ui";
+import { formatApiDate } from "@/lib/dates";
 import {
   getToken, getLineageGraph, getContracts, createContract, validateContract, getAuditTrail, getSources,
   type LineageNode, type DataContract, type AuditEntry,
@@ -175,7 +176,7 @@ export default function GovernancePage() {
                       <Td>{c.name}</Td>
                       <Td>{c.consumer_description || "—"}</Td>
                       <Td><Badge variant={validationVariant(c.validation_status)}>{c.validation_status}</Badge></Td>
-                      <Td>{c.last_validated_at ? new Date(c.last_validated_at).toLocaleString() : "Never"}</Td>
+                      <Td>{formatApiDate(c.last_validated_at, "Never")}</Td>
                       <Td>
                         <Button size="sm" variant="secondary" disabled={validateMut.isPending} onClick={() => validateMut.mutate(c.contract_id)}>
                           Validate
@@ -211,7 +212,7 @@ export default function GovernancePage() {
                       <Td>{e.actor}</Td>
                       <Td><code>{e.action}</code></Td>
                       <Td>{e.resource_type}{e.resource_id ? ` · ${e.resource_id.slice(0, 8)}` : ""}</Td>
-                      <Td>{e.created_at ? new Date(e.created_at).toLocaleString() : "—"}</Td>
+                      <Td>{formatApiDate(e.created_at)}</Td>
                     </Tr>
                   ))}
                 </Tbody>

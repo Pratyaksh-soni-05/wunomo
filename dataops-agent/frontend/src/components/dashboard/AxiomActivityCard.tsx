@@ -3,9 +3,11 @@
 import { useRouter } from "next/navigation";
 import { Card, CardHeader, CardBody, Button } from "@/components/ui";
 import type { ChatSessionSummary } from "@/lib/api";
+import { parseApiDate } from "@/lib/dates";
 
 function timeAgo(iso: string): string {
-  const diffMs = Date.now() - new Date(iso + "Z").getTime();
+  const d = parseApiDate(iso);
+  const diffMs = Date.now() - (d ? d.getTime() : 0);
   const mins = Math.floor(diffMs / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;

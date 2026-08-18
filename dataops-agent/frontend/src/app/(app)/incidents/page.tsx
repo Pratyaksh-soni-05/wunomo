@@ -6,6 +6,7 @@ import {
   Button, Card, Badge, Modal, Input, Select,
   Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
 } from "@/components/ui";
+import { formatApiDate } from "@/lib/dates";
 import {
   getToken, getOpenIncidents, createIncident, resolveIncident, getPipelines,
   type Incident,
@@ -115,7 +116,7 @@ export default function IncidentsPage() {
                     <Td><Badge variant={severityVariant(i.severity)}>{i.severity}</Badge></Td>
                     <Td><Badge variant={statusVariant(i.status)}>{i.status}</Badge></Td>
                     <Td>{pipelineName(i.pipeline_id)}</Td>
-                    <Td>{i.detected_at ? new Date(i.detected_at).toLocaleString() : "—"}</Td>
+                    <Td>{formatApiDate(i.detected_at)}</Td>
                     <Td>
                       {i.status !== "resolved" ? (
                         <Button size="sm" variant="success" onClick={() => setResolvingId(i.id)}>Resolve</Button>

@@ -4,10 +4,11 @@ import { Button } from "@/components/ui";
 import { Skeleton } from "@/components/ui";
 import type { ChatSessionSummary } from "@/lib/api";
 import { useSavedPrompts } from "./useSavedPrompts";
+import { parseApiDate } from "@/lib/dates";
 
 function timeAgo(iso: string): string {
-  const then = new Date(iso.replace(" ", "T") + (iso.endsWith("Z") ? "" : "Z")).getTime();
-  const diffMs = Date.now() - then;
+  const d = parseApiDate(iso);
+  const diffMs = Date.now() - (d ? d.getTime() : 0);
   const mins = Math.floor(diffMs / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
