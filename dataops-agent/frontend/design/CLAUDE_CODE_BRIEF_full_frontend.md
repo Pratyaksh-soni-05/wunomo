@@ -248,6 +248,20 @@ actually shipped for `tr.selected` today. See `docs/context/
 WALKTHROUGH_FINDINGS_2026-08.md` item 54 for the full measured evidence
 (both the original failure and the fix's verification).
 
+**Independent precedent, found during Phase 6 items 3-5's audit, cited
+alongside item 54 because it's evidence this is the natural answer, not just
+a patch after two failed attempts:** the Tasks detail page's failed-step
+banner (`tasks/[id]/page.tsx:293`) already renders a left-edge coloured bar
+driven by a dynamic token reference (`` `var(--${reason.variant})` ``) —
+built before this rule was amended, by someone independently reaching for
+"a coloured edge bar" to make a state (there, a failure reason, not a
+selection) read clearly. It was never broken and was never in question here
+— it just happens to already be the corrected pattern, arrived at on its
+own. Two people reaching for the same shape-over-tint answer to two
+different problems is a stronger signal than either instance alone that
+this is the right general-purpose fix for a near-black surface, not a
+one-off workaround.
+
 ---
 
 ## PHASE 0 — Audit. Change nothing.
