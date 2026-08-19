@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Card, Badge, Button, Tabs, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
+  Card, Badge, Button, Tabs, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast, RowActionsMenu,
 } from "@/components/ui";
 import { formatApiDate } from "@/lib/dates";
 import {
@@ -138,13 +138,24 @@ export default function CicdPage() {
                       <Td>{c.author || "—"}</Td>
                       <Td><Badge variant={ciStatusVariant(c.ci_status)}>{c.ci_status}</Badge></Td>
                       <Td><Badge variant={gateVariant(c.gate_decision)}>{c.gate_decision || "—"}</Badge></Td>
-                      <Td>{Math.round(c.risk_score)}</Td>
+                      <Td className="tabular-nums">{Math.round(c.risk_score)}</Td>
                       <Td>{formatApiDate(c.trigger_time)}</Td>
                       <Td>
                         {c.gate_decision === "pending_approval" ? (
-                          <div className="flex gap-2">
-                            <Button size="sm" variant="success" disabled={approveMut.isPending} onClick={() => approveMut.mutate(c.id)}>Approve</Button>
-                            <Button size="sm" variant="danger" disabled={rejectMut.isPending} onClick={() => rejectMut.mutate(c.id)}>Reject</Button>
+                          <div className="row-actions">
+                            <Button
+                              variant="ghost" icon title="Approve" aria-label={`Approve ${c.commit_sha.slice(0, 8)}`}
+                              disabled={approveMut.isPending} onClick={() => approveMut.mutate(c.id)}
+                            >
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            </Button>
+                            <RowActionsMenu
+                              actions={[
+                                { label: "Reject", disabled: rejectMut.isPending, onClick: () => rejectMut.mutate(c.id) },
+                              ]}
+                            />
                           </div>
                         ) : (
                           <span className="text-muted text-sm">—</span>
@@ -180,8 +191,8 @@ export default function CicdPage() {
                     <Td><code>{d.commit_sha.slice(0, 8)}</code></Td>
                     <Td><Badge variant={deployStatusVariant(d.status)}>{d.status}</Badge></Td>
                     <Td>{d.monitoring_active ? "Active" : "Closed"}</Td>
-                    <Td>{d.post_deploy_run_count}</Td>
-                    <Td>{d.post_deploy_failure_count}</Td>
+                    <Td className="tabular-nums">{d.post_deploy_run_count}</Td>
+                    <Td className="tabular-nums">{d.post_deploy_failure_count}</Td>
                     <Td>{formatApiDate(d.deployed_at)}</Td>
                   </Tr>
                 ))}

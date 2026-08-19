@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Card, Badge, Button, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast } from "@/components/ui";
+import { Card, Badge, Button, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast, RowActionsMenu } from "@/components/ui";
 import {
   getToken, getMergedApprovals, approveRequest, rejectRequest, approveCommit, rejectCommit,
   type MergedApproval,
@@ -84,9 +84,20 @@ export default function ApprovalsPage() {
                     <Td><Badge variant={riskVariant(a.risk_level)}>{a.risk_level}</Badge></Td>
                     <Td>{formatApiDate(a.created_at)}</Td>
                     <Td>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="success" disabled={approveMut.isPending} onClick={() => approveMut.mutate(a)}>Approve</Button>
-                        <Button size="sm" variant="danger" disabled={rejectMut.isPending} onClick={() => rejectMut.mutate(a)}>Reject</Button>
+                      <div className="row-actions">
+                        <Button
+                          variant="ghost" icon title="Approve" aria-label={`Approve ${a.title}`}
+                          disabled={approveMut.isPending} onClick={() => approveMut.mutate(a)}
+                        >
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        </Button>
+                        <RowActionsMenu
+                          actions={[
+                            { label: "Reject", disabled: rejectMut.isPending, onClick: () => rejectMut.mutate(a) },
+                          ]}
+                        />
                       </div>
                     </Td>
                   </Tr>

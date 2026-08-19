@@ -8,3 +8,4 @@ export { ToastProvider, useToast } from "./Toast";
 export { Tabs, type TabItem } from "./Tabs";
 export { Progress } from "./Progress";
 export { Skeleton } from "./Skeleton";
+export { RowActionsMenu } from "./RowActionsMenu";

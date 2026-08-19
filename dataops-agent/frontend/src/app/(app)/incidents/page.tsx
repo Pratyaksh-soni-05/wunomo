@@ -129,7 +129,16 @@ export default function IncidentsPage() {
                     <Td>{formatApiDate(i.detected_at)}</Td>
                     <Td>
                       {i.status !== "resolved" ? (
-                        <Button size="sm" variant="success" onClick={() => setResolvingId(i.id)}>Resolve</Button>
+                        <div className="row-actions">
+                          <Button
+                            variant="ghost" icon title="Resolve" aria-label={`Resolve ${i.title}`}
+                            onClick={() => setResolvingId(i.id)}
+                          >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          </Button>
+                        </div>
                       ) : (
                         <span className="text-muted text-sm">—</span>
                       )}

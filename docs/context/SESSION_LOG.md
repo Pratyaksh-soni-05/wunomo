@@ -10,6 +10,78 @@ otherwise only in someone's head or a chat transcript.
 
 ---
 
+## 2026-08-19 — ⚠️ BLOCKING BACKEND ESCALATION: `_check_freshness()`'s unbounded incident-creation loop, read this before touching `services/tasks.py` or the `incidents` table
+
+**If you are a backend-focused session picking up work in this repo, read this
+entry first, before `docs/context/STATUS_TABLE.md`'s Known-broken table or
+anything else — this is the single most urgent item in that table right now.**
+
+### What this is
+
+Not a new bug — the already-documented "Freshness checker creates duplicate
+open incidents" Known-broken row (`services/tasks.py`'s `_check_freshness()`,
+runs every 15 min via Celery beat, creates a brand-new `Incident` row every
+tick a source is still stale, with no dedup check against an already-open
+incident for the same asset first). What changed today: a frontend session
+(`feat/futurewave` branch, Phase 6 part 2 table-density work) needed to
+screenshot the real Incidents screen and, while doing so, measured this bug's
+true current scope for the first time — it had previously only ever been
+checked one tenant at a time.
+
+**The real, system-wide numbers, queried directly against the dev DB
+2026-08-19:** 51,719 `OPEN` incidents, across **339 distinct tenants**
+simultaneously exhibiting the identical bug, growing at a measured
+**~700–875 new rows/hour** in steady state (hourly buckets immediately
+before the check: 175, 874, 701, 700, 700, 700). Two tenants independently
+tracked across the same day show the same pattern at smaller scale: the
+"Email Code Verify Corp" QA tenant went 7 → 324 → 329 → 355; the
+`demo@axiom-yc.ai` / "AXIOM YC Demo" tenant (the frontend's own screenshot
+tenant) went 109 → 123 → 151. One leftover test tenant ("Run Status Test
+Corp") alone holds 33,857 of the system-wide total (65.5%) — but the bug is
+not specific to that tenant; every one of the 339 affected tenants is
+independently hitting the same unconditional `db.add(incident)` inside
+`if hours_since > sla_hours:`.
+
+### Why this is blocking, not backlog
+
+This has sat in `STATUS_TABLE.md`'s Known-broken table as "flagging only"
+since it was first observed (7 near-duplicates for one source). It is no
+longer safe to treat as low-priority: this is live, unbounded,
+production-shaped write-loop code, currently consuming real DB storage at a
+measured, non-trivial rate, with no cap and no sign of self-limiting. The
+same code path will hit any real production tenant whose source goes stale
+and stays stale — this isn't a dev-environment-only artifact, even though
+today's volume is dominated by leftover test tenants.
+
+### What this session did and did not do about it
+
+This was a frontend/design-system session, out of scope for `services/tasks.py`
+by design — **not fixed here, on purpose, not by oversight.** What this
+session did do: escalated the severity in `STATUS_TABLE.md`'s Known-broken
+row (now marked Severity: CRITICAL / BLOCKING) and in
+`docs/context/WALKTHROUGH_FINDINGS_2026-08.md` items 48/49/53 (now marked
+BLOCKING, with the full trajectory above recorded in each). Also found and
+logged, as a **separate, frontend-only bug** (item 55 in the same findings
+file, distinct from this one): the Incidents screen's `GET /api/v1/incidents/`
+endpoint hardcodes `limit: int = 50` with no pagination and a `count` field
+that echoes the truncated page size rather than a true total — meaning the
+screen currently has no way to show how bad this actually is, independent of
+whether/when this backend bug gets fixed.
+
+### What still needs deciding (not decided here)
+
+1. The real fix: a dedup query against existing open incidents for the same
+   `affected_assets` before `db.add(incident)` in `_check_freshness()`.
+2. What to do with the 51,719 already-created rows — a cleanup/backfill
+   decision, not made by this session.
+3. The frontend's separate pagination gap (item 55) — real paginated
+   endpoint + a frontend pager, matched pair, not just a `limit` bump.
+
+Full detail and exact queries: `docs/context/WALKTHROUGH_FINDINGS_2026-08.md`
+items 48, 49, 53, 55; `docs/context/STATUS_TABLE.md`'s Known-broken row.
+
+---
+
 ## 2026-08-17 — Argument resolution live-verified (findings 8/9/16 closed), two new findings surfaced, metering test fixed
 
 ### Context

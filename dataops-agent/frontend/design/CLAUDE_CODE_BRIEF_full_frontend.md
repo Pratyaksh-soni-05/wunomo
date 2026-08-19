@@ -71,19 +71,6 @@ Blue used in dark is `#2277FF` (**4.86:1** on `#0A0A0B` ✓), **not** `#0056FF`,
 which measures 3.56:1 there and fails AA. This distinction is load-bearing;
 do not collapse the two blues into one token.
 
-**Canonical token (Fix 1, 2026-08-19): `--brand-blue`** — `#0056FF` light /
-`#2277FF` dark, one theme-aware name for exactly this pair. "One token" here
-means one *name*, not one *value* — the two hexes above stay two hexes,
-switched by theme; nothing about this token collapses them. Both the
-monogram (`.sidebar-logo-icon`) and `--focus-ring` point at `--brand-blue`
-now, not at each other — `--focus-ring` used to hold the literal value and
-the monogram borrowed it, which meant an a11y-driven change to the ring
-would have silently recoloured the logo too. Use `--brand-blue` directly
-for anything that needs exactly this pair; don't reach for `--focus-ring`
-or `--accent-fill` as a stand-in for "the brand blue" — neither is that job
-(`--focus-ring` is a ring's job, `--accent-fill` inverts to near-white in
-dark mode per Decision 1, which is correct for buttons and wrong for a logo).
-
 ### Status colours survive in both themes — non-negotiable
 
 The greyscale rule is for **chrome only**. Semantic state must stay chromatic
@@ -224,6 +211,43 @@ row selection, list selection, and card selection** all face the identical
 problem in dark mode, and should reuse this pattern (solid border + text
 brightening) rather than re-deriving it per screen.
 
+**Amendment (2026-08-19, findings item 54) — "a solid border" was necessary
+but not sufficient; it failed a real test, here is the corrected version.**
+Phase 6 part 2 built `tr.selected` exactly per this rule as first written —
+a border reinforcing the fill instead of chasing fill contrast — and it
+still didn't read as selected in dark mode, measured, not assumed:
+`--accent-subtle-border` (`#26262a`) against the row's own `#1A1A1D`
+fill measured **1.15:1**, against the page's `#121214` surface **1.24:1**.
+Both fail non-text AA by a wide margin. The mistake: the border color was
+drawn from the same near-black neutral-grey family as everything around
+it — a low-alpha-*adjacent* colour choice, even though technically opaque
+and technically "a border, not a tint." **A border only carries the signal
+this rule needs if its colour is a real, saturated, out-of-family colour**
+(the actual accent blue — `--brand-blue`, `#0056FF` light / `#2277FF` dark,
+not a desaturated neutral "theme-aware pair" grey), **and if its shape is
+structurally distinct from whatever lines already exist around it** — a
+table already has a 1px horizontal border on every row; a second 1px
+horizontal line (even in the right colour) competes with that existing
+structure and reads as noise, not signal. The fix that actually works,
+verified live at 100% zoom (not zoomed in) with a real mouse-hovered row
+alongside a `.selected` row for direct comparison: a **3px solid
+`--brand-blue` bar on the row's leading edge only** (`box-shadow: inset 3px
+0 0 var(--brand-blue)` on the row's first cell, not every cell), on top of
+the existing `--accent-subtle-bg` fill, plus `--text-primary` on the row's
+own text. The bar is a shape (a stripe, not a gradient) and sits on an axis
+(vertical) nothing else on the surface uses, so it doesn't fight anything
+else for attention. **The corrected rule: on near-black surfaces, a
+selection/active-state border must be (a) a real accent colour, never a
+neutral grey pulled from the same dark family as the surface around it, and
+(b) shaped to stand apart from the surface's existing structural lines —
+an edge bar beats a hairline matching an existing border's own orientation.**
+A 1px border at full opacity in the real accent colour would likely also
+work by this same logic (real colour, right idea) — the edge-bar shape is
+the belt-and-suspenders version, not the only valid one, but is what's
+actually shipped for `tr.selected` today. See `docs/context/
+WALKTHROUGH_FINDINGS_2026-08.md` item 54 for the full measured evidence
+(both the original failure and the fix's verification).
+
 ---
 
 ## PHASE 0 — Audit. Change nothing.
@@ -329,23 +353,13 @@ Phase 2/5 after all:**
   consumers that had a border (`--ocean-100` light / `--border` dark),
   otherwise a grey dark chip would’ve kept a blue-tinted edge.
 
-**All closed in Phase 5 (2026-08-19):**
-- `Sidebar.tsx:120`/`:167`'s inline `rgba()` literals → `--sidebar-chevron`/
-  `--sidebar-avatar-border`, values unchanged.
-- `.sidebar-item.active` → the near-black-ceiling pattern (§4): solid border
-  + text brightening, not fill contrast — `--sidebar-active-bg/-border/-text`.
-- `.badge-count.badge-live` and `.input:focus`'s shadow → repointed off
-  `--ocean-500` (Fix 2). `badge-live` uses `--brand-blue` (sidebar chrome
-  blue, since it lives on the permanently-dark sidebar in both app themes,
-  not the main-content semantic-status system); `.input:focus`'s shadow now
-  tracks `--accent-border` (itself `--focus-ring` → `--brand-blue`) instead
-  of a hardcoded Ocean base, so it can't drift from the border it glows
-  around.
-- `--accent-fill-a35` removed — orphaned once `.sidebar-item.active` moved
-  off the overlay pattern entirely.
-- `.sidebar-back-link`/`.sidebar-workspace-sel` brought into the Tier 3
-  hover language (border + lift, not lift alone) — one hover treatment in
-  the sidebar, not two.
+**Still deferred to Phase 5 (sidebar/shell), not forgotten:**
+- `Sidebar.tsx:120`'s `stroke="rgba(255,255,255,0.4)"` and `Sidebar.tsx:167`'s
+  `border: "1.5px solid rgba(255,255,255,0.2)"` — two inline JSX literals,
+  left alone on purpose since Phase 5 is already touching this file's markup.
+- `.sidebar-item.active`/`.badge-count.badge-live`/`.input:focus`'s shadow
+  still derive from `--ocean-500`, not the new accent blue — same reasoning,
+  Phase 5's to reconcile.
 
 **Chart-series distinctness — noted, not fixed (2026-08-19):** `--chart-accent`
 measures 1.05–1.30:1 against the new success/warning/danger text colours in
@@ -449,6 +463,32 @@ One screen, so I can react before twenty more.
 
 Report after 1, after 2, and at the end. Both themes each time.
 
+**Item 1 (AXIOM chat) — closed 2026-08-19, on a real generated conversation
+(5 real tool calls, not seeded). Findings for whoever touches this screen
+again:**
+- Chat bubble inversion (dark mode, Decision 1) reads clean on the one real
+  exchange checked, but **left deliberately unresolved** — a single exchange
+  can't tell you how it feels across many bubbles in a row, and manufacturing
+  a long thread with real AI calls just to check isn't "using the product."
+  Re-check at **Phase 7**, once normal use of the demo tenant has produced a
+  genuinely long thread. If it still hasn't by then, look at whatever exists
+  and decide honestly rather than resolving this by reasoning about it now.
+- `--code-comment`/`::placeholder` (midnight-300) do **not** render inside
+  chat messages — checked directly, `.chat-tool-block-body pre` uses
+  `--text-secondary` (already AA-verified). They belong to the **Transforms**
+  SQL/Python editor and the **Tasks detail page**'s tool-args display — both
+  still ahead in item 4/elsewhere below. **Verified ratio, don't re-derive
+  it:** midnight-300 vs. the theme-invariant midnight-900 code-block
+  background = **5.14:1** — passes, in both themes (the background doesn't
+  change with theme).
+- **Composer auto-grow doesn't work** — logged as finding item 52. The
+  textarea's own CSS claims `min-height: 40px; max-height: 120px` but no JS
+  ever resizes it (`rows={1}`, static); multi-line input scrolls invisibly
+  inside a fixed 40px box instead of the box growing. Verified live at 3 and
+  6 lines. Not fixed here — a real fix needs an `onInput` handler driving
+  height from `scrollHeight`, which is component logic, not a token/CSS
+  change this brief's phases cover.
+
 **Queued from Phase 2 (Correction 4, 2026-08-19) — decide, don't rediscover:**
 every dense table's row actions (Sources/Pipelines/Quality/Incidents/
 Governance/Team/Settings/CI-CD/Approvals/Tasks — Trigger, Pause, Delete,
@@ -467,6 +507,11 @@ rest of item 2's list, so decide it once, not per-screen.
 
 Only when the product is done and approved.
 
+- **Re-check chat bubble inversion first** (open question from Phase 6 item
+  1): does dark mode's light-grey user bubble read as heavy across a real,
+  naturally-accumulated long thread by now? Decide with whatever the demo
+  tenant actually has at this point, honestly — if it's still thin, say so
+  rather than judging it anyway.
 - From the running app at `localhost:3000`, real demo tenant, nothing seeded,
   nothing edited into the image.
 - 1440px viewport, 2× DPR.

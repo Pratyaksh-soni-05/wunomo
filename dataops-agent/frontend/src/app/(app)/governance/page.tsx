@@ -178,9 +178,16 @@ export default function GovernancePage() {
                       <Td><Badge variant={validationVariant(c.validation_status)}>{c.validation_status}</Badge></Td>
                       <Td>{formatApiDate(c.last_validated_at, "Never")}</Td>
                       <Td>
-                        <Button size="sm" variant="secondary" disabled={validateMut.isPending} onClick={() => validateMut.mutate(c.contract_id)}>
-                          Validate
-                        </Button>
+                        <div className="row-actions">
+                          <Button
+                            variant="ghost" icon title="Validate" aria-label={`Validate ${c.name}`}
+                            disabled={validateMut.isPending} onClick={() => validateMut.mutate(c.contract_id)}
+                          >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          </Button>
+                        </div>
                       </Td>
                     </Tr>
                   ))}

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Button, Card, Badge, Modal, Input, Select,
-  Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
+  Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast, RowActionsMenu,
 } from "@/components/ui";
 import { formatApiDate } from "@/lib/dates";
 import {
@@ -156,14 +156,40 @@ export default function PipelinesPage() {
                       </div>
                     </Td>
                     <Td>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="secondary" disabled={triggerMut.isPending} onClick={() => triggerMut.mutate(p.id)}>Trigger</Button>
+                      <div className="row-actions">
+                        <Button
+                          variant="ghost" icon title="Trigger" aria-label={`Trigger ${p.name}`}
+                          disabled={triggerMut.isPending} onClick={() => triggerMut.mutate(p.id)}
+                        >
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                            <polygon points="5 3 19 12 5 21 5 3" />
+                          </svg>
+                        </Button>
                         {p.status === "paused" ? (
-                          <Button size="sm" variant="secondary" disabled={activateMut.isPending} onClick={() => activateMut.mutate(p.id)}>Activate</Button>
+                          <Button
+                            variant="ghost" icon title="Activate" aria-label={`Activate ${p.name}`}
+                            disabled={activateMut.isPending} onClick={() => activateMut.mutate(p.id)}
+                          >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          </Button>
                         ) : (
-                          <Button size="sm" variant="secondary" disabled={pauseMut.isPending} onClick={() => pauseMut.mutate(p.id)}>Pause</Button>
+                          <Button
+                            variant="ghost" icon title="Pause" aria-label={`Pause ${p.name}`}
+                            disabled={pauseMut.isPending} onClick={() => pauseMut.mutate(p.id)}
+                          >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                              <rect x="6" y="4" width="4" height="16" rx="1" />
+                              <rect x="14" y="4" width="4" height="16" rx="1" />
+                            </svg>
+                          </Button>
                         )}
-                        <Button size="sm" variant="danger" disabled={deleteMut.isPending} onClick={() => deleteMut.mutate(p.id)}>Delete</Button>
+                        <RowActionsMenu
+                          actions={[
+                            { label: "Delete", disabled: deleteMut.isPending, onClick: () => deleteMut.mutate(p.id) },
+                          ]}
+                        />
                       </div>
                     </Td>
                   </Tr>

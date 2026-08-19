@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Button, Card, Badge, Modal, Input, Select,
-  Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
+  Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast, RowActionsMenu,
 } from "@/components/ui";
 import { formatApiDate } from "@/lib/dates";
 import {
@@ -141,10 +141,30 @@ export default function SourcesPage() {
                     <Td>{s.owner || "—"}</Td>
                     <Td>{formatApiDate(s.last_profiled_at, "Never")}</Td>
                     <Td>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="secondary" disabled={syncMut.isPending} onClick={() => syncMut.mutate(s.id)}>Sync</Button>
-                        <Button size="sm" variant="secondary" disabled={profileMut.isPending} onClick={() => profileMut.mutate(s.id)}>Profile</Button>
-                        <Button size="sm" variant="danger" disabled={deleteMut.isPending} onClick={() => deleteMut.mutate(s.id)}>Delete</Button>
+                      <div className="row-actions">
+                        <Button
+                          variant="ghost" icon title="Sync" aria-label={`Sync ${s.name}`}
+                          disabled={syncMut.isPending} onClick={() => syncMut.mutate(s.id)}
+                        >
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="23 4 23 10 17 10" />
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                          </svg>
+                        </Button>
+                        <Button
+                          variant="ghost" icon title="Profile" aria-label={`Profile ${s.name}`}
+                          disabled={profileMut.isPending} onClick={() => profileMut.mutate(s.id)}
+                        >
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="11" cy="11" r="8" />
+                            <path d="m21 21-4.35-4.35" />
+                          </svg>
+                        </Button>
+                        <RowActionsMenu
+                          actions={[
+                            { label: "Delete", disabled: deleteMut.isPending, onClick: () => deleteMut.mutate(s.id) },
+                          ]}
+                        />
                       </div>
                     </Td>
                   </Tr>

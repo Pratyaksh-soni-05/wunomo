@@ -73,11 +73,19 @@ export function MessageThread({
   onStartTask: () => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, sending]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "40px";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [draft]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -199,6 +207,7 @@ export function MessageThread({
         )}
         <div className="chat-composer-box">
           <textarea
+            ref={textareaRef}
             placeholder="Ask AXIOM anything about your data... (↵ to send, Shift+↵ for newline)"
             rows={1}
             value={draft}

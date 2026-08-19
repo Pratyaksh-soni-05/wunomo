@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Card, Badge, Button, Modal, Input, Select, Tabs, Skeleton, useToast,
+  Card, Badge, Button, Modal, Input, Select, Tabs, Skeleton, useToast, RowActionsMenu,
 } from "@/components/ui";
 import {
   getToken, decodeUserFromToken, getSettings, updateSettings,
@@ -598,7 +598,13 @@ function ApiKeysTab({ token, canManage }: { token: string; canManage: boolean })
                   {k.revoked_at ? (
                     <Badge variant="gray">Revoked</Badge>
                   ) : (
-                    <Button size="sm" variant="danger" disabled={revokeMut.isPending} onClick={() => revokeMut.mutate(k.id)}>Revoke</Button>
+                    <div className="row-actions">
+                      <RowActionsMenu
+                        actions={[
+                          { label: "Revoke", disabled: revokeMut.isPending, onClick: () => revokeMut.mutate(k.id) },
+                        ]}
+                      />
+                    </div>
                   )}
                 </div>
               ))}

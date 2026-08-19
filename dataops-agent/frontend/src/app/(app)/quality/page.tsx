@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Button, Card, Badge, Modal, Input, Select,
-  Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
+  Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast, RowActionsMenu,
 } from "@/components/ui";
 import {
   getToken, getQualityRules, createQualityRule, deleteQualityRule, runQualityChecks,
@@ -116,11 +116,22 @@ export default function QualityPage() {
                     <Td><Badge variant="info">{r.rule_type}</Badge></Td>
                     <Td>{r.column_name || "—"}</Td>
                     <Td><Badge variant={severityVariant(r.severity)}>{r.severity}</Badge></Td>
-                    <Td>{r.pass_count ?? 0} / {r.fail_count ?? 0}</Td>
+                    <Td className="tabular-nums">{r.pass_count ?? 0} / {r.fail_count ?? 0}</Td>
                     <Td>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="secondary" disabled={runMut.isPending} onClick={() => runMut.mutate(r.pipeline_id)}>Run Checks</Button>
-                        <Button size="sm" variant="danger" disabled={deleteMut.isPending} onClick={() => deleteMut.mutate(r.id)}>Delete</Button>
+                      <div className="row-actions">
+                        <Button
+                          variant="ghost" icon title="Run Checks" aria-label={`Run checks for ${r.name}`}
+                          disabled={runMut.isPending} onClick={() => runMut.mutate(r.pipeline_id)}
+                        >
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        </Button>
+                        <RowActionsMenu
+                          actions={[
+                            { label: "Delete", disabled: deleteMut.isPending, onClick: () => deleteMut.mutate(r.id) },
+                          ]}
+                        />
                       </div>
                     </Td>
                   </Tr>

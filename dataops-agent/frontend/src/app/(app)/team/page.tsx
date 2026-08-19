@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Card, Badge, Button, Modal, Input, Select, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
+  Card, Badge, Button, Modal, Input, Select, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast, RowActionsMenu,
 } from "@/components/ui";
 import { formatApiDateOnly } from "@/lib/dates";
 import {
@@ -152,14 +152,18 @@ export default function TeamPage() {
                       {canManage && (
                         <Td>
                           {m.is_active && (
-                            <Button
-                              size="sm" variant="danger"
-                              disabled={removeMut.isPending || !!removeReason}
-                              title={removeReason ?? undefined}
-                              onClick={() => removeMut.mutate(m.id)}
-                            >
-                              Remove
-                            </Button>
+                            <div className="row-actions">
+                              <RowActionsMenu
+                                actions={[
+                                  {
+                                    label: "Remove",
+                                    disabled: removeMut.isPending || !!removeReason,
+                                    title: removeReason ?? undefined,
+                                    onClick: () => removeMut.mutate(m.id),
+                                  },
+                                ]}
+                              />
+                            </div>
                           )}
                         </Td>
                       )}
@@ -191,7 +195,13 @@ export default function TeamPage() {
                         <Td>{formatApiDateOnly(i.expires_at)}</Td>
                         <Td>
                           {i.status === "pending" && (
-                            <Button size="sm" variant="secondary" disabled={revokeMut.isPending} onClick={() => revokeMut.mutate(i.id)}>Revoke</Button>
+                            <div className="row-actions">
+                              <RowActionsMenu
+                                actions={[
+                                  { label: "Revoke", disabled: revokeMut.isPending, onClick: () => revokeMut.mutate(i.id) },
+                                ]}
+                              />
+                            </div>
                           )}
                         </Td>
                       </Tr>
