@@ -501,6 +501,43 @@ density, costs a click), or icon-only actions with tooltips (reclaims width,
 costs discoverability). Whichever screen goes first sets the pattern for the
 rest of item 2's list, so decide it once, not per-screen.
 
+**Items 3-5 (Quality, Governance, Analytics, Catalog, Transforms, Automations,
+CI-CD, Approvals, Settings, Billing, Tasks + Tasks detail) — closed
+2026-08-19.** Both carry-forward risks flagged going in turned out not to
+apply, corrected rather than assumed clean:
+- **`--code-comment` doesn't exist as a token** — the fact carried forward
+  (5.14:1 midnight-300 vs midnight-900, verified, still holds) was about the
+  `.code-comment` CSS class, which reaches `var(--midnight-300)` directly,
+  not through an intermediate semantic token. It's consumed in exactly one
+  place across these screens: Transforms' empty-state placeholder ("--
+  Generated code will appear here"), confirmed legible live. **The Tasks
+  detail page never uses it at all** — its two `.code-block`s (the editable
+  and read-only `tool_args` JSON) render plain text, no comment styling.
+  The premise that both screens use it was half wrong; corrected here.
+- **`--chart-accent` + a status colour never share a canvas on Analytics or
+  Governance, because neither screen renders a chart at all.** Analytics is
+  a routable stub (`<StubPage title="Analytics" />`, zero markup of its
+  own). Governance's Lineage tab is a plain two-table node/edge list, not a
+  graph visualization. The only chart code anywhere in the app
+  (`TrendCharts.tsx`, Chart.js via `react-chartjs-2`) belongs to the
+  **Dashboard** screen, outside this phase's scope — and even there, its two
+  charts don't combine chart-accent with a status colour on one canvas
+  either (one plots two status colours together, success+danger; the other
+  plots chart-accent alone). The predicted collision doesn't exist anywhere
+  in the app today.
+- No hardcoded hex/rgb/rgba literals found in any of these 11 page files —
+  every inline color reaches `var(--token)`, including a dynamically-built
+  reference in the Tasks detail page (`` `var(--${reason.variant})` ``,
+  `tasks/[id]/page.tsx:293`, driving a left-edge coloured bar on a failed-
+  step banner — an existing, independent precedent for the shape-over-tint
+  approach the near-black-ceiling amendment above formalizes, though it
+  predates that amendment and wasn't itself in question here).
+- No new near-black-ceiling states found (the only `.active` usage in these
+  files is `Tabs`' own `.tab.active`, on a regular page surface, not a
+  near-black one — out of scope for §4).
+- Zero console errors across all 11 screens, both themes, live.
+Full detail: `docs/context/SESSION_LOG.md`'s 2026-08-19 entry.
+
 ---
 
 ## PHASE 7 — Screenshots

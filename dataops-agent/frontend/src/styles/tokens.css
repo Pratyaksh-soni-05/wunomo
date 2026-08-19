@@ -94,13 +94,21 @@
      stay visually distinct even where the fill is identical. */
   --sidebar-bg: var(--deep-ground);
 
-  /* Active/hover, per the near-black-ceiling rule (§4 of the brief): no
-     fill reaches 3:1 this close to black, so these lean on a solid border
-     plus text brightening instead of fill contrast. Light stays in the
-     Futurewave blue direction (--accent-fill); dark is grey lift + grey
-     border, never a blue fill, per the brief's explicit rule for active
-     nav state. Hover (not active) stays the existing neutral white-alpha
-     wash in both themes — it was never blue, doesn't need this treatment. */
+  /* Active/hover, per §4 of the brief — AMENDED 2026-08-19 (findings item
+     54): the original rule (cited below, pre-amendment) called for "a solid
+     border" and this token's dark value took that literally as a neutral
+     grey (--border-strong), same as tr.selected's first attempt — measured
+     1.75:1 vs --sidebar-bg, 1.04:1 fill-vs-fill against :hover, effectively
+     indistinguishable, confirmed live at 100% zoom. Fixed the same way as
+     tr.selected: --sidebar-active-border now feeds a left-edge box-shadow
+     bar (components.css), not a full-perimeter border, and always holds a
+     real accent colour, never a neutral grey — light already pointed at
+     --accent-fill (a real blue, 3.41:1 vs --deep-ground, never broken);
+     dark now points at --brand-blue instead of --border-strong. Fill stays
+     as a quiet reinforcement in both themes, the bar is what carries the
+     signal now, not fill-vs-fill contrast. Hover (not active) stays the
+     existing neutral white-alpha wash in both themes — it was never meant
+     to carry this signal, only active needs it. */
   --sidebar-active-bg: color-mix(in srgb, var(--accent-fill) 40%, transparent);
   --sidebar-active-border: var(--accent-fill);   /* solid: 3.41:1 vs --deep-ground */
   --sidebar-active-text: var(--on-dark);
@@ -381,13 +389,18 @@
   --accent-subtle-border: var(--border);     /* #26262A — plain neutral, not a blue-tinted edge on a now-grey chip */
 
   /* Phase 5 (2026-08-19): sidebar joins the greyscale-chrome rule. --bg, not
-     --surface — see this token's :root comment for why. Active state is the
-     near-black-ceiling pattern (§4): a solid grey border plus --text-primary
-     doing the work, not the fill (--surface-hover here only measures
-     1.14:1 against --bg — expected, not a bug, see §4). Never a blue fill. */
+     --surface — see this token's :root comment for why. --surface-hover
+     fill only measures 1.14:1 against --bg — expected, not a bug on its
+     own (the fill was never meant to carry the signal alone). AMENDED
+     2026-08-19 (findings item 54): this token's border WAS a solid grey
+     (--border-strong) on the theory that "solid" was enough — measured
+     1.75:1 against --bg, 1.04:1 fill-vs-fill against :hover, effectively
+     invisible, confirmed live. Now --brand-blue, a real accent colour, fed
+     into a left-edge box-shadow bar (components.css), not a full border —
+     see the :root comment above for the full amendment detail. */
   --sidebar-bg: var(--bg);
   --sidebar-active-bg: var(--surface-hover);
-  --sidebar-active-border: var(--border-strong);
+  --sidebar-active-border: var(--brand-blue);
   --sidebar-active-text: var(--text-primary);
 
   --shadow-xs: var(--_dark-shadow-xs);
@@ -449,7 +462,7 @@
 
     --sidebar-bg: var(--bg);
     --sidebar-active-bg: var(--surface-hover);
-    --sidebar-active-border: var(--border-strong);
+    --sidebar-active-border: var(--brand-blue);
     --sidebar-active-text: var(--text-primary);
   }
 }

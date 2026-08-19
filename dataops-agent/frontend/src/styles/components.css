@@ -534,11 +534,13 @@ tr.selected td:first-child {
 .sidebar-section-label { font-size: 10px; font-weight: 600; color: var(--sidebar-text-faint); text-transform: uppercase; letter-spacing: 0.08em; }
 /* Tier 3 (Phase 5, 2026-08-19): ghost at rest, bordered box on hover, same
    language as .btn-icon/.topbar-icon-btn — border starts transparent so
-   the hover/active border doesn't shift layout. min-height matches the
-   44px floor; collapsed mode (below) adds min-width so the icon-only state
-   is a proper 44x44 target, not just tall. Active state is the
-   near-black-ceiling pattern (§4 of the brief) — see tokens.css for the
-   light/dark values. .badge-count.badge-live below is NOT part of this
+   :hover's border doesn't shift layout (:hover still swaps border-color;
+   :active moved to a box-shadow bar instead, see below). min-height matches
+   the 44px floor; collapsed mode (below) adds min-width so the icon-only
+   state is a proper 44x44 target, not just tall. Active state is the
+   near-black-ceiling pattern (§4 of the brief, AMENDED 2026-08-19 per
+   findings item 54 — see tokens.css for the current light/dark values and
+   the amendment detail). .badge-count.badge-live below is NOT part of this
    pass — still --accent-fill-a50 (ocean-500-derived), left open,
    see report. */
 .sidebar-item {
@@ -549,7 +551,13 @@ tr.selected td:first-child {
   transition: background var(--t-slow), border-color var(--t-slow), color var(--t-slow);
 }
 .sidebar-item:hover { background: var(--sidebar-hover-bg); border-color: var(--sidebar-hairline); color: var(--sidebar-text-hover); }
-.sidebar-item.active { background: var(--sidebar-active-bg); border-color: var(--sidebar-active-border); color: var(--sidebar-active-text); }
+/* Near-black-ceiling amendment (§4, findings item 54) — was a full 1px
+   border color-swap (matching :hover's own shape, differentiated only by
+   colour); a left-edge box-shadow bar instead, same mechanism as
+   tr.selected, since a shape reads at any luminance where a colour-only
+   swap on an identically-shaped border doesn't. --sidebar-active-border
+   already carries the right colour per theme (tokens.css). */
+.sidebar-item.active { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); box-shadow: inset 3px 0 0 var(--sidebar-active-border); }
 .sidebar-item .badge-count { background: var(--sidebar-badge-bg); color: var(--sidebar-badge-text); padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: auto; }
 .sidebar-item .badge-count.badge-live { background: var(--accent-fill-a50); color: rgba(200,222,240,0.95); }
 .sidebar-item svg { flex-shrink: 0; }
@@ -714,7 +722,12 @@ tr.selected td:first-child {
 .chat-session-list { flex: 1; overflow-y: auto; }
 .chat-session-item { padding: 9px 12px; border-radius: var(--radius-sm); margin: 1px 4px; cursor: pointer; border: 1px solid transparent; }
 .chat-session-item:hover { background: var(--surface); }
-.chat-session-item.active { background: var(--surface); border-color: var(--border); }
+/* Near-black-ceiling fix (§4, findings item 54's re-audit) — was a plain
+   --border colour-swap on the same full-perimeter shape :hover already
+   uses (measured 1.24:1 in dark, live-confirmed indistinguishable from
+   :hover). Left-edge box-shadow bar instead, same mechanism as
+   tr.selected/.sidebar-item.active. */
+.chat-session-item.active { background: var(--surface); box-shadow: inset 3px 0 0 var(--brand-blue); }
 .chat-session-title { font-size: 12px; font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-session-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 .chat-session-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }

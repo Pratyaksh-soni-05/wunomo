@@ -72,13 +72,125 @@ whether/when this backend bug gets fixed.
 
 1. The real fix: a dedup query against existing open incidents for the same
    `affected_assets` before `db.add(incident)` in `_check_freshness()`.
-2. What to do with the 51,719 already-created rows — a cleanup/backfill
-   decision, not made by this session.
+2. What to do with the already-created rows — a cleanup/backfill decision,
+   not made by this session.
 3. The frontend's separate pagination gap (item 55) — real paginated
    endpoint + a frontend pager, matched pair, not just a `limit` bump.
+4. **Added same day, see follow-up below**: a real test-suite teardown for
+   the "Run Status Test Corp" pytest fixture, which currently manufactures a
+   brand-new leftover tenant on every run instead of reusing/cleaning one up.
 
 Full detail and exact queries: `docs/context/WALKTHROUGH_FINDINGS_2026-08.md`
-items 48, 49, 53, 55; `docs/context/STATUS_TABLE.md`'s Known-broken row.
+items 48, 49, 53, 53-correction, 55; `docs/context/STATUS_TABLE.md`'s
+Known-broken row.
+
+### Same-day follow-up — the "one dominant tenant" framing above was wrong
+
+The initial escalation (above) attributed 33,857 of the 51,719-then-current
+`OPEN` total to one tenant, "Run Status Test Corp," at 65.5% — asked to
+verify this before treating it as final, since a single tenant looping
+faster than 338 others would itself be a diagnostic lead worth a separate
+flag. **It isn't one tenant.** `SELECT DISTINCT id FROM tenants WHERE
+name='Run Status Test Corp'` returns **101 distinct tenant rows** — a
+pytest fixture that creates a fresh tenant of this name on every test run
+and never tears it down, created repeatedly 2026-07-14 through 2026-08-18
+(over a month of accumulation), each with a synthetic
+`runstatus-<hex>@example.com` user and exactly one `DataSource` named
+`"missing file source"`, profiled once at creation then abandoned forever —
+the identical "one dead source, never revisited" shape items 48/49 already
+documented on two other tenants. 97 of the 101 currently have `OPEN`
+incidents (33,954, current count). Checked and ruled out that any one of
+them loops faster than the others: the largest individual tenant ID in this
+cohort has 504 `OPEN` incidents, the same order of magnitude as every other
+affected tenant system-wide — the total is large because there are ~100 of
+them, not because one is anomalous.
+
+**Corrected, both figures kept (neither replaces the other):** including
+this cohort, 51,894 `OPEN` across 339 tenants (the real current row count);
+**excluding it, 17,940 `OPEN` across 242 genuinely distinct tenants** — this
+is the number that should anchor any severity conversation going forward,
+since it isn't inflated by one repeated fixture. Growth rate excluding the
+cohort: ~300–390 rows/hour, still spread across 242 tenants with no single
+dominant one (largest is 9.6% of that total) — if anything, this is
+*stronger* evidence the underlying bug is systemic rather than tenant-
+specific, not weaker. Per explicit instruction, none of the 33,954 rows
+were deleted. `STATUS_TABLE.md`'s Known-broken row and
+`docs/context/WALKTHROUGH_FINDINGS_2026-08.md`'s items 48/49/53 updated
+with a new "53-correction" row carrying the full detail.
+
+### Second same-day follow-up — the fixture leak is its own bug, logged separately
+
+The 101-tenant pytest fixture behind "Run Status Test Corp" isn't just
+context for the escalation number above — it's a real, independent defect:
+the test suite writes permanent tenant/user/source rows to the shared dev
+database and never tears them down. Logged as its own new finding, walkthrough
+item 56, and its own new `STATUS_TABLE.md` Known-broken row, specifically so
+it doesn't get marked resolved the day someone fixes `_check_freshness()`'s
+dedup — that fix stops these tenants from accumulating more incidents, it
+does nothing about the 101 leftover rows or the fixture minting a 102nd on
+the next test run. Backend/test-infrastructure, not fixed here. Also: the
+escalation summary above and in `STATUS_TABLE.md` now lead with the
+corrected 17,940/242-tenant figure, with the 9.6%-largest-contributor number
+positioned as the thing that rules out a single misconfigured tenant, per
+explicit instruction on how to present it.
+
+### Third same-day follow-up — near-black-ceiling re-audit, three fixes applied
+
+Asked to re-audit every place the original (pre-amendment) near-black-ceiling
+rule landed, since it had already been given wrong twice (first as a fill,
+then as a neutral-grey border) and both failed the same way. Grepped every
+explicit citation of the rule plus every other selection/active state built
+around the same period: found three real instances, `.sidebar-item.active`
+(Phase 5), `.chat-session-item.active` (AXIOM chat's session list), and
+`.cmd-item.selected` (command palette).
+
+`.sidebar-item.active` (dark mode): confirmed defective, same shape as item
+54 — `--border-strong` measured 1.75:1 against the sidebar's own base, 1.04:1
+fill-vs-fill against `:hover`. `.chat-session-item.active` (dark mode):
+screenshot-verified with a real hovered session beside a real active one —
+confirmed indistinguishable, `--border` measured 1.24:1. Both fixed with the
+same left-edge `box-shadow: inset 3px 0 0 var(--brand-blue)` mechanism as
+item 54, verified live at 100% zoom in both themes and (for the sidebar)
+both workspace and AXIOM domain modes — confirmed no collision with the
+sidebar's own `border-right` (different element, different edge). New
+`--sidebar-active-border` dark value points at `--brand-blue` instead of
+`--border-strong`; light's value (`--accent-fill`) was already correct and
+untouched. `.cmd-item.selected` turned out to have no live consumer at all —
+`CommandPalette.tsx` never applies the `.selected` class anywhere (matches
+the already-documented "Command Palette's keyboard navigation doesn't exist"
+gap in this file's Known-broken table) — so it's dead CSS today, not a live
+defect, left as-is. Brief §4 and every component/token comment citing the
+pre-amendment rule updated to point at the amendment instead.
+
+### Fourth same-day follow-up — Phase 6 parts 3-5 closed, both carry-forwards corrected
+
+Audited the remaining screens (Quality, Governance, Analytics, Catalog,
+Transforms, Automations, CI-CD, Approvals, Settings, Billing, Tasks + Tasks
+detail) via a background research pass plus live screenshots in both themes.
+Zero console errors, zero hardcoded colors, zero new near-black-ceiling
+states. Both carry-forward risks flagged at the start of this session turned
+out not to apply — corrected rather than assumed still true:
+
+- `--code-comment` isn't a real token — it's the `.code-comment` CSS class,
+  reaching `var(--midnight-300)` directly. Used once across these screens
+  (Transforms' empty-state placeholder, confirmed legible live). The Tasks
+  detail page doesn't use it at all — its `tool_args` JSON displays are
+  plain text. The original "Transforms and Tasks detail both use it" premise
+  was half wrong.
+- `--chart-accent` + a status colour never share a canvas on Analytics or
+  Governance, because neither renders a chart — Analytics is a routable
+  stub, Governance's Lineage tab is a plain table, not a graph. The only
+  chart code in the app belongs to Dashboard (out of scope here), and even
+  there the predicted pairing doesn't occur.
+
+Bonus find, not a defect: the Tasks detail page's failed-step banner already
+uses a `var(--${reason.variant})`-driven left-edge coloured bar
+(`tasks/[id]/page.tsx:293`) — an independent, pre-existing precedent for
+exactly the shape-over-tint approach this session's near-black-ceiling
+amendment formalizes, confirmed live in the screenshot evidence.
+
+Full detail in `dataops-agent/frontend/design/CLAUDE_CODE_BRIEF_full_frontend.md`'s
+Phase 6 items 3-5 closure note.
 
 ---
 
