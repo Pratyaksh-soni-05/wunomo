@@ -148,8 +148,12 @@ img { display: block; max-width: 100%; }
   backdrop-filter: blur(10px);
 }
 .landing-brand { display: flex; align-items: center; gap: 9px; }
+/* Vector monogram (WunomoMark, currentColor) - no border/card treatment,
+   that belonged to the old raster's own baked-in background. Colour set
+   explicitly to match the adjacent .landing-brand-text rather than
+   inheriting ambiently, same reasoning as .landing-hero-wordmark below. */
 .landing-brand-mark {
-  height: 26px; width: auto; border-radius: 6px; border: 1px solid var(--border); display: block;
+  height: 26px; width: auto; color: var(--text-primary); display: block;
 }
 .landing-brand-text { font-family: var(--font-display); font-size: 17px; font-weight: 600; color: var(--text-primary); }
 .landing-nav-anchors { display: flex; align-items: center; gap: 28px; }
@@ -215,7 +219,13 @@ img { display: block; max-width: 100%; }
   position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0.16; mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='0.5'/></svg>");
 }
-.landing-hero-wordmark { position: relative; z-index: 5; height: 54px; width: auto; border-radius: 10px; border: 1px solid var(--border); margin: 0 auto 28px; display: block; }
+/* Vector wordmark (WunomoWordmark, currentColor, WORDMARK_ASPECT 9.43:1 -
+   a full logotype, not the old raster's compact cream card, so sized by
+   width rather than trying to match the old height). Sits directly on the
+   mesh - colour set explicitly to white rather than left to inherit
+   .landing-hero's ambient #fff, so a later change to the hero's base text
+   colour can't silently drag the wordmark along with it. */
+.landing-hero-wordmark { position: relative; z-index: 5; width: 200px; height: auto; color: #fff; margin: 0 auto 28px; display: block; }
 
 /* Content scrim (handoff doc §5) — grid-stacks a dark radial-gradient
    floor behind the text in the EXACT same cell, so it auto-sizes to
@@ -351,7 +361,7 @@ img { display: block; max-width: 100%; }
   .landing-feature-grid { grid-template-columns: 1fr; }
   .landing-nav { padding: 12px 16px; }
   .landing-hero { padding: 48px 16px 40px; }
-  .landing-hero-wordmark { height: 42px; }
+  .landing-hero-wordmark { width: 160px; }
   .landing-section { padding: 40px 16px; }
   .landing-final-cta { padding: 48px 16px; }
   .landing-footer { padding: 20px 16px; flex-direction: column; align-items: flex-start; }

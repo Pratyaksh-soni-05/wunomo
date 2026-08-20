@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { WunomoMark, WunomoWordmark } from "@/components/brand";
 import { EmployeeCard } from "@/components/EmployeeCard";
 import { ScreenshotCarousel } from "@/components/ScreenshotCarousel";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -41,8 +42,7 @@ export default function LandingPage() {
     <div className="landing-page">
       <nav className="landing-nav">
         <Link href="/" className="landing-brand">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/wunomo-mark.jpeg" alt="Wunomo" className="landing-brand-mark" />
+          <WunomoMark className="landing-brand-mark" />
           <span className="landing-brand-text">Wunomo</span>
         </Link>
         <div className="landing-nav-anchors">
@@ -61,8 +61,7 @@ export default function LandingPage() {
       <section className="landing-hero">
         <div className="landing-hero-mesh" aria-hidden="true" />
         <div className="landing-hero-grain" aria-hidden="true" />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/wunomo-wordmark.png" alt="wunomo" className="landing-hero-wordmark landing-animate-in" />
+        <WunomoWordmark className="landing-hero-wordmark landing-animate-in" />
         <div className="landing-hero-content-stack">
           <div className="landing-hero-scrim" aria-hidden="true" />
           <div className="landing-hero-content-visible">
@@ -180,8 +179,7 @@ export default function LandingPage() {
 
       <footer className="landing-footer">
         <div className="landing-footer-brand">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/wunomo-mark.jpeg" alt="Wunomo" className="landing-brand-mark" />
+          <WunomoMark className="landing-brand-mark" />
           <span className="landing-brand-text">Wunomo</span>
         </div>
         <div className="landing-footer-links">
