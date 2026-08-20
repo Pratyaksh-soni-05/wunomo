@@ -128,6 +128,7 @@
      the hero itself is a later phase. */
   --mesh-white: #FFFFFF;
   --mesh-lavender: #E3E7FC;
+  --mesh-glow-2: #0056FF;              /* the mesh's 4th radial-gradient layer reads this directly — same hex as --accent-fill's light value, not a fresh blue. (Missed in the Phase 1 token port; caught wiring the mesh itself in Phase 3 — --mesh-glow-1 genuinely has no consumer here, only --auth-brand-bg uses it, which stays out of scope.) */
   --mesh-royal-deep: #0047D6;
   --mesh-ramp-1: #F6F9FF;
   --mesh-ramp-2: #D8E5FF;

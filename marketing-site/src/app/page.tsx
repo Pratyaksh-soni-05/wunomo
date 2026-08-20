@@ -59,21 +59,28 @@ export default function LandingPage() {
       </nav>
 
       <section className="landing-hero">
+        <div className="landing-hero-mesh" aria-hidden="true" />
+        <div className="landing-hero-grain" aria-hidden="true" />
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/wunomo-wordmark.png" alt="wunomo" className="landing-hero-wordmark landing-animate-in" />
-        <div className="landing-hero-pill landing-animate-in">
-          <span className="landing-hero-pill-dot" />
-          Currently onboarding design partners
-        </div>
-        <h1 className="font-display landing-animate-in delay-1">The AI workforce for modern companies.</h1>
-        <p className="landing-animate-in delay-1">
-          We&apos;re building autonomous AI employees that handle real operational work — starting with
-          AXIOM, an AI DataOps engineer.
-        </p>
-        <div className="flex items-center justify-center gap-3 landing-animate-in delay-2">
-          <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
-            Book a demo
-          </a>
+        <div className="landing-hero-content-stack">
+          <div className="landing-hero-scrim" aria-hidden="true" />
+          <div className="landing-hero-content-visible">
+            <div className="landing-hero-pill landing-animate-in">
+              <span className="landing-hero-pill-dot" />
+              Currently onboarding design partners
+            </div>
+            <h1 className="font-display landing-animate-in delay-1">The AI workforce for modern companies.</h1>
+            <p className="landing-animate-in delay-1">
+              We&apos;re building autonomous AI employees that handle real operational work — starting with
+              AXIOM, an AI DataOps engineer.
+            </p>
+            <div className="flex items-center justify-center gap-3 landing-animate-in delay-2">
+              <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
+                Book a demo
+              </a>
+            </div>
+          </div>
         </div>
       </section>
 
