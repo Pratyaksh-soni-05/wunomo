@@ -35,13 +35,17 @@
   --ocean-100: #E1EBF3;
   --ocean-50:  #F1F6FA;
 
-  /* Surfaces & borders (warm, from Pearl Perfect) — untouched by
-     Futurewave on the product side either. */
-  --surface: #FFFEF5;
-  --bg: #FBF9E4; /* Pearl Perfect itself */
-  --surface-hover: #F3F0DC;
-  --border: #E6E1C8;
-  --border-strong: #D3CBA8;
+  /* Surfaces & borders — Futurewave cool-white (2026-08-20). Replaces the
+     Pearl Perfect cream this port had carried over unchanged — the surfaces
+     were never actually part of the Futurewave token port despite
+     everything else that landed, on both this site and the product (same
+     fix, same day, same values, both repos). Dark mode is untouched and
+     already correct. */
+  --surface: #FFFFFF;
+  --bg: #F7F8FC;
+  --surface-hover: #EEF1FA;
+  --border: #E3E7FC;
+  --border-strong: #C9D2EE;
 
   /* Text / ink (cool, from Midnight) — untouched by Futurewave. */
   --text-primary: #16233A;
@@ -54,7 +58,7 @@
      stays a constant near-white in both themes. Deliberately NOT the same
      token as --surface, which flips per theme — conflating the two causes
      dark-text-on-dark buttons in dark mode (documented product gotcha). */
-  --on-dark: #FFFEF5;
+  --on-dark: #FFFFFF;
 
   /* ==========================================
      SEMANTIC STATUS — fill/text split (ported from Futurewave Phase 1b)
@@ -117,27 +121,27 @@
 
   --deep-ground: #061024;              /* Gradient terminus for the hero mesh below. Theme-invariant. */
 
-  /* Landing-hero mesh — the corrected elliptical version from the handoff
-     doc §2/§5, ported EXACTLY, not re-derived: base ramp reaches full blue
-     by 21% of hero height (not 40%, which ran the transition through the
-     headline), blobs are independent x/y-percentage ellipses (aspect-
-     independent by construction, no per-breakpoint variance), verified
-     6.04:1 worst-case for white text in the 22%-82% text zone against the
-     product's own hero. Theme-invariant — this gradient doesn't flip with
-     the app theme. Not wired into any CSS yet (Phase 1 is tokens only);
-     the hero itself is a later phase. */
+  /* Landing-hero mesh — theme-invariant, doesn't flip with the app theme.
+     RESTORED 2026-08-20 to match design/futurewave-reference.html's real
+     diagonal composition (same fix, same day, same values, as the product
+     repo) — the version this site had wired in Phase 3 had drifted into a
+     flat horizontal band. Two things fixed together: the blob position/
+     size/alpha values, and a real CSS-vs-canvas layer-order bug (CSS
+     background-image lists first-listed-on-top; the reference's canvas
+     code paints its blob array in order, each one drawn OVER the previous,
+     so the correct CSS order is the REVERSE of the blob list, not the same
+     order — see components.css's .landing-hero-mesh comment for the full
+     detail). --mesh-royal-deep retired (unused by the corrected
+     composition); --mesh-glow-1 added (was skippable when this site had no
+     use for it beyond the product's auth panel — the corrected mesh reads
+     it directly now, same as --mesh-glow-2 already did). */
   --mesh-white: #FFFFFF;
   --mesh-lavender: #E3E7FC;
-  --mesh-glow-2: #0056FF;              /* the mesh's 4th radial-gradient layer reads this directly — same hex as --accent-fill's light value, not a fresh blue. (Missed in the Phase 1 token port; caught wiring the mesh itself in Phase 3 — --mesh-glow-1 genuinely has no consumer here, only --auth-brand-bg uses it, which stays out of scope.) */
-  --mesh-royal-deep: #0047D6;
-  --mesh-ramp-1: #F6F9FF;
-  --mesh-ramp-2: #D8E5FF;
-  --mesh-ramp-3: #7FAEFF;
-  --mesh-ramp-4: #1160FF;
-  --mesh-ramp-5: #0050EE;
-  --mesh-ramp-6: #0B45B4;
-  --mesh-ramp-7: #0C2E7A;
-  --mesh-ramp-8: #0A1F5C;
+  --mesh-glow-1: #2277FF;
+  --mesh-glow-2: #0056FF;
+  --mesh-ramp-1: #EAF0FF;
+  --mesh-ramp-2: #BBD0FF;
+  --mesh-ramp-3: #0A1F5C;
 
   /* Shadows */
   --shadow-xs: 0 1px 2px rgba(22,35,58,0.05);

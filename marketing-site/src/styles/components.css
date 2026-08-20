@@ -195,46 +195,57 @@ img { display: block; max-width: 100%; }
   padding: 84px 24px 56px; text-align: center;
   color: #fff;
 }
-/* Ported EXACTLY from the handoff doc / product's components.css — the
-   corrected elliptical construction (independent x/y-percentage ellipses,
-   aspect-independent by construction; base ramp reaching full blue by 21%
-   of hero height, not 40%) — not re-derived. Layer order matches given
-   order exactly: first-listed paints on top. */
+/* RESTORED 2026-08-20 (same fix, same day, same values, as the product
+   repo) — the version wired in Phase 3 had drifted into a flat horizontal
+   band instead of the reference's diagonal wash. Layer order is the
+   REVERSE of the composition's own paint order, deliberately: CSS
+   background-image lists first-listed-on-top, but the reference's canvas
+   code paints its blobs array in order, each one drawn OVER the previous
+   (last-drawn = topmost) — listing them in that same top-to-bottom order
+   here put the top-left white blob on top instead of the darker blue/
+   midnight blobs meant to sit over it, which is what made this read as
+   flat. Blob numbers below match the reference's own list order. */
 .landing-hero-mesh {
   position: absolute; inset: 0; z-index: 0;
   background-image:
-    radial-gradient(ellipse 42% 30% at 2% -8%,
-      color-mix(in srgb, var(--mesh-white) 95%, transparent) 0%,
-      color-mix(in srgb, var(--mesh-white) 39.9%, transparent) 55%,
+    /* blob 7 - topmost */
+    radial-gradient(ellipse 40% 40% at 88% 80%,
+      color-mix(in srgb, var(--deep-ground) 72%, transparent) 0%,
+      color-mix(in srgb, var(--deep-ground) 30.24%, transparent) 55%,
       transparent 100%),
-    radial-gradient(ellipse 38% 27% at 82% -7%,
-      color-mix(in srgb, var(--mesh-white) 82%, transparent) 0%,
-      color-mix(in srgb, var(--mesh-white) 34.4%, transparent) 55%,
+    /* blob 6 */
+    radial-gradient(ellipse 62% 62% at 52% 99%,
+      color-mix(in srgb, var(--deep-ground) 92%, transparent) 0%,
+      color-mix(in srgb, var(--deep-ground) 38.64%, transparent) 55%,
       transparent 100%),
-    radial-gradient(ellipse 30% 19% at 40% 0%,
+    /* blob 5 */
+    radial-gradient(ellipse 36% 36% at 2% 66%,
+      color-mix(in srgb, var(--mesh-glow-2) 80%, transparent) 0%,
+      color-mix(in srgb, var(--mesh-glow-2) 33.6%, transparent) 55%,
+      transparent 100%),
+    /* blob 4 */
+    radial-gradient(ellipse 44% 44% at 96% 34%,
+      color-mix(in srgb, var(--mesh-glow-1) 72%, transparent) 0%,
+      color-mix(in srgb, var(--mesh-glow-1) 30.24%, transparent) 55%,
+      transparent 100%),
+    /* blob 3 */
+    radial-gradient(ellipse 34% 34% at 30% 30%,
       color-mix(in srgb, var(--mesh-lavender) 50%, transparent) 0%,
       color-mix(in srgb, var(--mesh-lavender) 21%, transparent) 55%,
       transparent 100%),
-    radial-gradient(ellipse 34% 34% at 106% 26%,
-      color-mix(in srgb, var(--mesh-glow-2) 45%, transparent) 0%,
-      color-mix(in srgb, var(--mesh-glow-2) 18.9%, transparent) 55%,
+    /* blob 2 */
+    radial-gradient(ellipse 42% 42% at 74% 6%,
+      color-mix(in srgb, var(--mesh-white) 72%, transparent) 0%,
+      color-mix(in srgb, var(--mesh-white) 30.24%, transparent) 55%,
       transparent 100%),
-    radial-gradient(ellipse 34% 34% at -6% 50%,
-      color-mix(in srgb, var(--mesh-royal-deep) 60%, transparent) 0%,
-      color-mix(in srgb, var(--mesh-royal-deep) 25.2%, transparent) 55%,
-      transparent 100%),
-    radial-gradient(ellipse 80% 55% at 52% 103%,
-      color-mix(in srgb, var(--deep-ground) 94%, transparent) 0%,
-      color-mix(in srgb, var(--deep-ground) 39.5%, transparent) 55%,
-      transparent 100%),
-    radial-gradient(ellipse 46% 40% at 94% 84%,
-      color-mix(in srgb, var(--deep-ground) 78%, transparent) 0%,
-      color-mix(in srgb, var(--deep-ground) 32.8%, transparent) 55%,
+    /* blob 1 - bottom-most blob, still above the base ramp */
+    radial-gradient(ellipse 52% 52% at 6% 2%,
+      color-mix(in srgb, var(--mesh-white) 95%, transparent) 0%,
+      color-mix(in srgb, var(--mesh-white) 39.9%, transparent) 55%,
       transparent 100%),
     linear-gradient(to bottom,
-      var(--mesh-ramp-1) 0%, var(--mesh-ramp-2) 5%, var(--mesh-ramp-3) 10%,
-      var(--mesh-ramp-4) 15.5%, var(--mesh-ramp-5) 21%, var(--mesh-ramp-6) 42%,
-      var(--mesh-ramp-7) 64%, var(--mesh-ramp-8) 84%, var(--deep-ground) 100%);
+      var(--mesh-ramp-1) 0%, var(--mesh-ramp-2) 16%, var(--mesh-glow-1) 40%,
+      var(--mesh-glow-2) 62%, var(--mesh-ramp-3) 85%, var(--deep-ground) 100%);
 }
 .landing-hero-grain {
   position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0.16; mix-blend-mode: overlay;
@@ -259,9 +270,15 @@ img { display: block; max-width: 100%; }
 .landing-hero-content-stack { position: relative; z-index: 5; display: grid; max-width: 800px; margin: 0 auto; }
 .landing-hero-scrim {
   grid-area: 1 / 1; position: relative; z-index: 2; pointer-events: none;
+  /* Raised 0.25/0.14 -> 0.66/0.42 (2026-08-20), same value as the product,
+     after the mesh restore: the corrected diagonal composition has real
+     pale patches reaching into the text zone that the old 0.25/0.14 floor
+     didn't fully cover - measured headline 2.68:1 (needs 3:1, large text)
+     and subhead 4.44:1 (needs 4.5:1) at a first pass of 0.50/0.30, both
+     just short. Strengthened the scrim itself, not the mesh, to fix it. */
   background: radial-gradient(ellipse 75% 85% at 50% 50%,
-    color-mix(in srgb, var(--deep-ground) 25%, transparent) 0%,
-    color-mix(in srgb, var(--deep-ground) 14%, transparent) 55%,
+    color-mix(in srgb, var(--deep-ground) 66%, transparent) 0%,
+    color-mix(in srgb, var(--deep-ground) 42%, transparent) 55%,
     transparent 100%);
 }
 .landing-hero-content-visible {
