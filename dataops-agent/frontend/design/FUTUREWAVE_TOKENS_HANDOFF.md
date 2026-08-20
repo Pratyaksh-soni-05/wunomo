@@ -33,13 +33,22 @@ Three states, not two — this matters for anyone porting the palette:
 
 ### Surfaces & borders
 
+**Light values corrected 2026-08-20/21.** The Futurewave rollout landed
+2026-08-19 but never actually touched these five tokens — light mode kept
+running on the old Pearl Perfect cream (`--bg: #FBF9E4`, `--surface:
+#FFFEF5`, etc.) underneath everything else that shipped, which is why the
+live product still read as "the old palette" regardless. If you ported the
+cream values from an earlier copy of this doc, they were wrong from the
+start of the Futurewave rollout, not a later regression — replace them.
+Dark mode was already correct and is untouched here.
+
 | Token | Light | Dark |
 |---|---|---|
-| `--bg` | `#FBF9E4` (Pearl Perfect) | `#0A0A0B` |
-| `--surface` | `#FFFEF5` | `#121214` |
-| `--surface-hover` | `#F3F0DC` | `#1A1A1D` |
-| `--border` | `#E6E1C8` | `#26262A` |
-| `--border-strong` | `#D3CBA8` | `#3A3A40` |
+| `--bg` | `#F7F8FC` | `#0A0A0B` |
+| `--surface` | `#FFFFFF` | `#121214` |
+| `--surface-hover` | `#EEF1FA` | `#1A1A1D` |
+| `--border` | `#E3E7FC` | `#26262A` |
+| `--border-strong` | `#C9D2EE` | `#3A3A40` |
 
 ### Text
 
@@ -49,7 +58,7 @@ Three states, not two — this matters for anyone porting the palette:
 | `--text-secondary` | `#3A4A63` | `#9A9AA2` | 7.085:1 |
 | `--text-muted` | `#6B7C94` | `#6E6E76` | 3.916:1 — **large text / non-essential UI only, never body copy.** Deliberately fails the 4.5:1 body floor; only clears the 3:1 large-text/UI-chrome bar. |
 | `--text-disabled` | `#A7B4C4` | `#5A5A66` | — |
-| `--on-dark` | `#FFFEF5` (both themes, constant) | same | Text painted on a permanently-dark surface (primary buttons, toasts, tooltips) — deliberately **not** the same token as `--surface`, which flips per theme. Conflating the two caused dark-text-on-dark primary buttons in an earlier phase; keep them separate. |
+| `--on-dark` | `#FFFFFF` (both themes, constant — corrected from the cream `#FFFEF5` alongside the surfaces above) | same | Text painted on a permanently-dark surface (primary buttons, toasts, tooltips) — deliberately **not** the same token as `--surface`, which flips per theme. Conflating the two caused dark-text-on-dark primary buttons in an earlier phase; keep them separate. |
 
 ### Accent (brand blue)
 
@@ -244,6 +253,35 @@ note; the amendment's original landing point in
 
 ## 5. Text over a gradient carries its own scrim — a second instance of §4's lesson, found in the landing hero
 
+**Headline vs. subhead is a different contrast bar, not the same one — get
+this right first, before anything else in this section.** The headline is
+large text (≥24px, or ≥18.66px bold) under WCAG, which needs **3:1**, not
+4.5:1. Only the subhead (body-sized copy) needs **4.5:1**. This distinction
+was gotten wrong once during this rollout — the scrim was tuned only to the
+subhead's 4.5:1 target, and the headline, which actually has a *lower* bar
+to clear, still failed anyway (2.68:1 at one intermediate scrim value)
+because the mesh's pale patches happened to sit worse under the headline
+specifically. Getting the threshold backwards costs a full unnecessary round
+of "strengthen the scrim until the wrong number passes" — check which
+element needs which ratio before tuning anything.
+
+**CSS-vs-canvas layer-order trap, found restoring this mesh from the
+reference (2026-08-20) — state this plainly so it isn't rediscovered:** CSS
+`background-image` with multiple comma-separated layers paints the
+**first-listed layer on top**. A `<canvas>` compositing sequence (like
+`design/futurewave-reference.html`'s own blob-drawing code) paints in
+**array order, each later call over the earlier ones** — last-drawn is
+topmost. These are opposite conventions. Porting a canvas blob list
+straight into a CSS `background-image` list, in the same order, silently
+inverts the stacking — the blob meant to sit on top ends up on the bottom.
+This is exactly what happened here: the mesh read as a flat, washed-out
+horizontal band instead of the reference's diagonal composition, because
+the CSS list was in the canvas's paint order instead of its reverse. Fix:
+when porting any canvas-drawn composition to CSS `background-image`,
+**reverse the layer list.** `components.css`'s `.landing-hero-mesh` keeps
+each blob numbered in a comment (matching the reference's own array order)
+specifically so this is checkable at a glance, not just asserted.
+
 `.landing-hero`'s mesh background (§2's `--mesh-*` tokens) was verified
 numerically — worst-case 6.04:1 for white text across the whole 22%–82%
 text zone, aspect-independent by construction — and still failed in the
@@ -306,14 +344,58 @@ forward:**
   contrast script written against a CSS (non-canvas) text-on-gradient
   layout needs this, or its numbers cannot be trusted.
 
-Scrim alpha actually shipped, after tuning down from an initial pass that
-technically passed contrast but read as a visible dark rectangle rather
-than an imperceptible floor: **25% / 14%** (down from a first cut at
-55%/34%) — worst-case still clears 4.5:1 by 1.7–2.8× margin at every
-breakpoint, with real headroom left if a future pass needs to tune further
-either direction. If you change the text content, box padding, or gradient
-stops, re-verify with the corrected technique above — don't assume the
-numbers still hold.
+**Scrim/ramp history, in order — read this before touching either value
+again:**
+
+1. Original ship: **25%/14%** scrim, worst-case cleared 4.5:1 by 1.7–2.8×.
+2. 2026-08-20, mesh restored to the reference's real diagonal composition
+   (§ layer-order fix above): the corrected mesh's pale patches reach
+   further into the text zone than the old flat-band version did. 25%/14%
+   now failed. Raised to 50%/30% — still failed (headline 2.68:1 against a
+   3:1 bar, subhead 4.44:1 against 4.5:1). Raised again to **66%/42%** —
+   passed, but read as a visible dark rectangle sitting over the mesh
+   rather than an imperceptible floor, and the headline's margin was thin
+   (worst-case 3.42:1... see below, this number is post-correction).
+3. 2026-08-21: identified the actual cause instead of continuing to
+   compensate with the scrim — **`#2277FF` (azure, the ramp's lightest
+   blue, 4.08:1 white-on-azure before any blob lightens it further) sat at
+   the ramp's 40% stop, exactly where the headline lands.** The scrim was
+   masking a ramp problem, not a scrim problem. Fixed the ramp:
+
+   ```css
+   linear-gradient(to bottom,
+     #EAF0FF 0%,   /* --mesh-ramp-1 */
+     #BBD0FF 12%,  /* --mesh-ramp-2 */
+     #2277FF 24%,  /* --mesh-glow-1 — now compressed into the top quarter */
+     #0056FF 38%,  /* --mesh-glow-2 */
+     #0A2E86 60%,  /* --mesh-ramp-4 — new stop, added for this fix */
+     #0A1F5C 80%,  /* --mesh-ramp-3 */
+     #061024 100%) /* --deep-ground */
+   ```
+
+   Same colours, same diagonal character, azure just no longer spread
+   across the band the headline actually occupies. Dropped the scrim back
+   down in 0.06 steps, re-measuring at all 5 breakpoints each time, and
+   stopped at the first value that passed: **0.34/0.20 still failed** (the
+   mesh's top-left white blob bleeds pure white into the headline zone at
+   wide viewports — 1440px specifically — independent of the ramp fix);
+   **0.40/0.26 still failed** at 1440px for the same reason; **0.46/0.32
+   passed at all 5 breakpoints, in both repos.** This is the value both
+   repos ship with now.
+
+**Final numbers, both repos, scrim 0.46/0.32:**
+
+| | Headline (needs 3:1) | Subhead (needs 4.5:1) |
+|---|---|---|
+| Product (`dataops-agent/frontend`) | worst-case 3.42:1 (range 3.42–3.98:1) | worst-case 5.31:1 (range 5.31–6.33:1) |
+| Marketing site | worst-case 4.11:1 (range 4.11–6.33:1) | worst-case 10.37:1 (range 10.37–13.13:1) |
+
+Both pass with real margin, at a visibly lighter scrim than the 0.66/0.42
+intermediate value — the mesh reads as a mesh again, not a dark rectangle
+with a gradient edge. If you change the text content, box padding, or
+gradient stops, re-verify with the corrected sampling technique above (set
+`color: transparent`, don't trust glyph-pixel sampling) — don't assume
+these numbers still hold.
 
 ## 6. What NOT to re-derive
 
@@ -377,6 +459,7 @@ left exactly as they are in the live product today.
 ## 8. Source of truth
 
 `dataops-agent/frontend/src/styles/tokens.css` is authoritative. This
-document is a compiled reference as of 2026-08-19 (Phase 6's close) — if
-`tokens.css` changes after this date and this file isn't updated to match,
-trust the file.
+document is a compiled reference, last updated 2026-08-21 (surfaces
+corrected to the cool-white values §2 describes; §5 rewritten with the
+layer-order bug and the final ramp/scrim numbers) — if `tokens.css` changes
+after this date and this file isn't updated to match, trust the file.
