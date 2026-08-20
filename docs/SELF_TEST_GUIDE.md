@@ -275,14 +275,16 @@ that says **Never**.
 Uploading a file registers it, but it does **not** automatically read its
 column structure — you have to ask it to, once, per source.
 
-1. On the **Sales Orders** row, click **Profile**.
+1. On the **Sales Orders** row, in the **Actions** column, click the
+   Profile icon — a magnifying glass, second icon from the left, tooltip
+   **"Profile"** on hover.
 2. Wait a couple of seconds.
 
 **What you should see:** a green "Source profiled" message, and the
 **Last Profiled** column now shows a real date/time instead of "Never."
 
-**If it looks wrong** (still says "Never" after clicking Profile, or an
-error toast appears): click **Profile** again — this action is safe to
+**If it looks wrong** (still says "Never" after clicking the Profile icon,
+or an error toast appears): click it again — this action is safe to
 repeat. If it keeps failing, re-check Section 1.2 (backend health) — a
 profile failure almost always means the backend lost its connection to
 the uploaded file, which usually means Docker was restarted without the
@@ -295,17 +297,27 @@ should see* **Sales Orders** *listed with 7 real columns:* `order_id`,
 ### 2.4 Also try on this screen (optional, any time after 2.3)
 
 Two more row actions exist on Data Sources that the walkthrough above
-doesn't use:
+doesn't use. As of 2026-08-19, every table's row actions in this app follow
+one rule, worth knowing once here since this is the first table this guide
+touches: **frequent, non-destructive actions are icon-only buttons directly
+in the row** (hover any of them for a tooltip naming it); **destructive or
+irreversible actions live behind a ⋮ (three-dot) overflow button** — the
+last icon in the **Actions** column — instead of standing in the row
+themselves, specifically so an accidental click can't trigger them in one
+motion.
 
-- **Sync** — re-reads the source's data (for a CSV, effectively a no-op
-  refresh since the file doesn't change; this matters more for a database
-  source). Click it on the **Sales Orders** row. **What you should see:**
-  a "Sync started." toast. No AI cost — this is a plain data operation.
-- **Delete** — removes the source. **Don't do this on Sales Orders** — the
-  rest of this guide depends on it existing. If you want to see the
-  delete flow, upload a disposable second source first (repeat 2.2 with
-  any small file, or even the same `sales_data.csv` under a different
-  name), then delete *that* one.
+- **Sync** — a refresh icon, first icon in the **Actions** column, tooltip
+  **"Sync"** on hover. Re-reads the source's data (for a CSV, effectively a
+  no-op refresh since the file doesn't change; this matters more for a
+  database source). Click it on the **Sales Orders** row. **What you
+  should see:** a "Sync started." toast. No AI cost — this is a plain data
+  operation.
+- **Delete** — behind the row's ⋮ overflow menu, not its own icon: click
+  the ⋮ button, then click **Delete** in the dropdown that opens. **Don't
+  do this on Sales Orders** — the rest of this guide depends on it
+  existing. If you want to see the delete flow, upload a disposable second
+  source first (repeat 2.2 with any small file, or even the same
+  `sales_data.csv` under a different name), then delete *that* one.
 
 ### 2.5 Your quota headroom for this specific walkthrough
 
@@ -365,12 +377,13 @@ Click **Create**.
 appears, and **Sales Ingestion Pipeline** appears in the table with status
 **draft** and "Never run" under Next/Last Run.
 
-**3.6** On that row, click **Trigger**.
+**3.6** On that row, in the **Actions** column, click the Trigger icon — a
+play triangle (▶), first icon in the row, tooltip **"Trigger"** on hover.
 
 **What you should see:** a "Run triggered" message. Within a couple of
-seconds (refresh isn't automatic here — click **Trigger** once and wait,
-or click the pipeline's name to check), the row's **Next / Last Run**
-column should show **Last: success** in a green badge.
+seconds (refresh isn't automatic here — click the Trigger icon once and
+wait, or click the pipeline's name to check), the row's **Next / Last
+Run** column should show **Last: success** in a green badge.
 
 **If it shows a red "failed" badge instead:** click the pipeline's own
 **name** (it's a clickable link) — a window titled **Runs — Sales
@@ -387,12 +400,16 @@ its run history.
 CSV) and a real duration in milliseconds. Close the window (click outside
 it or the X).
 
-*Also try on this screen (optional, any time after this step):* each row
-has **Trigger**, then either **Activate** (if the pipeline is currently
-`paused`) or **Pause** (if it's active), and **Delete**. Click **Pause** —
-the badge should flip to `paused` and a "Pipeline paused." toast appears;
-click the same button (now labeled **Activate**) to flip it back. Don't
-**Delete** this pipeline — Part B and Part C both depend on it.
+*Also try on this screen (optional, any time after this step):* each row's
+**Actions** column has, in order: the Trigger icon (▶, tooltip
+**"Trigger"**); then either a checkmark icon (tooltip **"Activate"**, if
+the pipeline is currently `paused`) or a two-bar pause icon (tooltip
+**"Pause"**, if it's active); then the ⋮ overflow menu, which opens to
+reveal **Delete**. Click the Pause icon — the badge should flip to
+`paused` and a "Pipeline paused." toast appears; click the same spot (the
+icon and tooltip have swapped to Activate) to flip it back. Don't open
+the ⋮ menu and click **Delete** on this pipeline — Part B and Part C both
+depend on it.
 
 ### Part B — A quality rule that actually catches something
 
@@ -409,7 +426,8 @@ click the same button (now labeled **Activate**) to flip it back. Don't
 
 Click **Create**.
 
-**3.11** On the new rule's row, click **Run Checks**.
+**3.11** On the new rule's row, in the **Actions** column, click the Run
+Checks icon — a checkmark, tooltip **"Run Checks"** on hover.
 
 **What you should see:** a message like "Checks ran — score ..., X
 passed / 1 failed." — the **1 failed** is real: it's catching row 1008's
@@ -507,7 +525,7 @@ again with the **+ Start a Task** button; nothing was created (check the
 **3.17** Click **View progress** on that card.
 
 **What you should see:** you're taken to a new page. At the top: the goal
-you typed as the title, a light-blue **Draft Plan** badge, and a real
+you typed as the title, a teal **Draft Plan** badge, and a real
 step-by-step plan in a table — showing exactly which tool AXIOM plans to
 call and with what arguments (this is real, not a guess — it's what will
 actually run if you approve it).
@@ -542,9 +560,9 @@ worth reporting; it's on the known-issues list (Section 14).
 **3.20** Click **Save Changes**.
 
 **What you should see:** a "Plan updated." message, the task-level badge
-row now shows an extra orange **Plan edited** badge, and — the important
+row now shows an extra amber **Plan edited** badge, and — the important
 part — the step's **Origin** column, which said gray **"AXIOM planned"**
-before, now says orange **"Human edited."**
+before, now says amber **"Human edited."**
 
 ![After editing: the step's origin badge changed to "Human edited"](self_test_assets/05-edited-step-human-badge.png)
 
@@ -578,7 +596,7 @@ outcomes — **all of these are correct, normal results**, not bugs:
 - **Completed** (green badge) — every step succeeded. The step timeline
   shows a green "succeeded" status and a real outcome summary for each
   one.
-- **Paused Failed Step** (orange badge) — a step tried something (like
+- **Paused Failed Step** (amber badge) — a step tried something (like
   looking up the pipeline by the exact name AXIOM guessed) and it didn't
   resolve after 3 real attempts. A banner at the top will name the exact
   step and the exact error — read it, it's specific, not generic.
@@ -928,6 +946,26 @@ after signup/onboarding — but works fine any time, from any account.)*
 Click **Dashboard** in the sidebar (top item, no section label above it)
 if you're not already there.
 
+![The Dashboard — KPI row, pipeline/quality trend charts, and recent activity](self_test_assets/10-dashboard-overview.png)
+
+*(This capture is real, current-state, and not staged — including its
+**Open Incidents** count, which is real too, and large, because of the
+still-open freshness-checker bug items 48/49/53 document. That number will
+be different by the time you read this, possibly much smaller once that
+bug is fixed. It's shown here because this document exists to describe the
+product's real current state, not a tidied-up one — see item 53's Phase 7
+note for why this same capture is deliberately *not* used anywhere the
+number would be read as permanent, like a landing page.)*
+
+**Known gap, pending, not an oversight:** this is a dark-theme capture; all
+9 of this guide's other screenshots (§3) are light-theme. It should be
+retaken in light for consistency once Docker is available again in this
+environment (it went down mid-session on 2026-08-19, unrelated to this
+guide, and hadn't come back by the time this section was last touched). If
+you're reading this and the image above is still dark, the retake hasn't
+happened yet — don't "fix" it by assuming the mismatch is wrong on
+purpose; it's a known, tracked gap.
+
 **6.1** Click **Refresh** (top right). **What you should see:** a default
 "Dashboard refreshed." toast, and all the cards below reload.
 
@@ -936,7 +974,7 @@ should see:** you're taken straight to the AXIOM chat screen (§3.12) — a
 shortcut, not a different chat.
 
 **6.3** If a source has gone stale or a pipeline has a real incident
-against it, a colored banner appears near the top with a button
+against it, an amber banner appears near the top with a button
 **Investigate**. On the demo tenant (§1.4B), this banner should be
 visible right now, since `demo_reset.mjs` deliberately creates one real
 open incident. Click **Investigate**. **What you should see:** you're
@@ -1005,10 +1043,12 @@ Click **Log Incident**.
 **What you should see:** a `` "Test incident — manual entry" logged. ``
 toast, and a new row in the table with status **open**.
 
-**7.4** Now resolve one. On the demo tenant, click **Resolve** on the
-real **"HR Sync Pipeline failed"** row (on your own account, resolve the
-one you just logged instead — you don't have another). A window titled
-**Resolve Incident** opens with a required **Resolution notes** field.
+**7.4** Now resolve one. On the demo tenant, on the real **"HR Sync
+Pipeline failed"** row, in the **Actions** column, click the Resolve
+icon — a checkmark, tooltip **"Resolve"** on hover (on your own account,
+resolve the one you just logged instead — you don't have another). A
+window titled **Resolve Incident** opens with a required **Resolution
+notes** field.
 Type: `Confirmed and closed during self-test walkthrough.` and click
 **Mark Resolved**.
 
@@ -1198,9 +1238,10 @@ requests with a key is planned but not yet built."* Type a name (e.g.
 **What you should see:** a modal titled **API key created**, warning text
 *"Copy this now — for your security, it won't be shown again,"* the raw
 key, a **Copy** button (toasts "Copied to clipboard." on click), and
-**Done**. Close it, and the key now appears in the list — masked, with a
-**Revoke** button. Click **Revoke** on it. **What you should see:** a
-"Key revoked." toast and a **Revoked** badge in place of the button.
+**Done**. Close it, and the key now appears in the list — masked, with a ⋮ overflow
+button at the right. Click it, then click **Revoke** in the dropdown that
+opens. **What you should see:** a "Key revoked." toast and a **Revoked**
+badge in place of the button.
 **Worth remembering while you test this:** per the notice above, this key
 was never usable to authenticate anything in the first place — you're
 testing the CRUD lifecycle, not a real credential.
@@ -1216,7 +1257,11 @@ real pending item on it — this section documents it either way.)*
 This screen is deliberately simple: a title, a table, no filters, no
 search, no "+ New" button of any kind (everything on it arrives from
 elsewhere — AXIOM's approval gate, or a CI/CD deployment gate — nothing is
-manually created here). Each row has **Approve** and **Reject**.
+manually created here). Each row's **Actions** column has a checkmark icon
+(tooltip **"Approve"**) directly in the row, and a ⋮ overflow button that
+opens to reveal **Reject** — Reject sits behind the extra click on
+purpose, same rule as every other destructive action in this app (§2.4
+covers why).
 
 One thing worth noticing if you have any real rows: a badge on each row
 reads either **Agent Action** or **CI/CD Deployment** — this screen is a
@@ -1261,7 +1306,9 @@ Contract**:
 Click **Create**. **What you should see:** `` "Sales Orders schema
 contract" created. `` toast, and a new row.
 
-**11.3** On that row, click **Validate**. **What you should see:** either
+**11.3** On that row, in the **Actions** column, click the Validate icon —
+a checkmark, tooltip **"Validate"** on hover. **What you should see:**
+either
 "Contract validated." or "Validation failed." — both are real outcomes
 depending on whether the source's actual current schema matches what the
 contract expects; either is a legitimate result to see, not a sign
