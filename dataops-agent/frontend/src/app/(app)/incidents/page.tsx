@@ -14,6 +14,17 @@ import {
 
 const SEVERITIES = ["low", "medium", "high", "critical"];
 
+// Mirrors the backend's own default (backend/api/v1/incidents.py:list_incidents,
+// `limit: int = 50`) - not fetched from anywhere, since the API exposes no
+// endpoint to ask "what's your current default." getIncidents() never
+// passes a limit, so this is what actually comes back. The API's own
+// `count` field always equals len(returned) (finding 55, backend), so it
+// can never be trusted to mean "how many exist" - this screen doesn't read
+// it at all. If the returned page is exactly this size, more rows may
+// exist that this screen has no way to fetch (no offset/cursor param
+// exists yet) - say that plainly instead of pretending 50 is everything.
+const INCIDENTS_DEFAULT_LIMIT = 50;
+
 function severityVariant(sev: string): "success" | "warning" | "danger" | "gray" {
   switch (sev) {
     case "critical": case "high": return "danger";
@@ -108,6 +119,11 @@ export default function IncidentsPage() {
           </div>
         ) : (
           <Card>
+            <p className="text-muted text-sm" style={{ padding: "14px 16px 0" }}>
+              {list.length >= INCIDENTS_DEFAULT_LIMIT
+                ? `Showing the ${list.length} most recent incidents. There may be more — this screen can't yet page past this limit or show a true total.`
+                : `Showing all ${list.length} incident${list.length === 1 ? "" : "s"}.`}
+            </p>
             <Table>
               <Thead>
                 <Tr>
