@@ -139,7 +139,22 @@ img { display: block; max-width: 100%; }
 /* ==========================================
    LANDING PAGE
    ========================================== */
-.landing-page { display: flex; flex-direction: column; min-height: 100vh; overflow-x: hidden; }
+/* overflow-x: hidden alone here silently broke .landing-nav's
+   position:sticky: per the CSS Overflow spec, whenever one axis is set to
+   anything other than visible/clip, the OTHER axis computes to auto even
+   if left at its visible default - this makes the element an unintended
+   scroll container and confuses the sticky nav's containing-block math.
+   (Explicitly writing `overflow-y: visible` does NOT escape this - the
+   spec's auto-conversion fires on the computed value being visible,
+   regardless of whether that's explicit or defaulted; verified this
+   doesn't fix it before landing on the real fix below.) `clip` is the one
+   value the spec exempts from triggering the other axis's conversion, and
+   behaves like hidden for this element's purposes (no independent
+   scroll box needed here) - overflow-x: clip keeps the real protection
+   (no horizontal scrollbar from a full-bleed hero/mesh) without dragging
+   overflow-y into auto. Fixed 2026-08-20, logged as a pre-existing bug in
+   PLACEHOLDERS.md. */
+.landing-page { display: flex; flex-direction: column; min-height: 100vh; overflow-x: clip; }
 .landing-nav {
   position: sticky; top: 0; z-index: 40;
   display: flex; align-items: center; justify-content: space-between;
@@ -169,9 +184,15 @@ img { display: block; max-width: 100%; }
    the mesh (position:absolute, inset:0) can never escape this box — never
    position:fixed, never on <body>. Every section below keeps its normal
    themed --bg, so nothing bleeds. */
+/* Full-bleed (2026-08-20): the mesh spans the whole viewport width - no
+   max-width/margin here, unlike every other .landing-* section, which are
+   deliberately constrained. .landing-hero-mesh's inset:0 fills whatever
+   box this section is, so making this one full-width is the entire fix on
+   the mesh side; the content (wordmark, text stack) gets its own 800px
+   constraint below instead, so copy stays readable at any hero width. */
 .landing-hero {
   position: relative; overflow: hidden; isolation: isolate;
-  padding: 84px 24px 56px; text-align: center; max-width: 800px; margin: 0 auto;
+  padding: 84px 24px 56px; text-align: center;
   color: #fff;
 }
 /* Ported EXACTLY from the handoff doc / product's components.css — the
@@ -235,7 +256,7 @@ img { display: block; max-width: 100%; }
    shrink-wrapped box's edges land exactly on the scrim's fade, which is
    why the first cut of this pattern (built for the product's own hero)
    measured no better than no scrim at all without it. */
-.landing-hero-content-stack { position: relative; z-index: 5; display: grid; }
+.landing-hero-content-stack { position: relative; z-index: 5; display: grid; max-width: 800px; margin: 0 auto; }
 .landing-hero-scrim {
   grid-area: 1 / 1; position: relative; z-index: 2; pointer-events: none;
   background: radial-gradient(ellipse 75% 85% at 50% 50%,

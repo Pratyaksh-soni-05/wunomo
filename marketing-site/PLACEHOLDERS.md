@@ -63,6 +63,32 @@ environment**: HTTPS certificate issuance, the actual `wunomo.in` DNS
 resolution, and Vercel Analytics actually recording a hit. These can only
 be confirmed after deploying — see `DEPLOY.md`.
 
+## Known-fixed bug: `.landing-nav`'s `position: sticky` never actually stuck
+
+**Predates the Futurewave work — found 2026-08-20 while verifying nav
+contrast against the new hero mesh, fixed the same day.** `.landing-page`
+declared only `overflow-x: hidden`; per the CSS Overflow spec, setting one
+axis to a non-`visible`/`clip` value silently computes the *other* axis to
+`auto` — turning `.landing-page` into an unintended scroll container and
+breaking `.landing-nav`'s sticky containing-block math. The nav never
+pinned on scroll; it just scrolled away like a normal element (confirmed
+live: `nav.getBoundingClientRect().top` tracked `-scrollY` exactly, at
+every scroll position tested). Explicitly writing `overflow-y: visible`
+does **not** fix this — the spec's auto-conversion fires on the *computed*
+value being `visible` regardless of whether that's explicit or defaulted,
+verified by trying it and re-measuring before finding the real fix.
+**Fix**: `overflow-x: clip` instead of `overflow-x: hidden` — `clip` is the
+one value the spec exempts from triggering the other axis's conversion, so
+it still blocks horizontal overflow (still real and load-bearing, more so
+now with a full-bleed hero) without dragging `overflow-y` into `auto`.
+Verified live: `nav.getBoundingClientRect().top` now holds at `0` across
+every scroll position tested (0/50/150/400px), `overflowY` computes to the
+real `visible`, and there's no new horizontal scrollbar at 1440px or
+375px. This bug made the hero mesh going full-bleed more visible, not
+worse — the nav was always meant to sit over the hero on scroll, and going
+full-bleed made that the common case rather than an edge case, which is
+exactly why re-checking nav contrast surfaced it.
+
 ## Shared-file sync status
 
 Three files in this app are **hand copies of a product-app source, kept
