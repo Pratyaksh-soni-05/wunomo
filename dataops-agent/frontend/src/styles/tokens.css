@@ -32,12 +32,17 @@
   --ocean-100: #E1EBF3;
   --ocean-50:  #F1F6FA;
 
-  /* Surfaces & borders (warm, from Pearl Perfect) */
-  --surface: #FFFEF5;
-  --bg: #FBF9E4; /* Pearl Perfect itself */
-  --surface-hover: #F3F0DC;
-  --border: #E6E1C8;
-  --border-strong: #D3CBA8;
+  /* Surfaces & borders — Futurewave cool-white (2026-08-20). Replaces the
+     Pearl Perfect cream (#FBF9E4/#FFFEF5/#F3F0DC/#E6E1C8/#D3CBA8) that light
+     mode was still running on despite the Futurewave rollout otherwise
+     landing — the surfaces were never actually touched, which is why the
+     live product still read as "the old palette" regardless of everything
+     else that shipped. Dark mode is untouched and already correct. */
+  --surface: #FFFFFF;
+  --bg: #F7F8FC;
+  --surface-hover: #EEF1FA;
+  --border: #E3E7FC;
+  --border-strong: #C9D2EE;
 
   /* Text / ink (cool, from Midnight) */
   --text-primary: #16233A;
@@ -52,7 +57,7 @@
      near-white (light mode) to dark navy (dark mode) for card backgrounds —
      conflating the two caused primary buttons to render dark-text-on-dark
      in dark mode. */
-  --on-dark: #FFFEF5;
+  --on-dark: #FFFFFF;
 
   /* ==========================================
      SEMANTIC STATUS — split by job (Phase 1b, 2026-08-19)
@@ -147,42 +152,39 @@
      --accent-fill (which inverts to a light grey in dark mode via Decision
      1 — wrong for this panel, which stays dark-ish in both themes). Dark
      value (flat, no gradient, "no colour") lives in the dark blocks below.
-     --mesh-glow-1/2 exist only to feed this gradient, not a general-purpose
-     token — reuses the same hexes as --focus-ring's dark value and
-     --accent-fill respectively, since those are already the two blues this
-     product uses, not a third invented one. */
+     --mesh-glow-1/2 started as auth-panel-only, but reuse the same hexes as
+     --focus-ring's dark value and --accent-fill respectively (already the
+     two blues this product uses, not third/fourth invented ones) — as of
+     the 2026-08-20 hero-mesh restore, the landing hero's own blobs and ramp
+     read these two directly as well, so treat them as the product's
+     general-purpose "azure"/"royal" blues, not auth-panel-private. */
   --mesh-glow-1: #2277FF;
   --mesh-glow-2: #0056FF;
 
-  /* Phase 8 (2026-08-19/20), landing hero mesh — theme-invariant, same
-     reasoning as --mesh-glow-1/2 above: this gradient is fixed to the
-     Futurewave direction regardless of app theme, so its colours never
-     flip. Corrected same day per item 59: the first version (percentage-
-     of-max(w,h) circles, base ramp reaching full blue at 40%) measured
-     1.00-1.38:1 behind the headline at every tested breakpoint — verified
-     against the reference file's own contrast probe, not assumed passing.
-     This version: elliptical blobs sized as independent x/y percentages of
-     the hero box (aspect-independent, no per-breakpoint variance by
-     construction) and a base ramp reaching full blue by 21% instead of
-     40%, so the transition finishes above the headline instead of running
-     through it. Verified 6.04:1 worst-case for white text in the 22%-82%
-     text zone — passes 4.5:1 body text everywhere. --mesh-royal reuses
-     --mesh-glow-2 (already #0056FF); --mesh-lavender and --mesh-white are
-     new since --accent-subtle-bg/existing whites are theme-varying and
-     this mesh must not be. See components.css's .landing-hero-mesh and
-     docs/context/WALKTHROUGH_FINDINGS_2026-08.md item 59 for the full
-     verification. */
+  /* Landing hero mesh — theme-invariant, same reasoning as --mesh-glow-1/2
+     above: this gradient is fixed to the Futurewave direction regardless of
+     app theme, so its colours never flip.
+     RESTORED 2026-08-20 to match design/futurewave-reference.html's actual
+     diagonal composition — the previous version (a symmetric, mostly-
+     vertical blob layout) had drifted from the reference into something
+     that read as a flat horizontal band rather than the reference's diagonal
+     wash. Real bug found alongside this, not just new numbers: CSS
+     background-image layers paint FIRST-listed on top, but the reference's
+     canvas code paints its blobs array IN ORDER with each later blob drawn
+     OVER the earlier ones (normal canvas compositing) — meaning the
+     previous CSS had the blob stack in the exact reverse of the reference's
+     real paint order, so the top-left white blob was dominating instead of
+     the darker blue/midnight blobs that are supposed to sit on top of it.
+     components.css's layer order is now the correct reverse of the blob
+     list below. --mesh-royal-deep (#0047D6) is retired - the corrected
+     composition doesn't use that shade; --mesh-glow-1/2 cover both the
+     ramp's blue stops and two of the blobs, so no separate azure/royal
+     blob tokens were needed. */
   --mesh-white: #FFFFFF;
   --mesh-lavender: #E3E7FC;
-  --mesh-royal-deep: #0047D6;
-  --mesh-ramp-1: #F6F9FF;
-  --mesh-ramp-2: #D8E5FF;
-  --mesh-ramp-3: #7FAEFF;
-  --mesh-ramp-4: #1160FF;
-  --mesh-ramp-5: #0050EE;
-  --mesh-ramp-6: #0B45B4;
-  --mesh-ramp-7: #0C2E7A;
-  --mesh-ramp-8: #0A1F5C;
+  --mesh-ramp-1: #EAF0FF;
+  --mesh-ramp-2: #BBD0FF;
+  --mesh-ramp-3: #0A1F5C;
 
   --auth-brand-bg:
     radial-gradient(ellipse 900px 700px at 10% 0%, color-mix(in srgb, var(--mesh-glow-1) 45%, transparent), transparent 70%),
