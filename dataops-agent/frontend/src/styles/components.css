@@ -995,20 +995,18 @@ tr.selected td:first-child {
 .landing-hero-content-stack { display: grid; }
 .landing-hero-scrim {
   grid-area: 1 / 1; position: relative; z-index: 2; pointer-events: none;
-  /* 2026-08-20: raised 0.25/0.14 -> 0.50/0.30 -> 0.66/0.42 to compensate for
-     failing contrast, but that was masking the real bug: #2277FF sat at 40%
-     in the ramp, exactly where the headline lands, and azure is the ramp's
-     lightest blue (white-on-azure = 4.08:1 before any blob lightens it
-     further). 2026-08-21: fixed the ramp instead (compressed azure into its
-     top quarter, see linear-gradient above) and dropped the scrim back down.
-     0.34/0.20 (matching the ramp fix 1:1) still failed - the mesh's top-left
-     white blob bleeds pure white into the headline zone at wide viewports
-     (1440px), independent of the ramp. Stepped up in 0.06 increments and
-     landed on 0.46/0.32, the first value that passes at all 5 breakpoints -
-     see the contrast table in FUTUREWAVE_TOKENS_HANDOFF.md. */
+  /* History: 0.25/0.14 -> 0.50/0.30 -> 0.66/0.42 (2026-08-20) -> 0.46/0.32
+     (2026-08-21, ramp fix) — each raise was compensating for contrast by
+     laying more of the mesh under a dark rectangle, which by 0.46/0.32 was
+     visibly a box sitting over the artwork, not an imperceptible floor.
+     2026-08-21, second pass: moved the remaining contrast burden onto the
+     text itself (see text-shadow on .landing-hero h1/.landing-hero-sub)
+     and dropped this back to a genuinely soft, near-invisible 0.20/0.10 —
+     the mesh now reads as a mesh again. See FUTUREWAVE_TOKENS_HANDOFF.md §5
+     for the measured contrast this combination produces. */
   background: radial-gradient(ellipse 75% 85% at 50% 50%,
-    color-mix(in srgb, var(--deep-ground) 46%, transparent) 0%,
-    color-mix(in srgb, var(--deep-ground) 32%, transparent) 55%,
+    color-mix(in srgb, var(--deep-ground) 20%, transparent) 0%,
+    color-mix(in srgb, var(--deep-ground) 10%, transparent) 55%,
     transparent 100%);
 }
 .landing-hero-content-visible {
@@ -1032,20 +1030,42 @@ tr.selected td:first-child {
   margin-bottom: clamp(22px, 4vh, 40px);
 }
 .landing-hero-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: #16a34a; }
+/* 2026-08-21: switched from --font-display (Fraunces) to --font-hero
+   (Instrument Serif, additive-only token set via next/font/google in
+   page.tsx) — matches the reference exactly. Instrument Serif ships weight
+   400 only, no bold/variable axis, so this drops the Fraunces-specific
+   font-variation-settings entirely rather than leaving dead properties a
+   non-variable face ignores. --font-display is untouched everywhere else. */
 .landing-hero h1 {
   margin: 0 0 clamp(18px, 2.6vh, 26px);
-  font-family: var(--font-display);
+  font-family: var(--font-hero), Georgia, serif;
   font-size: clamp(42px, 6.4vw, 92px);
-  line-height: 1.03; letter-spacing: -0.028em; font-weight: 500;
-  font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1;
+  line-height: 1.03; letter-spacing: -0.022em; font-weight: 400;
   max-width: 15ch; color: #fff;
+  /* Replaces the old content-scrim as the primary contrast mechanism
+     (2026-08-21) — a soft shadow behind the glyphs raises effective
+     legibility without laying a visible box over the mesh artwork. See
+     .landing-hero-scrim below for the (now much lighter) remaining scrim
+     and FUTUREWAVE_TOKENS_HANDOFF.md §5 for the measured numbers. Deepened
+     from the initial rgba(...,0.55)/rgba(...,0.40) pass, which measured
+     2.85:1/3.98:1 worst-case (headline/subhead) at 375px — short of both
+     3:1 and 4.5:1 — using a glyph-level probe (contrast sampled only at
+     actual anti-aliased glyph coverage, not the text's whole bounding box,
+     since a shadow-based halo doesn't reach the empty space between
+     letters the way a rectangular scrim did). */
+  text-shadow: 0 1px 4px rgba(6, 16, 36, 0.85), 0 2px 26px rgba(6, 16, 36, 0.65);
 }
-.landing-hero h1 em { font-style: italic; font-variation-settings: 'opsz' 144, 'SOFT' 0, 'WONK' 1; }
+.landing-hero h1 em { font-style: italic; }
 .landing-hero-sub {
   margin: 0 0 clamp(26px, 4vh, 42px);
   font-size: clamp(16px, 1.28vw, 19px);
   line-height: 1.62; font-weight: 400; max-width: 56ch;
   color: rgba(255, 255, 255, 0.94);
+  /* Deeper than the headline's shadow — smaller glyphs at this weight give
+     the shadow less ink to cling to per letter, so the same alpha/blur pair
+     that clears 3:1 for the headline needed two more passes to clear
+     subhead's higher 4.5:1 bar (last short reading: 4.34:1 at 375px). */
+  text-shadow: 0 1px 4px rgba(6, 16, 36, 1), 0 2px 30px rgba(6, 16, 36, 1), 0 0 12px rgba(6, 16, 36, 0.9);
 }
 .landing-hero-sub b { font-weight: 600; }
 
@@ -1121,9 +1141,11 @@ tr.selected td:first-child {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
 }
 .landing-footer-mark { height: 30px; width: auto; color: rgba(255, 255, 255, 0.9); margin-bottom: 14px; }
-.landing-footer-links { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; }
-.landing-footer-links a { color: rgba(255, 255, 255, 0.7); font-size: 13px; }
-.landing-footer-links a:hover { color: #fff; }
+/* 2026-08-21 (matches the reference exactly): footer is three things only —
+   wordmark, one line of copy, legal line. The old .landing-footer-links row
+   duplicated the nav's Features/About/Contact/Log in/Try Wunomo links right
+   below the final CTA, which is dead weight in a footer this small — a
+   visitor who scrolled this far already saw those links once. Removed. */
 .landing-footer-line { margin: 0; font-size: 14.5px; color: rgba(255, 255, 255, 0.9); font-weight: 450; }
 .landing-footer-copyright { color: rgba(255, 255, 255, 0.46); font-size: 12.5px; }
 

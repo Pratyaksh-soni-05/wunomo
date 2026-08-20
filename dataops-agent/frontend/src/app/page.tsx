@@ -2,12 +2,26 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Instrument_Serif } from "next/font/google";
 import { EmployeeCard } from "@/components/shared/EmployeeCard";
 import { ScreenshotCarousel } from "@/components/shared/ScreenshotCarousel";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { WunomoWordmark } from "@/components/brand";
 import { EMPLOYEES } from "@/lib/employees";
 import { getToken } from "@/lib/api";
+
+// Additive only — a new --font-hero token for the hero headline alone.
+// --font-display (Fraunces) is untouched and stays the face for every other
+// product heading. Instrument Serif ships with no bold/weight axis and no
+// italic-face fallback below ~28px, so this is requested at weight 400 only
+// and applied nowhere but a headline already set well above that floor.
+const instrumentSerif = Instrument_Serif({
+  subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
+  variable: "--font-hero",
+  display: "swap",
+});
 
 const FEATURES = [
   {
@@ -78,7 +92,7 @@ export default function LandingPage() {
   return (
     <>
     <script dangerouslySetInnerHTML={{ __html: LANDING_THEME_PREPAINT_SCRIPT }} />
-    <div className="landing-page">
+    <div className={`landing-page ${instrumentSerif.variable}`}>
       <section className="landing-hero">
         <div className="landing-hero-mesh" aria-hidden="true" />
         <div className="landing-hero-grain" aria-hidden="true" />
@@ -226,13 +240,6 @@ export default function LandingPage() {
 
       <footer className="landing-footer">
         <WunomoWordmark className="landing-footer-mark" title="Wunomo" />
-        <div className="landing-footer-links">
-          <a href="#features">Features</a>
-          <a href="#about">About</a>
-          <a href="#contact">Contact</a>
-          <Link href="/login">Log in</Link>
-          <Link href="/signup">Try Wunomo</Link>
-        </div>
         <p className="landing-footer-line">Wunomo is a product of Alpha Parallel.</p>
         <span className="landing-footer-copyright">© 2026 Alpha Parallel. All rights reserved.</span>
       </footer>

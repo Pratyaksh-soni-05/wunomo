@@ -3,6 +3,7 @@ import "@/styles/fonts.css";
 import "@/styles/tokens.css";
 import "@/styles/components.css";
 import { ToastProvider } from "@/components/ui";
+import { WunomoWordmarkSymbolDef } from "@/components/brand";
 
 export const metadata: Metadata = {
   title: "Wunomo AI",
@@ -29,6 +30,7 @@ export default function RootLayout({
         />
       </head>
       <body>
+        <WunomoWordmarkSymbolDef />
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
