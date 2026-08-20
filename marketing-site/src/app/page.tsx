@@ -1,11 +1,23 @@
 import Link from "next/link";
-import { WunomoMark, WunomoWordmark } from "@/components/brand";
+import { Instrument_Serif } from "next/font/google";
+import { WunomoWordmark } from "@/components/brand";
 import { EmployeeCard } from "@/components/EmployeeCard";
 import { ScreenshotCarousel } from "@/components/ScreenshotCarousel";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { InterestForm } from "@/components/InterestForm";
 import { EMPLOYEES } from "@/lib/employees";
 import { CAL_LINK, CONTACTS } from "@/lib/config";
+
+// Additive only — a new --font-hero token for the hero headline alone, same
+// as the product repo. --font-display (Fraunces) is untouched everywhere
+// else. Instrument Serif ships no bold/weight axis, so weight 400 only.
+const instrumentSerif = Instrument_Serif({
+  subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
+  variable: "--font-hero",
+  display: "swap",
+});
 
 const FEATURES = [
   {
@@ -39,45 +51,53 @@ const SCREENSHOTS = [
 
 export default function LandingPage() {
   return (
-    <div className="landing-page">
-      <nav className="landing-nav">
-        <Link href="/" className="landing-brand">
-          <WunomoMark className="landing-brand-mark" />
-          <span className="landing-brand-text">Wunomo</span>
-        </Link>
-        <div className="landing-nav-anchors">
-          <a href="#features">Features</a>
-          <a href="#about">About</a>
-          <a href="#contact">Contact</a>
-        </div>
-        <div className="landing-nav-actions">
-          <ThemeToggle />
-          <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm">
-            Book a demo
-          </a>
-        </div>
-      </nav>
-
+    <div className={`landing-page ${instrumentSerif.variable}`}>
       <section className="landing-hero">
         <div className="landing-hero-mesh" aria-hidden="true" />
         <div className="landing-hero-grain" aria-hidden="true" />
-        <WunomoWordmark className="landing-hero-wordmark landing-animate-in" />
-        <div className="landing-hero-content-stack">
-          <div className="landing-hero-scrim" aria-hidden="true" />
-          <div className="landing-hero-content-visible">
-            <div className="landing-hero-pill landing-animate-in">
-              <span className="landing-hero-pill-dot" />
-              Currently onboarding design partners
-            </div>
-            <h1 className="font-display landing-animate-in delay-1">The AI workforce for modern companies.</h1>
-            <p className="landing-animate-in delay-1">
-              We&apos;re building autonomous AI employees that handle real operational work — starting with
-              AXIOM, an AI DataOps engineer.
-            </p>
-            <div className="flex items-center justify-center gap-3 landing-animate-in delay-2">
-              <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
-                Book a demo
-              </a>
+
+        <div className="landing-band landing-band-a" aria-hidden="true">
+          <WunomoWordmark /><WunomoWordmark /><WunomoWordmark />
+        </div>
+        <div className="landing-band landing-band-b" aria-hidden="true">
+          <WunomoWordmark /><WunomoWordmark /><WunomoWordmark />
+        </div>
+
+        <nav className="landing-nav">
+          <Link href="/" className="landing-brand">
+            <WunomoWordmark className="landing-brand-mark" />
+          </Link>
+          <div className="landing-nav-anchors">
+            <a href="#features">Features</a>
+            <a href="#about">About</a>
+            <a href="#contact">Contact</a>
+          </div>
+          <div className="landing-nav-actions">
+            <ThemeToggle />
+            <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm">
+              Book a demo
+            </a>
+          </div>
+        </nav>
+
+        <div className="landing-hero-content">
+          <div className="landing-hero-content-stack">
+            <div className="landing-hero-scrim" aria-hidden="true" />
+            <div className="landing-hero-content-visible">
+              <div className="landing-hero-pill landing-animate-in">
+                <span className="landing-hero-pill-dot" />
+                Currently onboarding design partners
+              </div>
+              <h1 className="landing-animate-in delay-1">The AI workforce for <em>modern</em> companies.</h1>
+              <p className="landing-animate-in delay-1">
+                We&apos;re building autonomous <b>AI employees</b> that handle real operational work — starting with
+                AXIOM, an AI DataOps engineer.
+              </p>
+              <div className="flex items-center justify-center gap-3 landing-animate-in delay-2">
+                <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
+                  Book a demo
+                </a>
+              </div>
             </div>
           </div>
         </div>
@@ -178,19 +198,9 @@ export default function LandingPage() {
       </section>
 
       <footer className="landing-footer">
-        <div className="landing-footer-brand">
-          <WunomoMark className="landing-brand-mark" />
-          <span className="landing-brand-text">Wunomo</span>
-        </div>
-        <div className="landing-footer-links">
-          <a href="#features">Features</a>
-          <a href="#about">About</a>
-          <a href="#contact">Contact</a>
-          <a href={CAL_LINK} target="_blank" rel="noopener noreferrer">Book a demo</a>
-        </div>
-        <span className="landing-footer-copyright">
-          © 2026 Wunomo. Wunomo is a product of Alpha Parallel.
-        </span>
+        <WunomoWordmark className="landing-footer-mark" />
+        <p className="landing-footer-line">Wunomo is a product of Alpha Parallel.</p>
+        <span className="landing-footer-copyright">© 2026 Alpha Parallel. All rights reserved.</span>
       </footer>
     </div>
   );

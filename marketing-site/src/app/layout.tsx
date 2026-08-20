@@ -3,6 +3,7 @@ import { Analytics } from "@vercel/analytics/next";
 import "@/styles/fonts.css";
 import "@/styles/tokens.css";
 import "@/styles/components.css";
+import { WunomoWordmarkSymbolDef } from "@/components/brand";
 
 export const metadata: Metadata = {
   title: "Wunomo — AI employees for modern companies",
@@ -31,6 +32,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_PREPAINT_SCRIPT }} />
       </head>
       <body>
+        <WunomoWordmarkSymbolDef />
         {children}
         <Analytics />
       </body>
