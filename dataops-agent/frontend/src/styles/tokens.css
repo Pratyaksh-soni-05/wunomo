@@ -153,6 +153,37 @@
      product uses, not a third invented one. */
   --mesh-glow-1: #2277FF;
   --mesh-glow-2: #0056FF;
+
+  /* Phase 8 (2026-08-19/20), landing hero mesh — theme-invariant, same
+     reasoning as --mesh-glow-1/2 above: this gradient is fixed to the
+     Futurewave direction regardless of app theme, so its colours never
+     flip. Corrected same day per item 59: the first version (percentage-
+     of-max(w,h) circles, base ramp reaching full blue at 40%) measured
+     1.00-1.38:1 behind the headline at every tested breakpoint — verified
+     against the reference file's own contrast probe, not assumed passing.
+     This version: elliptical blobs sized as independent x/y percentages of
+     the hero box (aspect-independent, no per-breakpoint variance by
+     construction) and a base ramp reaching full blue by 21% instead of
+     40%, so the transition finishes above the headline instead of running
+     through it. Verified 6.04:1 worst-case for white text in the 22%-82%
+     text zone — passes 4.5:1 body text everywhere. --mesh-royal reuses
+     --mesh-glow-2 (already #0056FF); --mesh-lavender and --mesh-white are
+     new since --accent-subtle-bg/existing whites are theme-varying and
+     this mesh must not be. See components.css's .landing-hero-mesh and
+     docs/context/WALKTHROUGH_FINDINGS_2026-08.md item 59 for the full
+     verification. */
+  --mesh-white: #FFFFFF;
+  --mesh-lavender: #E3E7FC;
+  --mesh-royal-deep: #0047D6;
+  --mesh-ramp-1: #F6F9FF;
+  --mesh-ramp-2: #D8E5FF;
+  --mesh-ramp-3: #7FAEFF;
+  --mesh-ramp-4: #1160FF;
+  --mesh-ramp-5: #0050EE;
+  --mesh-ramp-6: #0B45B4;
+  --mesh-ramp-7: #0C2E7A;
+  --mesh-ramp-8: #0A1F5C;
+
   --auth-brand-bg:
     radial-gradient(ellipse 900px 700px at 10% 0%, color-mix(in srgb, var(--mesh-glow-1) 45%, transparent), transparent 70%),
     radial-gradient(ellipse 800px 600px at 100% -10%, color-mix(in srgb, var(--mesh-glow-2) 35%, transparent), transparent 65%),

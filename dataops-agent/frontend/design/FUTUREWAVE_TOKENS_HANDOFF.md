@@ -242,7 +242,80 @@ WALKTHROUGH_FINDINGS_2026-08.md` item 54 and its Tasks-banner precedent
 note; the amendment's original landing point in
 `design/CLAUDE_CODE_BRIEF_full_frontend.md` §4.
 
-## 5. What NOT to re-derive
+## 5. Text over a gradient carries its own scrim — a second instance of §4's lesson, found in the landing hero
+
+`.landing-hero`'s mesh background (§2's `--mesh-*` tokens) was verified
+numerically — worst-case 6.04:1 for white text across the whole 22%–82%
+text zone, aspect-independent by construction — and still failed in the
+built page, at every breakpoint, because **the content sitting on top of
+that gradient doesn't obey the same percentage math the gradient does.**
+Nav height and badge height are fixed-pixel; the hero's total height (and
+so every percentage-based gradient stop) changes with viewport. The two
+drift against each other. Measured: the headline's own top edge landed
+anywhere from 19.8% to 22.4% of hero height depending on breakpoint — never
+reliably inside the "safe" 22%+ zone the gradient math assumed, so its
+worst-sampled point kept catching the tail of a blob the mesh's own numbers
+said shouldn't reach that far.
+
+**This is the same lesson as §4's near-black-ceiling rule, in a different
+shape: don't depend on a background you don't control at the exact point
+text actually sits.** §4's fix was a shape (an edge bar) that reads
+regardless of the surface under it. This fix is the direct analogue for
+body copy sitting over a large decorative gradient: **give the text its
+own background layer that travels with it**, sized to the text's real box
+via CSS Grid stacking (two elements sharing one `grid-area`, so the scrim
+auto-sizes to whatever the text naturally occupies — no JS measurement,
+no guessed percentage), rather than trusting a percentage-of-container
+zone to still be dark wherever the content stack happens to land that day.
+
+```css
+.text-wrap { display: grid; } /* shrink-wraps to its content */
+.text-wrap .scrim { grid-area: 1 / 1; /* sits behind, sized to the text's own box */ }
+.text-wrap .visible-text { grid-area: 1 / 1; /* the real content, stacked on top */ }
+```
+
+**Two things this cost real debugging time to learn, worth carrying
+forward:**
+- **General rule, not a Phase-8 anecdote: a shrink-wrapped container puts
+  its widest line exactly where any edge-fade is weakest.** Any element
+  sized to fit its content — a scrim, a card, a highlight box, a badge —
+  shrinks until its box edge touches its longest line/widest glyph run.
+  If that same box also carries a fade-to-transparent edge (a radial-
+  gradient scrim, a soft drop shadow used as a floor, a vignette), the
+  fade's weakest point and the text's own edge land in the same place by
+  construction — not by bad luck, and not specific to this hero. **This
+  applies to every text-over-gradient layout in this codebase and beyond,
+  not just `.landing-hero-scrim`.** The fix is always the same: give the
+  shrink-wrapped box real padding beyond its tightest content bounds (this
+  build uses `clamp(32px,6vh,64px) clamp(60px,9vw,140px)` on
+  `.landing-hero-content-visible`) so the fade happens *outside* where the
+  glyphs are, not at them. **The marketing site will hit this on its own
+  first gradient-backed hero or section** — check for it there before
+  shipping, don't wait to rediscover it the same way this build did.
+- **A contrast-sampling script that screenshots a text element and reads
+  its own pixels will sample the text's own glyph colour, not the
+  background behind it, wherever a rendered pixel happens to be inside a
+  character's ink.** This produced a false "1.00:1, pure white" reading at
+  every breakpoint that had nothing to do with the actual background — the
+  sampled "lightest point" was a white pixel *of the letter itself*. The
+  reference file's own probe avoids this by sampling its underlying canvas
+  directly, never the text DOM node's rendered output; this codebase's CSS
+  mesh has no such canvas, so the correct technique is to temporarily set
+  the text (and its descendants — `<em>`/`<b>` carry their own computed
+  colour) to `color: transparent` before sampling, then restore it. Any
+  contrast script written against a CSS (non-canvas) text-on-gradient
+  layout needs this, or its numbers cannot be trusted.
+
+Scrim alpha actually shipped, after tuning down from an initial pass that
+technically passed contrast but read as a visible dark rectangle rather
+than an imperceptible floor: **25% / 14%** (down from a first cut at
+55%/34%) — worst-case still clears 4.5:1 by 1.7–2.8× margin at every
+breakpoint, with real headroom left if a future pass needs to tune further
+either direction. If you change the text content, box padding, or gradient
+stops, re-verify with the corrected technique above — don't assume the
+numbers still hold.
+
+## 6. What NOT to re-derive
 
 These are already measured and verified — cite them, don't re-check them
 from scratch:
@@ -263,7 +336,45 @@ from scratch:
   not a translucent same-hue tint — the translucent version measured
   ~1.1–1.2:1 and was the original defect this fixed.
 
-## 6. Source of truth
+## 7. Known-unverified, deliberately deferred — not oversights
+
+Two open questions were checked against real product usage before Phase 7's
+screenshot pass, found to still be unanswerable with real data, and
+deliberately left unresolved rather than forced. Record here so a future
+session (or the person deciding whether to finally answer them) knows these
+were checked and deferred on purpose, not missed:
+
+- **Chat bubble inversion (dark mode).** Whether dark mode's light-grey
+  user bubble reads as visually heavy across a long, naturally-accumulated
+  thread was never answered, because no long thread exists to check it
+  against. Checked live 2026-08-19, roughly a week after this rollout's
+  chat work landed: the demo tenant has exactly 3 chat sessions, each with
+  exactly 2 messages (one exchange). Three sessions of two messages after a
+  week means the tenant isn't being used conversationally — that's the
+  answer to "should we manufacture a longer thread to check this," not just
+  a blocker. **Decision: stays unresolved for this rollout, permanently, not
+  just deferred to a later phase.** Don't hold anything on it, and don't
+  seed a fake long thread to force an answer — a manufactured thread
+  wouldn't tell you anything real about how the product is actually used.
+  If real usage ever produces a long thread, that's the moment to look, not
+  before.
+- **Quality Score sparkline suppression.** `KpiCard` only renders a
+  sparkline when it has 2+ data points (`sparklineData.length > 1`) — the
+  Quality Score card's data comes from `GET /analytics/quality`, grouped by
+  distinct calendar day of completed `pipeline_runs` in the trailing window.
+  Checked live 2026-08-19: the demo tenant has completed runs on exactly
+  **one** calendar day, all-time (2026-08-16, 6 runs) — not just within the
+  7-day window, ever. This isn't a rendering question to debug; the
+  suppress-under-2-points behaviour is correct given the data, and there's
+  nothing to visually verify until a second day of real runs exists.
+  **Decision: leave the suppression unverified, same reasoning as bubble
+  inversion** — don't fabricate a second day of runs to force the sparkline
+  to render.
+
+Neither of these blocked Phase 7 — the screenshot pass proceeded with both
+left exactly as they are in the live product today.
+
+## 8. Source of truth
 
 `dataops-agent/frontend/src/styles/tokens.css` is authoritative. This
 document is a compiled reference as of 2026-08-19 (Phase 6's close) — if

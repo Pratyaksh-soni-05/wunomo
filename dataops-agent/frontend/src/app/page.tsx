@@ -5,6 +5,7 @@ import Link from "next/link";
 import { EmployeeCard } from "@/components/shared/EmployeeCard";
 import { ScreenshotCarousel } from "@/components/shared/ScreenshotCarousel";
 import { ThemeToggle } from "@/components/shell/ThemeToggle";
+import { WunomoWordmark } from "@/components/brand";
 import { EMPLOYEES } from "@/lib/employees";
 import { getToken } from "@/lib/api";
 
@@ -31,11 +32,17 @@ const FEATURES = [
   },
 ];
 
+// Phase 8 (2026-08-19): exactly these two, both dark-theme, both real and
+// unedited from the demo tenant. Every other screen was considered and
+// held — Incidents lies about its own count until item 55 is fixed,
+// Dashboard's real Open Incidents KPI is accurate but an artifact of the
+// still-growing item 53 bug, and Sources/Pipelines/Quality are honest but
+// thin (a two-source demo tenant). Two clean screenshots beat five that
+// need caveats — see WALKTHROUGH_FINDINGS_2026-08.md items 53/55 and the
+// Phase 7 handoff note.
 const SCREENSHOTS = [
-  { src: "/landing/shot-dashboard.png", title: "Dashboard", desc: "Real pipeline health, quality score, and AXIOM activity — no fabricated numbers." },
-  { src: "/landing/shot-chat.png", title: "AXIOM chat", desc: "A real conversation, with a visible trace of every tool call AXIOM made." },
-  { src: "/landing/shot-pipelines.png", title: "Pipelines", desc: "Create, schedule, and trigger real pipelines with real run history." },
-  { src: "/landing/shot-governance.png", title: "Data lineage", desc: "Source-to-pipeline lineage, auto-populated as you connect data." },
+  { src: "/landing/shot-axiom-chat.png", title: "AXIOM chat", desc: "A real conversation, with a visible trace of every tool call AXIOM made." },
+  { src: "/landing/shot-tasks.png", title: "Tasks", desc: "Real multi-step plans AXIOM generates, reviews, and executes with human approval on the risky steps." },
 ];
 
 // The landing page is the signed-off, light-tuned "public mode" and must
@@ -72,46 +79,62 @@ export default function LandingPage() {
     <>
     <script dangerouslySetInnerHTML={{ __html: LANDING_THEME_PREPAINT_SCRIPT }} />
     <div className="landing-page">
-      <nav className="landing-nav">
-        <Link href="/" className="landing-brand">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/wunomo-mark.jpeg" alt="Wunomo" className="landing-brand-mark" />
-          <span className="landing-brand-text">Wunomo AI</span>
-        </Link>
-        <div className="landing-nav-anchors">
-          <a href="#features">Features</a>
-          <a href="#about">About</a>
-          <a href="#contact">Contact</a>
-        </div>
-        <div className="landing-nav-actions">
-          <ThemeToggle />
-          {authed ? (
-            <Link href="/dashboard" className="btn btn-primary btn-sm">Go to Dashboard</Link>
-          ) : (
-            <>
-              <Link href="/login" className="btn btn-secondary btn-sm">Log in</Link>
-              <Link href="/signup" className="btn btn-primary btn-sm">Try Wunomo</Link>
-            </>
-          )}
-        </div>
-      </nav>
-
       <section className="landing-hero">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/wunomo-wordmark.png" alt="wunomo" className="landing-hero-wordmark landing-animate-in" />
-        <h1 className="font-display landing-animate-in delay-1">The AI workforce for modern companies.</h1>
-        <p className="landing-animate-in delay-1">
-          Hire autonomous AI employees that handle real operational work — no headcount required.
-          AXIOM, the first, is live now.
-        </p>
-        <div className="flex items-center justify-center gap-3 landing-animate-in delay-2">
-          <Link href="/signup" className="btn btn-primary">Try Wunomo</Link>
-          <Link href="/login" className="btn btn-secondary">Log in</Link>
-        </div>
-      </section>
+        <div className="landing-hero-mesh" aria-hidden="true" />
+        <div className="landing-hero-grain" aria-hidden="true" />
 
-      <section className="landing-section" aria-label="Product screenshots">
-        <ScreenshotCarousel slides={SCREENSHOTS} />
+        <div className="landing-band landing-band-a" aria-hidden="true">
+          <WunomoWordmark /><WunomoWordmark /><WunomoWordmark />
+        </div>
+        <div className="landing-band landing-band-b" aria-hidden="true">
+          <WunomoWordmark /><WunomoWordmark /><WunomoWordmark />
+        </div>
+
+        <nav className="landing-nav">
+          <Link href="/" className="landing-brand">
+            <WunomoWordmark className="landing-brand-mark" title="Wunomo" />
+          </Link>
+          <div className="landing-nav-anchors">
+            <a href="#features">Features</a>
+            <a href="#about">About</a>
+            <a href="#contact">Contact</a>
+          </div>
+          <div className="landing-nav-actions">
+            <ThemeToggle />
+            {authed ? (
+              <Link href="/dashboard" className="btn btn-primary btn-sm">Go to Dashboard</Link>
+            ) : (
+              <>
+                <Link href="/login" className="btn btn-secondary btn-sm">Log in</Link>
+                <Link href="/signup" className="btn btn-primary btn-sm">Try Wunomo</Link>
+              </>
+            )}
+          </div>
+        </nav>
+
+        <div className="landing-hero-content">
+          <div className="landing-hero-content-stack">
+            <div className="landing-hero-scrim" aria-hidden="true" />
+            <div className="landing-hero-content-visible">
+              <span className="landing-hero-badge landing-animate-in">
+                <span className="dot" />Currently onboarding design partners
+              </span>
+              <h1 className="landing-animate-in delay-1">The AI workforce for <em>modern</em> companies.</h1>
+              <p className="landing-hero-sub landing-animate-in delay-1">
+                We&apos;re building autonomous <b>AI employees</b> that handle real operational work —
+                starting with AXIOM, an AI DataOps engineer.
+              </p>
+              <div className="landing-animate-in delay-2">
+                <Link href="/signup" className="btn btn-primary btn-lg">Try Wunomo</Link>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="landing-hero-frame">
+          <div className="landing-hero-frame-bar"><i /><i /><i /></div>
+          <ScreenshotCarousel slides={SCREENSHOTS} />
+        </div>
       </section>
 
       <section className="landing-section" id="features">
@@ -202,11 +225,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="landing-footer">
-        <div className="landing-footer-brand">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/wunomo-mark.jpeg" alt="Wunomo" className="landing-brand-mark" />
-          <span className="landing-brand-text">Wunomo AI</span>
-        </div>
+        <WunomoWordmark className="landing-footer-mark" title="Wunomo" />
         <div className="landing-footer-links">
           <a href="#features">Features</a>
           <a href="#about">About</a>
@@ -214,7 +233,8 @@ export default function LandingPage() {
           <Link href="/login">Log in</Link>
           <Link href="/signup">Try Wunomo</Link>
         </div>
-        <span className="landing-footer-copyright">© 2026 Wunomo AI.</span>
+        <p className="landing-footer-line">Wunomo is a product of Alpha Parallel.</p>
+        <span className="landing-footer-copyright">© 2026 Alpha Parallel. All rights reserved.</span>
       </footer>
     </div>
     </>
