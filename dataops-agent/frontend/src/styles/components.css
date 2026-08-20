@@ -939,8 +939,9 @@ tr.selected td:first-child {
       color-mix(in srgb, var(--mesh-white) 39.9%, transparent) 55%,
       transparent 100%),
     linear-gradient(to bottom,
-      var(--mesh-ramp-1) 0%, var(--mesh-ramp-2) 16%, var(--mesh-glow-1) 40%,
-      var(--mesh-glow-2) 62%, var(--mesh-ramp-3) 85%, var(--deep-ground) 100%);
+      var(--mesh-ramp-1) 0%, var(--mesh-ramp-2) 12%, var(--mesh-glow-1) 24%,
+      var(--mesh-glow-2) 38%, var(--mesh-ramp-4) 60%, var(--mesh-ramp-3) 80%,
+      var(--deep-ground) 100%);
 }
 .landing-hero-grain {
   position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0.16; mix-blend-mode: overlay;
@@ -994,17 +995,20 @@ tr.selected td:first-child {
 .landing-hero-content-stack { display: grid; }
 .landing-hero-scrim {
   grid-area: 1 / 1; position: relative; z-index: 2; pointer-events: none;
-  /* Raised 0.25/0.14 -> 0.50/0.30 (2026-08-20) alongside the mesh restore,
-     then to 0.66/0.42 after measuring: at 0.50/0.30 the headline still
-     failed 3:1 (2.68:1 worst-case) and the subhead was borderline on 4.5:1
-     (4.44:1) - both against real pale patches from the corrected diagonal
-     composition reaching further into the text zone than the old flat-band
-     version did. Strengthened the scrim itself rather than "moving text
-     into the darker band" or touching the mesh - re-measured after, see
-     the contrast table in this session's report. */
+  /* 2026-08-20: raised 0.25/0.14 -> 0.50/0.30 -> 0.66/0.42 to compensate for
+     failing contrast, but that was masking the real bug: #2277FF sat at 40%
+     in the ramp, exactly where the headline lands, and azure is the ramp's
+     lightest blue (white-on-azure = 4.08:1 before any blob lightens it
+     further). 2026-08-21: fixed the ramp instead (compressed azure into its
+     top quarter, see linear-gradient above) and dropped the scrim back down.
+     0.34/0.20 (matching the ramp fix 1:1) still failed - the mesh's top-left
+     white blob bleeds pure white into the headline zone at wide viewports
+     (1440px), independent of the ramp. Stepped up in 0.06 increments and
+     landed on 0.46/0.32, the first value that passes at all 5 breakpoints -
+     see the contrast table in FUTUREWAVE_TOKENS_HANDOFF.md. */
   background: radial-gradient(ellipse 75% 85% at 50% 50%,
-    color-mix(in srgb, var(--deep-ground) 66%, transparent) 0%,
-    color-mix(in srgb, var(--deep-ground) 42%, transparent) 55%,
+    color-mix(in srgb, var(--deep-ground) 46%, transparent) 0%,
+    color-mix(in srgb, var(--deep-ground) 32%, transparent) 55%,
     transparent 100%);
 }
 .landing-hero-content-visible {

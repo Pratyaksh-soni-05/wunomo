@@ -185,6 +185,12 @@
   --mesh-ramp-1: #EAF0FF;
   --mesh-ramp-2: #BBD0FF;
   --mesh-ramp-3: #0A1F5C;
+  /* Added 2026-08-21: compresses --mesh-glow-1 (azure, the ramp's lightest
+     blue at 4.08:1 white-on-azure) into the top quarter of the ramp instead
+     of leaving it spread across the 24%-62% band where the headline lands.
+     Same colour set as the reference, just re-stopped — see the ramp in
+     components.css .landing-hero-mesh and FUTUREWAVE_TOKENS_HANDOFF.md. */
+  --mesh-ramp-4: #0A2E86;
 
   --auth-brand-bg:
     radial-gradient(ellipse 900px 700px at 10% 0%, color-mix(in srgb, var(--mesh-glow-1) 45%, transparent), transparent 70%),
