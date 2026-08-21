@@ -182,6 +182,31 @@ this was a deliberate convergence, not an oversight (neither the old
 "visible border at rest" secondary nor a colour-shifting ghost matched the
 actual Tier 2 spec, so both variant names now point at the same rules).
 
+**Landing pages run a second, separate sizing scheme (2026-08-21) — don't
+conflate it with the Tier system above.** The two above apply to the
+authenticated app; `design/futurewave-reference.html`'s own button spec is
+slightly different (44px default including Tier-2-equivalents, not just a
+44px floor with Tier 1 always at 52px) and both landing pages now match it
+via a `.landing-page`-scoped override, never by editing the base
+`.btn`/`.btn-primary` rules above:
+
+```css
+.landing-page .btn { min-height: 44px; padding: 0 20px; font-size: 14px; font-weight: 550; border-radius: 9px; }
+.landing-page .btn-lg { min-height: 52px; padding: 0 30px; font-size: 15.5px; } /* Tier-1-standalone only: hero CTA, final-CTA */
+```
+
+Marketing-site has no authenticated app to carve out (the whole site is
+landing pages), so the same `.landing-page`-scoped pattern is used there
+too, for parity, even though it could have gone on the base rules directly.
+One real conflict, adapted rather than forced, same in both repos: the
+logged-out/only nav (full cursive wordmark, ~245px wide at 26px tall, plus
+theme toggle plus one or two 44px buttons) doesn't fit its own content
+below ~480px. Product drops the secondary "Log in" link and the toggle at
+that width; marketing (no secondary link to drop) drops just the toggle.
+Both shrink the wordmark to 20px tall there. Report only, not a rule to
+generalize — the wordmark's fixed aspect ratio is what makes this tight,
+not the button spec itself.
+
 ## 4. The near-black-ceiling rule (amended, current version — read this, not an earlier draft)
 
 **On a near-black surface (`#061024`/`#0A0A0B`-class — `--deep-ground`,
@@ -380,22 +405,68 @@ again:**
    mesh's top-left white blob bleeds pure white into the headline zone at
    wide viewports — 1440px specifically — independent of the ramp fix);
    **0.40/0.26 still failed** at 1440px for the same reason; **0.46/0.32
-   passed at all 5 breakpoints, in both repos.** This is the value both
-   repos ship with now.
+   passed at all 5 breakpoints, in both repos** — the value both repos
+   shipped with for one round.
+4. 2026-08-21, second pass: **the scrim was deleted entirely — not lowered,
+   removed** (both the CSS rule and its `<div>`, both repos). Even at
+   0.46/0.32 it read as a visible dark rectangle sitting over the mesh,
+   which is not what the reference looks like — the reference has no scrim
+   at all. Contrast now rests **entirely on `text-shadow`** on `h1` and the
+   subhead, deepened over several passes with the glyph-level probe (below)
+   until it cleared 3:1/4.5:1 at every breakpoint, done alongside a type
+   size increase (`h1` `clamp(42px,6.4vw,92px)` → `clamp(52px,7.4vw,108px)`;
+   subhead → `clamp(18px,1.5vw,22px)`, both repos, bigger type needing its
+   own re-tuning of the shadow). **What actually moved the needle wasn't
+   the wide soft glow layers — it was adding a very tight, small-blur layer
+   right at the glyph edge** (`0 0 3px rgba(6,16,36,1)`); the glyph-mask
+   probe samples pixels immediately touching the stroke, and that's exactly
+   what a wide 40px-blur shadow doesn't reach.
 
-**Final numbers, both repos, scrim 0.46/0.32:**
+**The reference file itself failed AA, discovered running its own built-in
+probe (2026-08-21):** `design/futurewave-reference.html` — the file this
+whole rollout has cited as source of truth — reported **Headline 1.80:1,
+Subhead 4.16:1** on its own Measure-contrast tool, no scrim/shadow change
+needed to see it, because the reference never had a text-shadow at all.
+"Matches the reference exactly" and "passes AA" are different targets when
+the reference itself doesn't pass. Resolved by adding the same text-shadow
+to the reference's own `h1`/`.sub` CSS (keeping its existing 0.25/0.14
+`.content-scrim` as-is — that layer was never the problem there), so the
+file's rendered look now matches production. One limitation worth knowing:
+the reference's own probe samples its `<canvas>` paint only, which has no
+visibility into a DOM `text-shadow` — so its on-page Headline/Subhead
+readout still shows the old failing numbers after this fix, and always
+will, unless the probe itself is rewritten. A note was added directly next
+to that readout in the file saying so; trust the numbers in this section,
+not that on-page display, for Headline/Subhead specifically (CTA edge/Nav
+links have no shadow, so the reference's own readout for those stays
+accurate).
+
+**Contrast-sampling technique, updated for shadow-only text:** the
+`color: transparent` + whole-bounding-box sampling described earlier in
+this section stops working once a shadow (not a rectangular scrim) is the
+contrast mechanism — empty space between glyphs shows raw background and
+always reads as "failing," regardless of how deep the shadow actually is.
+The corrected technique: screenshot the element twice, once normally
+(fill + shadow) and once with `color: transparent` on the text **and its
+`<em>`/`<b>` descendants** (shadow still renders — it's independent of
+`color`), then treat any pixel where the first screenshot is measurably
+lighter than the second as "glyph ink," and sample the *second* screenshot
+at exactly those coordinates as the real background-behind-the-glyph value.
+This is what "glyph-level probe" means everywhere in this doc from here on.
+
+**Final numbers, both repos, no scrim, text-shadow only:**
 
 | | Headline (needs 3:1) | Subhead (needs 4.5:1) |
 |---|---|---|
-| Product (`dataops-agent/frontend`) | worst-case 3.42:1 (range 3.42–3.98:1) | worst-case 5.31:1 (range 5.31–6.33:1) |
-| Marketing site | worst-case 4.11:1 (range 4.11–6.33:1) | worst-case 10.37:1 (range 10.37–13.13:1) |
+| Product (`dataops-agent/frontend`) | worst-case 3.82:1 (range 3.82–5.01:1) | worst-case 5.40:1 (range 5.40–6.45:1) |
+| Marketing site | worst-case 6.17:1 (range 6.17–8.62:1) | worst-case 12.00:1 (range 12.00–16.25:1) |
 
-Both pass with real margin, at a visibly lighter scrim than the 0.66/0.42
-intermediate value — the mesh reads as a mesh again, not a dark rectangle
-with a gradient edge. If you change the text content, box padding, or
-gradient stops, re-verify with the corrected sampling technique above (set
-`color: transparent`, don't trust glyph-pixel sampling) — don't assume
-these numbers still hold.
+Both pass with real margin, and the mesh now has nothing painted over it at
+all — no box, no edge, matching the reference's actual composition. If you
+change the text content, box padding, font size, or gradient stops,
+re-verify with the glyph-level probe technique above — don't assume these
+numbers still hold, and don't trust a naive `color: transparent` +
+whole-box sample once a shadow (not a scrim) is doing the work.
 
 ## 6. What NOT to re-derive
 
@@ -460,6 +531,9 @@ left exactly as they are in the live product today.
 
 `dataops-agent/frontend/src/styles/tokens.css` is authoritative. This
 document is a compiled reference, last updated 2026-08-21 (surfaces
-corrected to the cool-white values §2 describes; §5 rewritten with the
-layer-order bug and the final ramp/scrim numbers) — if `tokens.css` changes
-after this date and this file isn't updated to match, trust the file.
+corrected to the cool-white values §2 describes; §3 notes the separate
+landing-page button sizing scheme; §5 rewritten with the layer-order bug,
+the scrim's full removal in favour of text-shadow, the bigger hero type
+scale, and the reference file's own AA failure/fix) — if `tokens.css`
+changes after this date and this file isn't updated to match, trust the
+file.
