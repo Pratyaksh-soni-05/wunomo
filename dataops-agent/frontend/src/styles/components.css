@@ -822,18 +822,39 @@ tr.selected td:first-child {
    actually reads there; every section below the hero has its own opaque
    background and its own nav-equivalent styling doesn't apply past this
    point. */
+/* 2026-08-21: switched from flex row to a 3-column grid. The flex version
+   put the anchors in the middle of whatever space was left between the
+   logo and the action group - since those two have different widths, the
+   anchors sat off-centre from the viewport, just centred between two
+   unequal ends. 1fr/auto/1fr makes the middle column genuinely centred on
+   the nav's own width regardless of what the two side columns measure. */
 .landing-nav {
   position: relative; z-index: 5;
-  display: flex; align-items: center; gap: 32px;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; column-gap: 24px;
   padding: 22px clamp(20px, 5vw, 56px);
   color: #0A1A33;
 }
-.landing-brand { display: flex; align-items: center; }
+.landing-brand { display: flex; align-items: center; justify-self: start; }
 .landing-brand-mark { height: 26px; width: auto; display: block; }
-.landing-nav-anchors { display: flex; align-items: center; gap: 28px; margin: 0 auto; font-size: 14.5px; font-weight: 450; }
+.landing-nav-anchors { display: flex; align-items: center; gap: 28px; justify-self: center; font-size: 14.5px; font-weight: 450; }
 .landing-nav-anchors a { color: inherit; opacity: 0.82; cursor: pointer; text-decoration: none; }
 .landing-nav-anchors a:hover { opacity: 1; }
-.landing-nav-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.landing-nav-actions { display: flex; align-items: center; gap: 12px; justify-self: end; }
+
+/* Landing-page-only button sizing (matches design/futurewave-reference.html
+   exactly). Scoped by specificity via .landing-page, never by editing the
+   base .btn/.btn-primary/etc rules above — those stay exactly as they are
+   for the authenticated app. Tier 1 standalone CTA (.btn-lg: hero CTA,
+   final-CTA) gets 52px/30px-padding/15.5px; every other landing button
+   (nav CTA + secondary, per-card CTAs, the marketing contact form's Send)
+   gets 44px/20px-padding/14px. */
+.landing-page .btn { border-radius: 9px; font-weight: 550; }
+.landing-page .btn-primary, .landing-page .btn-secondary,
+.landing-page .btn-danger, .landing-page .btn-success {
+  min-height: 44px; padding: 0 20px; font-size: 14px;
+}
+.landing-page .btn-lg { min-height: 52px; padding: 0 30px; font-size: 15.5px; }
+.landing-nav .topbar-icon-btn { border-radius: 9px; padding: 0; }
 
 /* Product frame — deliberately real screenshots, never an invented mock. */
 .landing-hero-frame {
@@ -985,30 +1006,13 @@ tr.selected td:first-child {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; padding: clamp(56px, 11vh, 96px) 22px clamp(40px, 6vh, 80px);
 }
-/* Grid-stacks the scrim and the visible text in the exact same cell, so
-   the cell (and the scrim inside it) auto-sizes to the text stack's own
-   natural box — never the hero's, never a guess. Neither this wrapper nor
-   .landing-hero-content-visible sets its own z-index, so their children's
-   z-index values (2 and 5) compete directly in .landing-hero's own
-   isolated stacking context, alongside the mesh/grain/bands/nav/frame —
-   depth of DOM nesting doesn't matter, only these explicit numbers do. */
+/* Grid-stacks the visible text alone in this cell now (2026-08-21: the
+   scrim that used to share this grid-area was removed entirely - see the
+   history note on .landing-hero h1's text-shadow below for why). Kept as a
+   grid wrapper rather than collapsed to a plain block purely so a future
+   layer (if one's ever needed again) has the same auto-sizing-to-content
+   behaviour available without re-deriving it. */
 .landing-hero-content-stack { display: grid; }
-.landing-hero-scrim {
-  grid-area: 1 / 1; position: relative; z-index: 2; pointer-events: none;
-  /* History: 0.25/0.14 -> 0.50/0.30 -> 0.66/0.42 (2026-08-20) -> 0.46/0.32
-     (2026-08-21, ramp fix) — each raise was compensating for contrast by
-     laying more of the mesh under a dark rectangle, which by 0.46/0.32 was
-     visibly a box sitting over the artwork, not an imperceptible floor.
-     2026-08-21, second pass: moved the remaining contrast burden onto the
-     text itself (see text-shadow on .landing-hero h1/.landing-hero-sub)
-     and dropped this back to a genuinely soft, near-invisible 0.20/0.10 —
-     the mesh now reads as a mesh again. See FUTUREWAVE_TOKENS_HANDOFF.md §5
-     for the measured contrast this combination produces. */
-  background: radial-gradient(ellipse 75% 85% at 50% 50%,
-    color-mix(in srgb, var(--deep-ground) 20%, transparent) 0%,
-    color-mix(in srgb, var(--deep-ground) 10%, transparent) 55%,
-    transparent 100%);
-}
 .landing-hero-content-visible {
   grid-area: 1 / 1; position: relative; z-index: 5;
   display: flex; flex-direction: column; align-items: center;
@@ -1039,33 +1043,32 @@ tr.selected td:first-child {
 .landing-hero h1 {
   margin: 0 0 clamp(18px, 2.6vh, 26px);
   font-family: var(--font-hero), Georgia, serif;
-  font-size: clamp(42px, 6.4vw, 92px);
+  font-size: clamp(52px, 7.4vw, 108px);
   line-height: 1.03; letter-spacing: -0.022em; font-weight: 400;
   max-width: 15ch; color: #fff;
-  /* Replaces the old content-scrim as the primary contrast mechanism
-     (2026-08-21) — a soft shadow behind the glyphs raises effective
-     legibility without laying a visible box over the mesh artwork. See
-     .landing-hero-scrim below for the (now much lighter) remaining scrim
-     and FUTUREWAVE_TOKENS_HANDOFF.md §5 for the measured numbers. Deepened
-     from the initial rgba(...,0.55)/rgba(...,0.40) pass, which measured
-     2.85:1/3.98:1 worst-case (headline/subhead) at 375px — short of both
-     3:1 and 4.5:1 — using a glyph-level probe (contrast sampled only at
-     actual anti-aliased glyph coverage, not the text's whole bounding box,
-     since a shadow-based halo doesn't reach the empty space between
+  /* Sole contrast mechanism as of 2026-08-21 — no scrim layer exists behind
+     the hero text at all anymore (the grid cell above used to also hold a
+     .landing-hero-scrim; removed). A shadow-only approach is what the
+     reference file itself never had, which is exactly why its own probe
+     reports headline 1.80:1 - a real AA failure, not a rendering quirk; see
+     FUTUREWAVE_TOKENS_HANDOFF.md §5 for the full before/after and why the
+     reference itself was patched to match. Re-tuned for the larger type
+     size above (52-108px, was 42-92px) with the glyph-level probe (samples
+     actual anti-aliased glyph coverage, not the text's whole bounding box -
+     a necessity here since a shadow halo doesn't reach the gaps between
      letters the way a rectangular scrim did). */
-  text-shadow: 0 1px 4px rgba(6, 16, 36, 0.85), 0 2px 26px rgba(6, 16, 36, 0.65);
+  text-shadow: 0 0 3px rgba(6, 16, 36, 1), 0 2px 10px rgba(6, 16, 36, 1), 0 4px 44px rgba(6, 16, 36, 0.9), 0 0 20px rgba(6, 16, 36, 0.85);
 }
 .landing-hero h1 em { font-style: italic; }
 .landing-hero-sub {
   margin: 0 0 clamp(26px, 4vh, 42px);
-  font-size: clamp(16px, 1.28vw, 19px);
+  font-size: clamp(18px, 1.5vw, 22px);
   line-height: 1.62; font-weight: 400; max-width: 56ch;
   color: rgba(255, 255, 255, 0.94);
-  /* Deeper than the headline's shadow — smaller glyphs at this weight give
-     the shadow less ink to cling to per letter, so the same alpha/blur pair
-     that clears 3:1 for the headline needed two more passes to clear
-     subhead's higher 4.5:1 bar (last short reading: 4.34:1 at 375px). */
-  text-shadow: 0 1px 4px rgba(6, 16, 36, 1), 0 2px 30px rgba(6, 16, 36, 1), 0 0 12px rgba(6, 16, 36, 0.9);
+  /* Deeper than the headline's shadow — smaller glyphs give the shadow less
+     ink to cling to per letter, so clearing the higher 4.5:1 body-text bar
+     needs more than the headline's 3:1 large-text bar does. */
+  text-shadow: 0 0 3px rgba(6, 16, 36, 1), 0 2px 10px rgba(6, 16, 36, 1), 0 3px 32px rgba(6, 16, 36, 1), 0 0 16px rgba(6, 16, 36, 1);
 }
 .landing-hero-sub b { font-weight: 600; }
 
@@ -1165,6 +1168,31 @@ tr.selected td:first-child {
 
 @media (max-width: 860px) {
   .landing-nav-anchors { display: none; }
+}
+
+/* 2026-08-21: the logged-out nav (wordmark logo + theme toggle + Log in +
+   Try Wunomo) is the one nav configuration on this page with two action
+   buttons, not one - at narrow widths the full-logotype wordmark (245px at
+   its 26px height, since it's the whole cursive "wunomo" mark, not a
+   compact monogram) plus theme toggle plus two spec-sized 44px buttons
+   doesn't fit even with .landing-nav-anchors already hidden; measured
+   overflowing past the viewport and clipping "Try Wunomo" entirely below
+   ~480px. Rather than force everything to full spec width and let it
+   clip, three things give at this width: the secondary "Log in" link
+   drops (the primary, signup-driving "Try Wunomo" CTA stays full-size and
+   full-spec), the theme toggle drops (a nice-to-have on a page that
+   already defaults to light and is a fixed dark-chrome hero regardless),
+   and the wordmark shrinks from 26px to 20px tall (proportionally
+   ~245px -> ~189px wide, since the mark has no independent width control -
+   it's one SVG at a fixed aspect ratio). Authenticated visitors are
+   unaffected (single "Go to Dashboard" button, already fits without any
+   of this). Measured: fits with room at 375px after this; see the report
+   for the exact numbers - this is the one place 44px-everywhere didn't fit
+   and got adapted instead of forced. */
+@media (max-width: 480px) {
+  .landing-brand-mark { height: 20px; }
+  .landing-nav-actions .btn-secondary,
+  .landing-nav-actions .topbar-icon-btn { display: none; }
 }
 
 @media (max-width: 640px) {

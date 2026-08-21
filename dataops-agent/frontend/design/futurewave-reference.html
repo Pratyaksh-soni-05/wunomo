@@ -168,6 +168,22 @@
   }
   .dot{ width:7px; height:7px; border-radius:50%; background:#16a34a; }
 
+  /* 2026-08-21: this file's own Measure-contrast probe (below) reported
+     Headline 1.80:1 and Subhead 4.16:1 - both genuinely FAILING AA, with
+     no scrim/shadow change needed to see it, just running the probe this
+     file already ships. This was a real gap between "matches this
+     reference" and "passes AA" for whoever built off it - the reference
+     had no text-shadow at all, so both the product and marketing repos
+     built from it initially had the same failure, caught in production
+     via a screenshot-based DOM glyph probe (samples actual anti-aliased
+     glyph coverage in a real browser render, not this file's canvas-only
+     probe below - see the note on that limitation there). Fixed the same
+     way in all three places: keep the .content-scrim exactly as it was
+     (still the lightest, most "correct-reading" version - do not
+     re-strengthen it), and add a text-shadow that carries the rest of the
+     contrast. Verified via the DOM glyph probe in
+     FUTUREWAVE_TOKENS_HANDOFF.md §5, not this file's own probe (see why
+     below). */
   h1{
     margin:0 0 clamp(18px,2.6vh,26px);
     font-size:clamp(42px, 6.4vw, 92px);
@@ -175,6 +191,8 @@
     letter-spacing:-.022em;
     font-weight:400;
     max-width:15ch;
+    text-shadow: 0 0 3px rgba(6,16,36,1), 0 2px 10px rgba(6,16,36,1),
+      0 4px 44px rgba(6,16,36,0.9), 0 0 20px rgba(6,16,36,0.85);
   }
   h1 em{ font-style:italic; }
   body[data-font="instrument"] h1{ font-family:'Instrument Serif',Georgia,serif; }
@@ -192,6 +210,8 @@
     font-size:clamp(16px,1.28vw,19px);
     line-height:1.62; font-weight:400;
     max-width:56ch;
+    text-shadow: 0 0 3px rgba(6,16,36,1), 0 2px 10px rgba(6,16,36,1),
+      0 3px 32px rgba(6,16,36,1), 0 0 16px rgba(6,16,36,1);
   }
   .sub b{ font-weight:600; }
 
@@ -344,6 +364,7 @@
   <h4>Measured contrast — min / max</h4>
   <div id="rows"></div>
   <p>Sampled from the painted gradient behind each element, worst and best point. WCAG AA: 4.5:1 body, 3:1 for text ≥24px bold or ≥18.66px.</p>
+  <p><b>Note (2026-08-21):</b> h1/.sub now carry a text-shadow (see their CSS) that this probe cannot see - it only samples the canvas-painted mesh+scrim, never a DOM text-shadow. So Headline/Subhead below will still read their original failing numbers (~1.80:1 / ~4.16:1) even though the real, shadow-included contrast passes - verified separately with a screenshot-based glyph probe, see FUTUREWAVE_TOKENS_HANDOFF.md §5 for the actual numbers. Trust that doc's numbers over this readout for Headline/Subhead specifically; CTA edge/Nav links (no shadow) are still read correctly here.</p>
 </div>
 
 <script>

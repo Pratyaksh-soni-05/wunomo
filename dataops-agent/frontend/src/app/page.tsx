@@ -116,11 +116,11 @@ export default function LandingPage() {
           <div className="landing-nav-actions">
             <ThemeToggle />
             {authed ? (
-              <Link href="/dashboard" className="btn btn-primary btn-sm">Go to Dashboard</Link>
+              <Link href="/dashboard" className="btn btn-primary">Go to Dashboard</Link>
             ) : (
               <>
-                <Link href="/login" className="btn btn-secondary btn-sm">Log in</Link>
-                <Link href="/signup" className="btn btn-primary btn-sm">Try Wunomo</Link>
+                <Link href="/login" className="btn btn-secondary">Log in</Link>
+                <Link href="/signup" className="btn btn-primary">Try Wunomo</Link>
               </>
             )}
           </div>
@@ -128,7 +128,6 @@ export default function LandingPage() {
 
         <div className="landing-hero-content">
           <div className="landing-hero-content-stack">
-            <div className="landing-hero-scrim" aria-hidden="true" />
             <div className="landing-hero-content-visible">
               <span className="landing-hero-badge landing-animate-in">
                 <span className="dot" />Currently onboarding design partners
@@ -179,9 +178,9 @@ export default function LandingPage() {
               cta={
                 e.active ? (
                   authed ? (
-                    <Link href="/chat" className="btn btn-primary btn-sm">Open AXIOM →</Link>
+                    <Link href="/chat" className="btn btn-primary">Open AXIOM →</Link>
                   ) : (
-                    <Link href="/signup" className="btn btn-primary btn-sm">Get Started with AXIOM</Link>
+                    <Link href="/signup" className="btn btn-primary">Get Started with AXIOM</Link>
                   )
                 ) : undefined
               }
@@ -235,7 +234,7 @@ export default function LandingPage() {
       <section className="landing-final-cta">
         <h2 className="font-display">Put your first AI employee to work.</h2>
         <p>Create a workspace and connect a data source in minutes.</p>
-        <Link href="/signup" className="btn btn-primary">Try Wunomo</Link>
+        <Link href="/signup" className="btn btn-primary btn-lg">Try Wunomo</Link>
       </section>
 
       <footer className="landing-footer">
