@@ -197,6 +197,21 @@ img { display: block; max-width: 100%; }
 }
 :root[data-theme="dark"] .locked-overlay { background: rgba(11, 20, 33, 0.72); }
 :root[data-theme="light"] .locked-overlay { background: rgba(255, 255, 255, 0.72); }
+/* 2026-08-21: forced regardless of the toggle inside the now-always-dark
+   landing sections - the light-theme variant above (rgba(255,255,255,.72))
+   rendered as a jarring bright-white block against the new dark backdrop;
+   simply switching to the existing dark-theme variant instead
+   (rgba(11,20,33,.72)) was tried and rejected - it nearly matched the
+   page's own near-black background, which is the literal "vanish on
+   dark" failure mode this needed checking for. This is a third, distinct
+   value: dark enough to still read as "content obscured, locked" against
+   the card underneath, but visibly lighter than the plain page backdrop
+   so the card doesn't disappear into it. Needs !important - matching or
+   beating :root[data-theme="light"] .locked-overlay's own specificity
+   with a plain descendant selector isn't reliably possible (both land at
+   the same specificity, so source order would decide, silently, if a
+   future edit reordered anything). */
+.landing-page .locked-overlay { background: rgba(20, 26, 38, 0.85) !important; }
 
 /* ==========================================
    BADGE
@@ -813,7 +828,98 @@ tr.selected td:first-child {
 /* ==========================================
    LANDING PAGE
    ========================================== */
-.landing-page { display: flex; flex-direction: column; min-height: 100vh; overflow-x: hidden; }
+/* 2026-08-21: the gradient now continues past the hero, page-wide. A
+   simple two-stop vertical gradient on .landing-page itself, no explicit
+   background-size (default "auto" fills the element's own full padding
+   box exactly once, for a CSS gradient - never tiles), so this reads as
+   one continuous, non-repeating backdrop across the page's real length,
+   not a per-section repaint or a visible seam between sections. The
+   hero's own mesh (.landing-hero-mesh) is untouched and still self-
+   contained/opaque, painting over this layer entirely while it's in
+   view; this only becomes visible once you scroll past the hero. Colours
+   match the mesh's own terminus (var(--deep-ground) 100%, i.e. #061024)
+   so there's no colour jump where the opaque hero ends and the
+   translucent sections begin.
+   Tried background-attachment:fixed first, matching the request literally
+   - it renders correctly on real scroll (verified interactively) but
+   pins the gradient to the viewport rather than the page, so every
+   viewport-height of scrolled content re-shows the same light-to-dark
+   band instead of one true page-length descent into near-black; it also
+   renders wrong under Playwright's fullPage screenshot capture (a real,
+   reproducible tool quirk - full-page capture resizes the viewport before
+   painting, and a fixed background doesn't repaint correctly against that
+   resize). Left off the standard (scroll) attachment instead, which
+   avoids both problems and is closer to what "a slow ramp ... for the
+   rest of the page" actually describes - a one-time transition across
+   the page's real length, not a vignette that repeats every viewport. */
+.landing-page {
+  display: flex; flex-direction: column; min-height: 100vh; overflow-x: hidden;
+  background: linear-gradient(to bottom, #061024 0%, #0A0A0B 100%);
+}
+/* Every section below the hero sits on that fixed dark backdrop now,
+   regardless of the site's light/dark toggle - so their surface/text/
+   border tokens are pinned here to fixed dark values rather than left to
+   the theme tokens (which would otherwise flip the DOM between a light
+   and a dark treatment depending on the toggle, and neither would read
+   correctly once the backdrop itself no longer changes with it). This is
+   a custom-property override, not a parallel set of hardcoded selectors:
+   every existing rule that already reads var(--text-primary)/
+   var(--surface)/var(--border)/var(--surface-hover)/var(--text-muted)/
+   var(--border-strong)/var(--accent-text) inherits the new values
+   automatically, including EmployeeCard/Card/Badge - components shared
+   with the authenticated app's own /ai-employees page, never touched
+   directly. A value set here on a real DOM ancestor overrides whatever a
+   descendant would otherwise have inherited from :root, regardless of
+   the specificity of whatever set it there (:root[data-theme="..."]
+   included) - custom-property inheritance resolves per-element, not by
+   competing specificity across different elements. The theme toggle
+   becomes visually inert for everything below the hero as a result -
+   left functional (flagged to the user, not hidden), see the report. */
+.landing-section, .landing-final-cta, .landing-footer {
+  --text-primary: #F2F2F3;
+  --text-secondary: #9A9AA2;
+  --text-muted: #9A9AA2;
+  --surface: rgba(255, 255, 255, 0.05);
+  --surface-hover: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.22);
+  --accent-text: #2277FF;
+  /* .btn-primary (per-card "Get Started"/"Open AXIOM" CTAs) reads these
+     three, and the app's dark theme deliberately inverts them to a near-
+     white fill / near-black label — correct for the authenticated app's
+     own dark surfaces, wrong here: it made the button flip from blue to
+     white when the toggle was switched, the one piece of this page that
+     was still visibly theme-reactive after everything else was pinned.
+     Forced to the light (blue) values always, for the same reason as
+     everything else above - this page no longer changes with the toggle. */
+  --accent-fill: #0056FF;
+  --accent-fill-hover: #0047D6;
+  --on-accent-fill: #FFFFFF;
+  /* Redefining the custom property alone isn't enough for plain-inherited
+     `color` - body's own `color: var(--text-primary)` resolves ONCE at
+     body and that resolved value is what plain inheritance passes down,
+     not a live binding that re-reads the variable at each descendant. Any
+     heading/paragraph in these sections that doesn't set its own `color`
+     (most of them - h2/h3 rely on inheritance) would otherwise keep
+     showing body's light-theme navy text on this now-dark backdrop,
+     regardless of the override above. Re-declaring `color` here, fresh,
+     on the same element that redefines the custom property, is what
+     actually restarts inheritance correctly for everything below it. */
+  color: var(--text-primary);
+}
+/* Cards (.card via EmployeeCard, .landing-feature, .landing-contact-card,
+   the below-hero product carousel if a repo has one) already pick up the
+   translucent background/border from the override above via var(--surface)/
+   var(--border) - backdrop-filter isn't part of that token system, so it's
+   added explicitly here, scoped to .landing-page so the authenticated
+   app's own (opaque, non-blurred) cards are never touched. */
+.landing-page .card,
+.landing-page .landing-feature,
+.landing-page .landing-contact-card,
+.landing-page .landing-carousel-frame,
+.landing-page .landing-carousel-arrow {
+  backdrop-filter: blur(12px);
+}
 
 /* Phase 8: nav now lives INSIDE .landing-hero (matches the reference — not
    a separate sticky bar), so it scrolls away with the hero rather than
@@ -1165,17 +1271,26 @@ tr.selected td:first-child {
 }
 .landing-contact-card:hover { border-color: var(--ocean-400); color: var(--accent-text); }
 
-.landing-final-cta { padding: 72px 24px; text-align: center; background: var(--deep-ground); color: var(--on-dark); }
+/* 2026-08-21: background dropped to transparent - was its own opaque
+   var(--deep-ground) fill, which is the same colour the page-level fixed
+   gradient (above) already lands on by this scroll depth, but painting it
+   again here as a second, separately-bounded opaque layer risked a visible
+   seam at this section's own top/bottom edge against the continuous fixed
+   backdrop. Letting the fixed layer show through directly is the actual
+   "no seam" fix, not just a colour match. */
+.landing-final-cta { padding: 72px 24px; text-align: center; background: transparent; color: var(--on-dark); }
 .landing-final-cta h2 { font-size: clamp(24px, 3vw, 32px); margin-bottom: 10px; color: var(--on-dark); }
 .landing-final-cta p { color: var(--midnight-300); margin-bottom: 28px; font-size: 15px; }
 
-/* Phase 8: matches the reference's centered footer — opaque midnight
-   background (never the hero's mesh, this section sits below it and needs
-   its own solid ground) — wordmark, then the two lines of copy, then the
-   product nav links. */
+/* Phase 8: matches the reference's centered footer — wordmark, then the
+   two lines of copy. 2026-08-21: background dropped from its own opaque
+   var(--midnight-900) fill to transparent, same reasoning as
+   .landing-final-cta above - the page-level fixed gradient already lands
+   on the same colour by this scroll depth, so painting it again here as a
+   second opaque layer was the seam, not the fix. */
 .landing-footer {
   padding: 64px clamp(20px, 5vw, 56px) 56px;
-  background: var(--midnight-900, #061024);
+  background: transparent;
   text-align: center;
   display: flex; flex-direction: column; align-items: center; gap: 8px;
 }
