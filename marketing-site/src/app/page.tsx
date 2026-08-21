@@ -74,7 +74,7 @@ export default function LandingPage() {
           </div>
           <div className="landing-nav-actions">
             <ThemeToggle />
-            <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm">
+            <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
               Book a demo
             </a>
           </div>
@@ -82,7 +82,6 @@ export default function LandingPage() {
 
         <div className="landing-hero-content">
           <div className="landing-hero-content-stack">
-            <div className="landing-hero-scrim" aria-hidden="true" />
             <div className="landing-hero-content-visible">
               <div className="landing-hero-pill landing-animate-in">
                 <span className="landing-hero-pill-dot" />
@@ -94,7 +93,7 @@ export default function LandingPage() {
                 AXIOM, an AI DataOps engineer.
               </p>
               <div className="flex items-center justify-center gap-3 landing-animate-in delay-2">
-                <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
+                <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-lg">
                   Book a demo
                 </a>
               </div>
@@ -134,7 +133,7 @@ export default function LandingPage() {
               employee={e}
               cta={
                 e.active ? (
-                  <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm">
+                  <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
                     Book a demo
                   </a>
                 ) : undefined
@@ -192,7 +191,7 @@ export default function LandingPage() {
       <section className="landing-final-cta">
         <h2 className="font-display">Curious what AXIOM could do for your team?</h2>
         <p>We&apos;re working with a small group of design partners now.</p>
-        <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
+        <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-lg">
           Book a demo
         </a>
       </section>
