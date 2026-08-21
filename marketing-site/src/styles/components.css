@@ -139,6 +139,16 @@ img { display: block; max-width: 100%; }
 }
 :root[data-theme="dark"] .locked-overlay { background: rgba(11, 20, 33, 0.72); }
 :root[data-theme="light"] .locked-overlay { background: rgba(255, 255, 255, 0.72); }
+/* 2026-08-21: forced regardless of the toggle inside the now-always-dark
+   landing sections, same as the product repo - the light-theme variant
+   above read as a jarring white block against the new dark backdrop, and
+   simply switching to the dark-theme variant instead nearly matched the
+   page's own background (the literal "vanish on dark" failure mode this
+   needed checking for). Needs !important - matching or beating
+   :root[data-theme="light"] .locked-overlay's specificity with a plain
+   descendant selector isn't reliably possible (both land at the same
+   specificity, so source order would silently decide). */
+.landing-page .locked-overlay { background: rgba(20, 26, 38, 0.85) !important; }
 
 /* ==========================================
    BADGE
@@ -205,7 +215,67 @@ img { display: block; max-width: 100%; }
    (no horizontal scrollbar from a full-bleed hero/mesh) without dragging
    overflow-y into auto. Fixed 2026-08-20, logged as a pre-existing bug in
    PLACEHOLDERS.md. */
-.landing-page { display: flex; flex-direction: column; min-height: 100vh; overflow-x: clip; }
+/* 2026-08-21: the gradient now continues past the hero, page-wide - same
+   change, same reasoning, as the product repo. A simple two-stop vertical
+   gradient on .landing-page itself, no explicit background-size (default
+   "auto" fills the element's own full padding box exactly once, for a
+   CSS gradient - never tiles), so this reads as one continuous, non-
+   repeating backdrop across the page's real length. The hero's own mesh
+   is untouched and still self-contained/opaque, painting over this layer
+   entirely while it's in view. Colours match the mesh's own terminus
+   (var(--deep-ground) 100%, i.e. #061024) so there's no colour jump
+   where the opaque hero ends and the translucent sections begin.
+   background-attachment:fixed was tried first (matching the original
+   request literally) and rejected for the same two reasons as the
+   product repo: it pins the gradient to the viewport rather than the
+   page (repeating the same light-to-dark band every viewport-height
+   instead of one true page-length descent), and it renders incorrectly
+   under Playwright's fullPage screenshot capture specifically (confirmed
+   computed style was correct, the actual paint wasn't - a tool quirk).
+   See FUTUREWAVE_TOKENS_HANDOFF.md for the full detail, same for both
+   repos. */
+.landing-page {
+  display: flex; flex-direction: column; min-height: 100vh; overflow-x: clip;
+  background: linear-gradient(to bottom, #061024 0%, #0A0A0B 100%);
+}
+/* Every section below the hero sits on that fixed dark backdrop now,
+   regardless of the site's light/dark toggle - same custom-property
+   override as the product repo, same reasoning: this cascades through
+   every existing rule that already reads var(--text-primary)/
+   var(--surface)/var(--border)/var(--surface-hover)/var(--text-muted)/
+   var(--border-strong)/var(--accent-text)/var(--accent-fill)/etc,
+   including .card/.badge-gray/EmployeeCard/.input (the contact form) -
+   without a parallel set of hardcoded rules. A value set here on a real
+   DOM ancestor overrides whatever a descendant would otherwise have
+   inherited from :root, regardless of the current data-theme value. */
+.landing-section, .landing-final-cta, .landing-footer {
+  --text-primary: #F2F2F3;
+  --text-secondary: #9A9AA2;
+  --text-muted: #9A9AA2;
+  --surface: rgba(255, 255, 255, 0.05);
+  --surface-hover: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.22);
+  --accent-text: #2277FF;
+  --accent-fill: #0056FF;
+  --accent-fill-hover: #0047D6;
+  --on-accent-fill: #FFFFFF;
+  /* Redefining the custom property alone isn't enough for plain-inherited
+     `color` - body's own `color: var(--text-primary)` resolves ONCE at
+     body and that resolved value is what plain inheritance passes down,
+     not a live binding that re-reads the variable at each descendant.
+     Re-declaring `color` here, fresh, on the same element that redefines
+     the custom property, is what actually restarts inheritance correctly
+     for every heading/paragraph below that doesn't set its own colour. */
+  color: var(--text-primary);
+}
+.landing-page .card,
+.landing-page .landing-feature,
+.landing-page .landing-contact-card,
+.landing-page .landing-carousel-frame,
+.landing-page .landing-carousel-arrow {
+  backdrop-filter: blur(12px);
+}
 /* 2026-08-21 (matches design/futurewave-reference.html exactly, and the
    product repo's own Phase 8 rebuild): nav moved INSIDE .landing-hero,
    transparent, no border/background/backdrop-filter, no longer sticky — it
@@ -473,20 +543,27 @@ img { display: block; max-width: 100%; }
 .landing-interest-form textarea.input { min-height: 96px; resize: vertical; padding-top: 10px; }
 .landing-interest-form .btn { align-self: center; min-width: 160px; }
 
-.landing-final-cta { padding: 72px 24px; text-align: center; background: var(--deep-ground); color: var(--on-dark); }
+/* 2026-08-21: background dropped to transparent, same reasoning as the
+   product repo - was its own opaque var(--deep-ground) fill, the same
+   colour the page-level gradient above already lands on by this scroll
+   depth, but painting it again here as a second, separately-bounded
+   opaque layer was the seam, not the fix. Letting the page-level gradient
+   show through directly is what actually removes it. */
+.landing-final-cta { padding: 72px 24px; text-align: center; background: transparent; color: var(--on-dark); }
 .landing-final-cta h2 { font-size: clamp(24px, 3vw, 32px); margin-bottom: 10px; color: var(--on-dark); }
 .landing-final-cta p { color: var(--midnight-300); margin-bottom: 28px; font-size: 15px; }
 
 /* 2026-08-21 (matches design/futurewave-reference.html and the product
    repo exactly): footer is three things only - wordmark, one line of copy,
-   legal line, centered, on an opaque --deep-ground background (never the
-   site's own themed --bg, which would go light-mode white here). The old
-   version put this on a light, top-bordered strip with a Features/About/
-   Contact/Book a demo link row - dead weight in a footer this small, and
-   the wrong background besides. */
+   legal line, centered. Background dropped from its own opaque
+   var(--deep-ground) fill to transparent - same seam reasoning as
+   .landing-final-cta above; the old version put this on a light,
+   top-bordered strip with a link row, which is what --deep-ground had
+   originally fixed, but a second opaque dark layer is still a seam once
+   the page itself is continuously dark. */
 .landing-footer {
   padding: 64px clamp(20px, 5vw, 56px) 56px;
-  background: var(--deep-ground);
+  background: transparent;
   text-align: center;
   display: flex; flex-direction: column; align-items: center; gap: 8px;
 }
