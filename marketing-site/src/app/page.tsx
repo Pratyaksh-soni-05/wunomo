@@ -3,7 +3,6 @@ import { Instrument_Serif } from "next/font/google";
 import { WunomoWordmark } from "@/components/brand";
 import { EmployeeCard } from "@/components/EmployeeCard";
 import { ScreenshotCarousel } from "@/components/ScreenshotCarousel";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { InterestForm } from "@/components/InterestForm";
 import { EMPLOYEES } from "@/lib/employees";
 import { CAL_LINK, CONTACTS } from "@/lib/config";
@@ -73,7 +72,6 @@ export default function LandingPage() {
             <a href="#contact">Contact</a>
           </div>
           <div className="landing-nav-actions">
-            <ThemeToggle />
             <a href={CAL_LINK} target="_blank" rel="noopener noreferrer" className="btn btn-primary">
               Book a demo
             </a>

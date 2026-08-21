@@ -77,42 +77,6 @@ img { display: block; max-width: 100%; }
   transition: background var(--t-slow), border-color var(--t-slow), box-shadow var(--t-slow), color var(--t-slow);
 }
 .landing-page .btn-lg { min-height: 52px; padding: 0 30px; font-size: 15.5px; }
-/* 2026-08-21: the theme toggle was rendering as a solid dark filled square
-   on hover with the icon pushed into the top-left corner - two separate
-   bugs, both from inheriting the base .topbar-icon-btn rules unchanged:
-   (1) the base rule sets align-items:center but never justify-content, so
-   the icon (the button's only child) packed to the flex start instead of
-   centering on both axes; (2) :hover used the THEME-DEPENDENT
-   --surface-hover/--text-primary tokens, which is wrong here for the same
-   reason the nav's own text colour is hardcoded rather than themed - this
-   button sits on the hero's fixed, theme-invariant dark-chrome mesh
-   (palest at the very top, where nav lives), not on the page's normal
-   themed surface. In dark theme, --surface-hover resolves to a near-black
-   fill, which is exactly the "solid dark filled square" - it was rendering
-   correctly-if-you-squint in light theme (a pale hover on an already-pale
-   background) and badly broken in dark theme, never both themes tested
-   together before. Rebuilt to match the reference's own .icon-btn exactly
-   in shape (44x44 fixed, not min-*; border reserved-but-transparent at
-   rest so hover doesn't shift layout; radius 9px) but with the reference's
-   white hover veil swapped for a dark-ink one - the reference's futurewave
-   .icon-btn assumes it sits somewhere dark, and its own nav (same fixed
-   dark-ink text as ours) would have the identical near-invisible-hover
-   problem sitting on a pale mesh top if that were ever tested; a dark veil
-   is what actually reads against this specific pale backdrop. */
-.landing-page .topbar-icon-btn {
-  width: 44px; height: 44px; min-width: 0; min-height: 0; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 9px; border: 1px solid transparent; background: transparent;
-  color: inherit;
-  transition: background var(--t-slow), border-color var(--t-slow), box-shadow var(--t-slow);
-}
-.landing-nav .topbar-icon-btn:hover {
-  background: rgba(10, 26, 51, 0.08);
-  border-color: rgba(10, 26, 51, 0.24);
-  box-shadow: 0 2px 10px rgba(0, 20, 70, 0.1);
-  color: inherit;
-}
-
 /* ==========================================
    CARD
    ========================================== */
@@ -589,20 +553,19 @@ img { display: block; max-width: 100%; }
   .landing-nav-anchors { display: none; }
 }
 
-/* 2026-08-21: the nav (wordmark logo + theme toggle + Book a demo) doesn't
+/* 2026-08-21: the nav (wordmark logo + theme toggle + Book a demo) didn't
    fit its own content below ~480px even with .landing-nav-anchors already
    hidden - measured overflowing to 473px in a 375px viewport. The
-   full-logotype wordmark is the biggest single cost (245px at its 26px
-   height - it's the whole cursive "wunomo" mark, not a compact monogram),
-   same root cause as the product repo's nav at this width. Same fix: the
-   theme toggle drops (nice-to-have on a page that already defaults to
-   light and is a fixed dark-chrome hero regardless of site theme) and the
-   wordmark shrinks from 26px to 20px tall (~245px -> ~189px wide). Unlike
-   the product repo there's no secondary nav link to also drop here - this
-   site's nav only ever has the one CTA. Verified fits with room after. */
+   full-logotype wordmark was the biggest single cost (245px at its 26px
+   height - it's the whole cursive "wunomo" mark, not a compact monogram).
+   The theme toggle itself was removed from the nav entirely later the same
+   day (a separate, deliberate change, not a mobile-only one - see
+   page.tsx), which reclaims most of that overflow on its own; the
+   wordmark shrink (26px -> 20px, ~245px -> ~189px wide) is kept regardless
+   - re-verified it's still needed for the remaining wordmark+CTA content
+   to fit without it. */
 @media (max-width: 480px) {
   .landing-brand-mark { height: 20px; }
-  .landing-nav-actions .topbar-icon-btn { display: none; }
 }
 
 @media (max-width: 640px) {
