@@ -468,6 +468,134 @@ re-verify with the glyph-level probe technique above — don't assume these
 numbers still hold, and don't trust a naive `color: transparent` +
 whole-box sample once a shadow (not a scrim) is doing the work.
 
+## 5b. Type-size correction, the theme-toggle "filled square" bug, and the gradient extended through the whole page (2026-08-21, later same day)
+
+**Type reverted:** the `h1`/`.sub` (or `.landing-hero p` in marketing-site)
+clamp values above were briefly pushed to `clamp(52px,7.4vw,108px)` /
+`clamp(18px,1.5vw,22px)` — overshot, wrapped the headline to 4 lines at
+1440px in both repos. Reverted to the reference's own exact values
+(`clamp(42px,6.4vw,92px)` / `clamp(16px,1.28vw,19px)`), and `h1` gained
+`max-width:15ch` in marketing-site, which it never had (product already
+had it). Marketing-site's `.landing-hero-content-stack` also had its own
+`max-width:800px` cap removed — narrower than product's effectively-
+uncapped wrapping, it was the other half of why marketing wrapped to 4
+lines where product wrapped to 2 at the same font size. Both repos now
+confirmed 2 lines at 1440px, no overflow at 375px, contrast re-verified
+with the glyph-level probe at the smaller size (still passes both
+thresholds, more margin than at the bigger size in both repos).
+
+**Theme toggle rendered as a solid dark filled square on hover, in dark
+theme specifically** — reproduced and confirmed, not just read off the
+CSS, before fixing. Two independent bugs, not one: `.topbar-icon-btn`'s
+icon had no `justify-content` in marketing-site's copy of the rule (only
+`align-items`), so it packed to the flex start instead of centering on
+both axes — product's copy already had this right. Both repos shared the
+second bug: `:hover` used the theme-dependent `--surface-hover`/
+`--border-strong`/`--text-primary` tokens, which is wrong for a button
+sitting on the hero's fixed, theme-invariant mesh (palest at the top,
+where nav lives) — in dark theme `--surface-hover` resolves to a near-
+black fill against that always-pale backdrop, which is the "filled
+square." Fixed to match the reference's own `.icon-btn` shape (44×44
+fixed, not `min-*`; border reserved-but-transparent at rest so hover
+doesn't shift layout; radius 9px) but with a dark-ink hover veil
+(`rgba(10,26,51,.08)` bg / `rgba(10,26,51,.24)` border) instead of the
+reference's white one — the reference's own nav sits on the same pale
+mesh top with the same fixed dark-ink text, so its literal white hover
+veil would have the identical near-invisible problem if ever tested
+against its own composition.
+
+**The gradient now continues past the hero, page-wide** — every section
+below the hero sits on a two-stop `#061024 → #0A0A0B` vertical gradient
+on `.landing-page` itself, colour-matched to the mesh's own terminus so
+there's no jump where the opaque hero ends. Two real implementation
+lessons from getting this wrong first, worth carrying forward:
+
+1. **`background-attachment:fixed` was the literal request and does work
+   on real interactive scroll (verified) — but it's the wrong mechanism
+   here, and it silently breaks Playwright's `fullPage` screenshot
+   capture.** `fixed` pins the gradient to the *viewport*, not the page —
+   scroll past the hero and every subsequent viewport-height of content
+   re-shows the same light-to-dark band, not one continuous page-length
+   descent into near-black. Confirmed via `getComputedStyle` (correct)
+   vs. an actual `page.screenshot({fullPage:true})` capture (wrong — pale/
+   light, not dark) — a real, reproducible tool-specific rendering bug,
+   not a CSS mistake or a live-browser bug. **If you ever need to verify
+   a `background-attachment:fixed` layer with Playwright, don't trust
+   `fullPage:true` — scroll and screenshot the real viewport instead.**
+   Fix: dropped the `background-attachment` declaration entirely. Default
+   `background-size:auto` for a CSS gradient with no attachment override
+   covers the element's own full padding box exactly once (never tiles),
+   which both avoids the screenshot bug and is a more literal match for
+   "a slow ramp... for the rest of the page" — one real descent across
+   the page's actual length, not a vignette repeating every viewport.
+   (Marketing-site's own `fullPage` capture separately showed a stray
+   fragment of unrelated footer text near the very top of the image after
+   this fix — reproduced once, gone on every subsequent capture and on
+   real scroll; treated as the same class of `fullPage`-specific
+   rendering artifact, not chased further.)
+2. **Redefining a CSS custom property on an ancestor does NOT retroactively
+   fix a `color` a descendant already inherited from a *different*
+   ancestor's explicit declaration.** `body { color: var(--text-primary); }`
+   resolves once, at `body`, to whatever `--text-primary` is at that
+   point — and that *resolved value* (not a live binding) is what plain
+   inheritance hands down to every descendant, including `.landing-section`
+   and everything under it. Redefining `--text-primary` on `.landing-section`
+   changes what `.landing-section` and its descendants would compute if
+   *they* referenced the variable fresh — but a heading with no `color`
+   of its own is still just inheriting `body`'s old resolved value, unless
+   something between `body` and that heading *also* explicitly declares
+   `color: var(--text-primary)`, re-triggering a fresh resolution against
+   the now-local override. First pass shipped with every custom property
+   correctly overridden (verified via `getComputedStyle` custom-property
+   reads) and every heading still rendering the *old* light-theme navy —
+   fixed by adding `color: var(--text-primary);` directly on the same
+   `.landing-section, .landing-final-cta, .landing-footer` selector that
+   redefines the token, which is what actually restarts inheritance
+   correctly for everything below it.
+
+Tokens overridden, both repos, scoped to `.landing-section, .landing-final-cta,
+.landing-footer` (never the hero, never the authenticated app):
+`--text-primary` → `#F2F2F3`, `--text-secondary`/`--text-muted` → `#9A9AA2`,
+`--surface` → `rgba(255,255,255,.05)`, `--surface-hover` →
+`rgba(255,255,255,.08)`, `--border` → `rgba(255,255,255,.12)`,
+`--border-strong` → `rgba(255,255,255,.22)`, `--accent-text` → `#2277FF`,
+`--accent-fill`/`--accent-fill-hover`/`--on-accent-fill` → `#0056FF`/
+`#0047D6`/`#FFFFFF` (forced to the light/blue values always — the app's
+dark theme deliberately inverts these to near-white-fill/near-black-label,
+correct for the authenticated app's own dark surfaces, but it made the
+per-card CTA buttons flip from blue to white when the toggle was switched,
+the one thing still visibly theme-reactive after everything else was
+pinned). `backdrop-filter:blur(12px)` added separately (not part of the
+token system), scoped via `.landing-page .card`/`.landing-feature`/
+`.landing-contact-card`/`.landing-carousel-frame`/`.landing-carousel-arrow`
+so the authenticated app's own opaque `.card` usage (shared component,
+including `/ai-employees`) is never touched.
+
+**`.locked-overlay` ("Coming Soon" employee cards) needed a third value,
+not either existing theme variant:** the light-theme overlay
+(`rgba(255,255,255,.72)`) read as a jarring white block against the new
+dark backdrop; simply switching to the existing dark-theme variant
+(`rgba(11,20,33,.72)`) very nearly matched the page's own background —
+the literal "vanish on dark" failure this needed checking for, per the
+task's own instruction. Landed on `rgba(20,26,38,.85)`, forced with
+`!important` (a plain descendant selector can't reliably beat
+`:root[data-theme="light"] .locked-overlay`'s specificity — both land at
+the same value, so source order would silently decide).
+
+**Contrast, both repos, every text/surface pair in the newly-dark
+sections (14–16 pairs measured: feature cards, employee cards, capability
+badges, about/contact text, the contact form's inputs and placeholder in
+marketing-site, final-CTA, footer, the Coming Soon badge) — all pass
+4.5:1.** Worst case in both repos is the footer's own pre-existing
+`rgba(255,255,255,.46)` copyright line, alpha-composited against the
+gradient's near-black end: **4.66:1** (unchanged value — the footer's
+background didn't meaningfully change darkness, just went from an opaque
+fill to the transparent gradient showing through at the same point).
+Marketing-site's contact-form placeholder measured **6.42:1**. The theme
+toggle is confirmed visually inert everywhere in these sections (pixel-
+compared toggled vs. untoggled renders) — left functional, not hidden,
+per instruction.
+
 ## 6. What NOT to re-derive
 
 These are already measured and verified — cite them, don't re-check them
@@ -534,6 +662,10 @@ document is a compiled reference, last updated 2026-08-21 (surfaces
 corrected to the cool-white values §2 describes; §3 notes the separate
 landing-page button sizing scheme; §5 rewritten with the layer-order bug,
 the scrim's full removal in favour of text-shadow, the bigger hero type
-scale, and the reference file's own AA failure/fix) — if `tokens.css`
+scale, and the reference file's own AA failure/fix; §5b adds the type-size
+correction, the theme-toggle filled-square fix, and the gradient extended
+through the whole page including the `background-attachment:fixed` +
+Playwright `fullPage` screenshot quirk and the custom-property/plain-
+`color`-inheritance gotcha) — if `tokens.css`
 changes after this date and this file isn't updated to match, trust the
 file.
