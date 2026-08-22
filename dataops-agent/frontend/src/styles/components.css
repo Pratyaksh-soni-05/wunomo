@@ -960,41 +960,6 @@ tr.selected td:first-child {
   min-height: 44px; padding: 0 20px; font-size: 14px;
 }
 .landing-page .btn-lg { min-height: 52px; padding: 0 30px; font-size: 15.5px; }
-/* 2026-08-21: the theme toggle was rendering as a solid dark filled square
-   on hover, in dark theme specifically — reproduced and confirmed, not
-   just read off the CSS. The base .topbar-icon-btn already centers its
-   icon correctly (justify-content:center was already present here, unlike
-   marketing-site's copy of this rule, which lacked it) but :hover uses the
-   THEME-DEPENDENT --surface-hover/--border-strong/--text-primary tokens,
-   which is wrong for a button sitting on the hero's fixed, theme-invariant
-   mesh (palest at the very top, where nav lives) — in dark theme
-   --surface-hover resolves to a near-black fill against that always-pale
-   backdrop, which is the "filled square." Matches the reference's own
-   .icon-btn shape (44x44 fixed, not min-*; border reserved-but-transparent
-   at rest so hover doesn't shift layout) with a dark-ink hover veil in
-   place of the reference's white one — the reference's own nav sits on
-   the same pale mesh top with the same fixed dark-ink text, so its literal
-   white hover veil would have the identical near-invisible problem if
-   ever tested against its own composition; a dark veil is what actually
-   reads here. */
-.landing-nav .topbar-icon-btn {
-  width: 44px; height: 44px; min-width: 0; min-height: 0; padding: 0;
-  border-radius: 9px; border: 1px solid transparent; background: transparent;
-  color: inherit;
-}
-.landing-nav .topbar-icon-btn:hover {
-  background: rgba(10, 26, 51, 0.08);
-  border-color: rgba(10, 26, 51, 0.24);
-  box-shadow: 0 2px 10px rgba(0, 20, 70, 0.1);
-  color: inherit;
-}
-/* Icon bumped 16px -> 17px, landing-only. ThemeToggle.tsx is shared with
-   the authenticated app's Topbar (src/components/shell/Topbar.tsx), so
-   this is a CSS override scoped to the landing nav rather than an edit to
-   the component's own hardcoded width/height attributes — those stay 16px
-   everywhere else. CSS width/height win over an SVG's presentation
-   attributes, so this is a real, reliable override, not a fragile one. */
-.landing-nav .topbar-icon-btn svg { width: 17px; height: 17px; }
 
 /* Product frame — deliberately real screenshots, never an invented mock. */
 .landing-hero-frame {
@@ -1321,29 +1286,25 @@ tr.selected td:first-child {
   .landing-nav-anchors { display: none; }
 }
 
-/* 2026-08-21: the logged-out nav (wordmark logo + theme toggle + Log in +
-   Try Wunomo) is the one nav configuration on this page with two action
-   buttons, not one - at narrow widths the full-logotype wordmark (245px at
-   its 26px height, since it's the whole cursive "wunomo" mark, not a
-   compact monogram) plus theme toggle plus two spec-sized 44px buttons
-   doesn't fit even with .landing-nav-anchors already hidden; measured
-   overflowing past the viewport and clipping "Try Wunomo" entirely below
-   ~480px. Rather than force everything to full spec width and let it
-   clip, three things give at this width: the secondary "Log in" link
-   drops (the primary, signup-driving "Try Wunomo" CTA stays full-size and
-   full-spec), the theme toggle drops (a nice-to-have on a page that
-   already defaults to light and is a fixed dark-chrome hero regardless),
-   and the wordmark shrinks from 26px to 20px tall (proportionally
-   ~245px -> ~189px wide, since the mark has no independent width control -
-   it's one SVG at a fixed aspect ratio). Authenticated visitors are
-   unaffected (single "Go to Dashboard" button, already fits without any
-   of this). Measured: fits with room at 375px after this; see the report
-   for the exact numbers - this is the one place 44px-everywhere didn't fit
-   and got adapted instead of forced. */
+/* 2026-08-21: the logged-out nav (wordmark logo + Log in + Try Wunomo) is
+   the one nav configuration on this page with two action buttons, not one -
+   at narrow widths the full-logotype wordmark (245px at its 26px height,
+   since it's the whole cursive "wunomo" mark, not a compact monogram) plus
+   two spec-sized 44px buttons doesn't fit even with .landing-nav-anchors
+   already hidden; measured overflowing past the viewport and clipping "Try
+   Wunomo" entirely below ~480px. Rather than force everything to full spec
+   width and let it clip, two things give at this width: the secondary "Log
+   in" link drops (the primary, signup-driving "Try Wunomo" CTA stays
+   full-size and full-spec), and the wordmark shrinks from 26px to 20px tall
+   (proportionally ~245px -> ~189px wide, since the mark has no independent
+   width control - it's one SVG at a fixed aspect ratio). Authenticated
+   visitors are unaffected (single "Go to Dashboard" button, already fits
+   without any of this). Measured: fits with room at 375px after this; see
+   the report for the exact numbers - this is the one place 44px-everywhere
+   didn't fit and got adapted instead of forced. */
 @media (max-width: 480px) {
   .landing-brand-mark { height: 20px; }
-  .landing-nav-actions .btn-secondary,
-  .landing-nav-actions .topbar-icon-btn { display: none; }
+  .landing-nav-actions .btn-secondary { display: none; }
 }
 
 @media (max-width: 640px) {

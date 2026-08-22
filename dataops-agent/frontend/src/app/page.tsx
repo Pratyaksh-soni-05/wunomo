@@ -5,7 +5,6 @@ import Link from "next/link";
 import { Instrument_Serif } from "next/font/google";
 import { EmployeeCard } from "@/components/shared/EmployeeCard";
 import { ScreenshotCarousel } from "@/components/shared/ScreenshotCarousel";
-import { ThemeToggle } from "@/components/shell/ThemeToggle";
 import { WunomoWordmark } from "@/components/brand";
 import { EMPLOYEES } from "@/lib/employees";
 import { getToken } from "@/lib/api";
@@ -114,7 +113,6 @@ export default function LandingPage() {
             <a href="#contact">Contact</a>
           </div>
           <div className="landing-nav-actions">
-            <ThemeToggle />
             {authed ? (
               <Link href="/dashboard" className="btn btn-primary">Go to Dashboard</Link>
             ) : (
