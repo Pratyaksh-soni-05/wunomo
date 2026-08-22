@@ -116,8 +116,23 @@ export default function LoginPage() {
   }
 
   async function handleGoogle() {
-    const { url } = await googleLoginUrl();
-    window.location.href = url;
+    try {
+      const { url } = await googleLoginUrl();
+      window.location.href = url;
+    } catch (err) {
+      // A blocked CORS preflight (wrong origin/port) throws a raw fetch
+      // TypeError here, not an ApiError — surface that case with an
+      // actionable message instead of letting the click look dead. See
+      // docs/context/WALKTHROUGH_FINDINGS_2026-08.md for the origin-
+      // mismatch history this is guarding against.
+      console.error("Google sign-in failed:", err);
+      toast.push(
+        err instanceof ApiError
+          ? String(err.detail ?? "Google sign-in failed.")
+          : "Couldn't reach the API. Check the backend is running and this page is open on the origin it expects (localhost:3000 in dev).",
+        "danger"
+      );
+    }
   }
 
   return (

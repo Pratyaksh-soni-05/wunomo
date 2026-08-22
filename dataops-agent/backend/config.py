@@ -43,7 +43,22 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> List[str]:
-        return [o.strip() for o in self.APP_CORS_ORIGINS.split(",")]
+        origins = [o.strip() for o in self.APP_CORS_ORIGINS.split(",") if o.strip()]
+        if self.APP_ENV == "development":
+            # Next dev silently falls back to 3001/3002/etc when 3000 is held
+            # by a stray process (has bitten this project twice — a CORS-
+            # blocked Google OAuth button that looked dead, and a "no changes
+            # visible" report against stale code on 3000 while work was live
+            # on 3001). Widen to the common fallback ports/hosts in dev only;
+            # production/staging always use APP_CORS_ORIGINS verbatim, no
+            # widening — see docs/context/WALKTHROUGH_FINDINGS_2026-08.md.
+            dev_extras = [
+                f"http://{host}:{port}"
+                for host in ("localhost", "127.0.0.1")
+                for port in (3000, 3001, 3002)
+            ]
+            origins = sorted(set(origins) | set(dev_extras))
+        return origins
 
     class Config:
         env_file = ".env"
