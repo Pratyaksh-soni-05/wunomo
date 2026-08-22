@@ -3,3 +3,7 @@
 # sibling top-level dir (e.g. marketing-site/) that isn't under dataops-agent/,
 # whose own .gitignore only covers itself and below.
 node_modules/
+
+# Local DB dumps (e.g. pre-cleanup safety backups) - large binary artifacts,
+# never belong in git history.
+backups/
