@@ -150,8 +150,10 @@
   /* Phase 3 (2026-08-19): the auth brand panel's own background — layered
      radial-gradient glows deepening to --deep-ground, NOT tied to
      --accent-fill (which inverts to a light grey in dark mode via Decision
-     1 — wrong for this panel, which stays dark-ish in both themes). Dark
-     value (flat, no gradient, "no colour") lives in the dark blocks below.
+     1 — wrong for this panel, which stays dark-ish in both themes). As of
+     2026-08-27 the panel's gradient is defined once and theme-invariant
+     (no dark-block override at all) rather than flattening to a plain grey
+     in dark mode — see the full --auth-brand-bg definition further below.
      --mesh-glow-1/2 started as auth-panel-only, but reuse the same hexes as
      --focus-ring's dark value and --accent-fill respectively (already the
      two blues this product uses, not third/fourth invented ones) — as of
@@ -192,16 +194,34 @@
      components.css .landing-hero-mesh and FUTUREWAVE_TOKENS_HANDOFF.md. */
   --mesh-ramp-4: #0A2E86;
 
+  /* 2026-08-27: rebuilt to match design/login gradient.jpg's character (deep
+     navy-to-electric-blue, soft organic corner blobs) instead of the flat
+     two-glow version above — same tokens/technique as .landing-hero-mesh
+     (color-mix over the two established blues + --deep-ground), just
+     recomposed for a tall narrow panel instead of a wide hero. Theme-
+     invariant on purpose, same reasoning as the hero mesh: this is fixed
+     brand chrome, not a themed surface, so it's defined once here and NOT
+     overridden in either dark block below. */
   --auth-brand-bg:
-    radial-gradient(ellipse 900px 700px at 10% 0%, color-mix(in srgb, var(--mesh-glow-1) 45%, transparent), transparent 70%),
-    radial-gradient(ellipse 800px 600px at 100% -10%, color-mix(in srgb, var(--mesh-glow-2) 35%, transparent), transparent 65%),
-    var(--deep-ground);
+    radial-gradient(ellipse 70% 42% at 18% 10%,
+      color-mix(in srgb, var(--mesh-white) 60%, transparent) 0%,
+      color-mix(in srgb, var(--mesh-white) 22%, transparent) 45%,
+      transparent 75%),
+    radial-gradient(ellipse 60% 50% at 12% 82%,
+      color-mix(in srgb, var(--mesh-glow-1) 65%, transparent) 0%,
+      color-mix(in srgb, var(--mesh-glow-1) 25%, transparent) 50%,
+      transparent 80%),
+    linear-gradient(165deg,
+      var(--mesh-ramp-1) 0%,
+      var(--mesh-glow-1) 18%,
+      var(--mesh-glow-2) 42%,
+      var(--mesh-ramp-3) 70%,
+      var(--deep-ground) 100%);
 
   /* Text / link — must satisfy AA against --surface and --bg */
   --accent-text: #0056FF;              /* light: 5.496:1/surface, 5.238:1/bg. Replaces Phase 1's #416487 (--ocean-650) stopgap. */
   --accent-text-hover: var(--ocean-700);
   --badge-accent-text: var(--midnight-700);
-  --on-accent-text: var(--midnight-100);  /* light — .auth-brand p's secondary text on --auth-brand-bg's mesh. Dark override in the dark blocks. */
 
   /* Border */
   --accent-border: var(--focus-ring);  /* tracks focus-ring so both stay in sync across themes */
@@ -413,14 +433,11 @@
   --on-accent-fill: var(--bg);              /* #0A0A0B — 17.7:1 on the above */
   --accent-fill-hover: #FFFFFF;
 
-  /* Phase 3: near-black with a subtle lift, no colour — reuses
-     --surface-hover rather than inventing a new grey. --on-accent-text's
-     dark value changed from Decision 1's --border-strong (right for text
-     on a light-grey inverted fill, wrong here) to --text-secondary — this
-     panel stays dark in both themes, so its secondary text needs to stay
-     light in both themes too. 6.22:1 on --auth-brand-bg's dark flat value. */
-  --auth-brand-bg: var(--surface-hover);    /* #1A1A1D */
-  --on-accent-text: var(--text-secondary);  /* #9A9AA2 */
+  /* --auth-brand-bg NOT overridden here as of 2026-08-27 — the panel's
+     gradient (defined once on :root) is theme-invariant, same as the
+     landing hero mesh; only the previous flat-grey dark treatment (and the
+     --on-accent-text token that coloured text on top of it, now unused
+     since the panel carries no text) is retired. */
 
   /* Decision 2 (2026-08-19): opaque low-lift grey, not a translucent blue
      tint — the same defect class the badges just had. */
@@ -494,8 +511,7 @@
     --accent-fill: var(--text-primary);
     --on-accent-fill: var(--bg);
     --accent-fill-hover: #FFFFFF;
-    --auth-brand-bg: var(--surface-hover);
-    --on-accent-text: var(--text-secondary);
+    /* --auth-brand-bg not overridden here either — see the :root definition. */
     --accent-subtle-bg: var(--surface-hover);
     --accent-subtle-border: var(--border);
 

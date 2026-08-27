@@ -402,21 +402,30 @@ tr.selected td:first-child {
    AUTH SCREENS (Phase 6)
    ========================================== */
 .auth-shell { display: flex; min-height: 100vh; }
-/* Phase 3 (2026-08-19): the mesh (light) / near-black-plus-lift (dark)
-   background lives in --auth-brand-bg, not --accent-fill — see that
-   token's comment in tokens.css for why they're no longer the same thing.
-   overflow:hidden keeps the radial-gradient glows from bleeding past the
-   panel edge; position:relative is what makes that containment apply. */
+/* 2026-08-27: rebuilt to design/login gradient.jpg's reference — a full-
+   height gradient (--auth-brand-bg, theme-invariant, see tokens.css) with a
+   single large centred WunomoMark and nothing else, no headline/tagline/
+   wordmark. overflow:hidden keeps the radial-gradient blobs and the grain
+   layer from bleeding past the panel edge; position:relative is what makes
+   that containment apply and gives .auth-brand-grain a positioning parent. */
 .auth-brand {
   flex: 0 0 40%; background: var(--auth-brand-bg); color: var(--on-dark);
-  display: flex; flex-direction: column; justify-content: flex-start;
-  padding: 48px; gap: 16px;
+  display: flex; align-items: center; justify-content: center;
   position: relative; overflow: hidden;
 }
-.auth-brand-wordmark { height: 22px; width: auto; color: var(--on-dark); flex-shrink: 0; }
-.auth-brand-copy {
-  font-family: var(--font-display); font-size: 21px; line-height: 1.35; font-weight: 500;
-  color: var(--on-accent-text); max-width: 320px;
+/* Same turbulence-noise technique as .landing-hero-grain (components.css),
+   just scoped to this panel instead of the hero. */
+.auth-brand-grain {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0.16; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='0.5'/></svg>");
+}
+/* MARK_ASPECT (WunomoMark.tsx) is 1.7274 (w:h) — height-driven sizing keeps
+   the mark's own proportions intact rather than fighting them with a fixed
+   width. clamp() floor matches the "never below 32px" mobile requirement;
+   the desktop ceiling keeps it a deliberate mark, not a logo wall. */
+.auth-brand-mark {
+  position: relative; z-index: 2;
+  height: clamp(32px, 12vw, 120px); width: auto; color: var(--on-dark); flex-shrink: 0;
 }
 .auth-form-side {
   flex: 1; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 32px;
@@ -474,12 +483,12 @@ tr.selected td:first-child {
 .onboarding-actions { display: flex; justify-content: space-between; margin-top: 32px; }
 
 /* Mobile: panels stack instead of side-by-side; the brand panel collapses
-   to a compact header band (wordmark only, copy line dropped to keep it
-   short) rather than disappearing outright. */
+   to a short header band (mark only, scaled down but never below the
+   .auth-brand-mark clamp() floor of 32px) rather than disappearing
+   outright or keeping its full-height 40% share of a narrow viewport. */
 @media (max-width: 860px) {
   .auth-shell { flex-direction: column; }
-  .auth-brand { flex: 0 0 auto; padding: 20px 24px; justify-content: center; }
-  .auth-brand-copy { display: none; }
+  .auth-brand { flex: 0 0 auto; padding: 20px 24px; }
 }
 
 /* ==========================================
