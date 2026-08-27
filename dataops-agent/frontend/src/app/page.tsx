@@ -156,11 +156,14 @@ export default function LandingPage() {
           </div>
         </div>
 
-        <div className="landing-hero-frame-title">See AXIOM in the product</div>
-        <div className="landing-hero-frame">
-          <div className="landing-hero-frame-bar"><i /><i /><i /></div>
-          <ScreenshotCarousel slides={SCREENSHOTS} />
+      </section>
+
+      <section className="landing-section" aria-label="Product screenshots">
+        <div className="landing-section-header">
+          <div className="landing-eyebrow">See It Live</div>
+          <h2 className="font-display">See AXIOM in the product</h2>
         </div>
+        <ScreenshotCarousel slides={SCREENSHOTS} />
       </section>
 
       <section className="landing-section" id="features">

@@ -970,47 +970,17 @@ tr.selected td:first-child {
 }
 .landing-page .btn-lg { min-height: 52px; padding: 0 30px; font-size: 15.5px; }
 
-/* Product frame — deliberately real screenshots, never an invented mock. */
-.landing-hero-frame-title {
-  position: relative; z-index: 5;
-  text-align: center; color: #fff; font-family: var(--font-display);
-  font-size: clamp(18px, 2.2vw, 24px); font-weight: 600;
-  margin: 0 auto 18px; text-shadow: 0 2px 16px rgba(0, 10, 45, 0.4);
-}
-.landing-hero-frame {
-  position: relative; z-index: 5;
-  width: min(1200px, 92vw); margin: 0 auto;
-  border-radius: 16px 16px 0 0;
-  border: 1px solid rgba(255, 255, 255, 0.2); border-bottom: none;
-  background: rgba(255, 255, 255, 0.07);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 -20px 70px rgba(0, 10, 45, 0.3);
-  overflow: hidden;
-}
-.landing-hero-frame-bar { display: flex; gap: 7px; padding: 13px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.14); }
-.landing-hero-frame-bar i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255, 255, 255, 0.34); display: block; }
-/* 2026-08-27: the min(300px,32vh)/object-fit:cover crop this replaced made
-   real product UI (dense tables, the chat panel's full-width layout)
-   unreadable — a sliver of the very top of each screen, not a legible
-   screenshot. Widened the frame (1080->1200px/88->92vw) and switched to a
-   real aspect-ratio box sized off the actual 1440x900 capture (16:10) with
-   object-fit:contain, so the full screen renders at a readable size instead
-   of being cropped to a strip. This does make the hero taller than the
-   previous capped version — re-verified against item 59's contrast fix
-   directly rather than assuming the old height-matching reasoning still
-   applies: the headline's contrast floor is carried by its own text-shadow/
-   scrim (travels with the text), not by keeping hero height near a
-   reference's measured proportions, so a taller hero here is safe. See
-   FUTUREWAVE_TOKENS_HANDOFF.md item 59 for that mechanism. */
-.landing-hero-frame .landing-carousel { max-width: none; margin: 0; }
-.landing-hero-frame .landing-carousel-frame { border: none; border-radius: 0; box-shadow: none; background: transparent; }
-.landing-hero-frame .landing-carousel-slide img { aspect-ratio: 16 / 10; width: 100%; object-fit: contain; background: #050b1a; }
-.landing-hero-frame .landing-carousel-caption { background: rgba(255, 255, 255, 0.07); border-top-color: rgba(255, 255, 255, 0.14); }
-.landing-hero-frame .landing-carousel-caption-title { color: #fff; }
-.landing-hero-frame .landing-carousel-caption-desc { color: rgba(255, 255, 255, 0.7); }
-.landing-hero-frame .landing-carousel-dots { margin: 14px 0; }
-.landing-hero-frame .landing-carousel-arrow { color: rgba(255, 255, 255, 0.7); }
-.landing-hero-frame .landing-carousel-arrow:hover { color: #fff; }
+/* 2026-08-27: the hero-embedded browser-chrome carousel treatment (frame
+   wrapping the whole ScreenshotCarousel, including its arrows, in a single
+   overflow:hidden box) is retired — it's what caused both the "doesn't sit
+   inside one section cleanly" clipping and the arrow-clipping bug (the
+   arrows sit at a negative offset relative to .landing-carousel, which
+   this wrapper's own overflow:hidden then cut into, since the wrapper had
+   to also fill 100% of the carousel's width once widened). The carousel
+   now lives in its own .landing-section, identical in markup and CSS to
+   the marketing site's own carousel section (no product-only override
+   layer to drift out of sync again) — see WALKTHROUGH_FINDINGS_2026-08.md
+   #69 for the diff against marketing that found this. */
 
 /* Phase 8 (2026-08-19/20): hero rebuilt to match design/futurewave-reference.html
    — mesh, wordmark bands, nav-inside-hero, product frame. The mesh is
@@ -1212,15 +1182,19 @@ tr.selected td:first-child {
 .landing-feature h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
 .landing-feature p { font-size: 13.5px; color: var(--text-secondary); line-height: 1.55; }
 
-/* Product carousel */
-.landing-carousel { position: relative; max-width: 980px; margin: 0 auto; }
+/* Product carousel — matches the marketing site's own carousel exactly
+   (see WALKTHROUGH_FINDINGS_2026-08.md #69): 980px fixed -> min(1200px,92vw)
+   so real product UI renders legibly, and a real 16:10 aspect-ratio box
+   sized off the actual 1440x900 capture with object-fit:contain instead of
+   height:auto, so nothing depends on image-load timing for its layout box. */
+.landing-carousel { position: relative; max-width: min(1200px, 92vw); margin: 0 auto; }
 .landing-carousel-frame {
   border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden;
   background: var(--surface); box-shadow: var(--shadow-lg);
 }
 .landing-carousel-track { display: flex; transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1); }
 .landing-carousel-slide { flex: 0 0 100%; }
-.landing-carousel-slide img { display: block; width: 100%; height: auto; }
+.landing-carousel-slide img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: #050b1a; }
 .landing-carousel-caption {
   padding: 14px 20px; border-top: 1px solid var(--border); display: flex;
   align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
