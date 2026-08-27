@@ -962,9 +962,15 @@ tr.selected td:first-child {
 .landing-page .btn-lg { min-height: 52px; padding: 0 30px; font-size: 15.5px; }
 
 /* Product frame — deliberately real screenshots, never an invented mock. */
+.landing-hero-frame-title {
+  position: relative; z-index: 5;
+  text-align: center; color: #fff; font-family: var(--font-display);
+  font-size: clamp(18px, 2.2vw, 24px); font-weight: 600;
+  margin: 0 auto 18px; text-shadow: 0 2px 16px rgba(0, 10, 45, 0.4);
+}
 .landing-hero-frame {
   position: relative; z-index: 5;
-  width: min(1080px, 88vw); margin: 0 auto;
+  width: min(1200px, 92vw); margin: 0 auto;
   border-radius: 16px 16px 0 0;
   border: 1px solid rgba(255, 255, 255, 0.2); border-bottom: none;
   background: rgba(255, 255, 255, 0.07);
@@ -974,17 +980,22 @@ tr.selected td:first-child {
 }
 .landing-hero-frame-bar { display: flex; gap: 7px; padding: 13px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.14); }
 .landing-hero-frame-bar i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255, 255, 255, 0.34); display: block; }
-/* The reference's own frame holds an empty placeholder capped at
-   min(340px,36vh) — real product screenshots have no natural cap, and an
-   uncapped carousel image made the whole hero ~345px taller than the
-   reference at 1440x900, which is what actually broke the headline/subhead
-   contrast verification (item 59): a taller hero pushes the same
-   percentage-based gradient stops further down, landing the headline in a
-   paler band than the reference's own tested proportions. Capping the
-   image keeps the hero close to the reference's real measured height. */
+/* 2026-08-27: the min(300px,32vh)/object-fit:cover crop this replaced made
+   real product UI (dense tables, the chat panel's full-width layout)
+   unreadable — a sliver of the very top of each screen, not a legible
+   screenshot. Widened the frame (1080->1200px/88->92vw) and switched to a
+   real aspect-ratio box sized off the actual 1440x900 capture (16:10) with
+   object-fit:contain, so the full screen renders at a readable size instead
+   of being cropped to a strip. This does make the hero taller than the
+   previous capped version — re-verified against item 59's contrast fix
+   directly rather than assuming the old height-matching reasoning still
+   applies: the headline's contrast floor is carried by its own text-shadow/
+   scrim (travels with the text), not by keeping hero height near a
+   reference's measured proportions, so a taller hero here is safe. See
+   FUTUREWAVE_TOKENS_HANDOFF.md item 59 for that mechanism. */
 .landing-hero-frame .landing-carousel { max-width: none; margin: 0; }
 .landing-hero-frame .landing-carousel-frame { border: none; border-radius: 0; box-shadow: none; background: transparent; }
-.landing-hero-frame .landing-carousel-slide img { height: min(300px, 32vh); width: 100%; object-fit: cover; object-position: top; }
+.landing-hero-frame .landing-carousel-slide img { aspect-ratio: 16 / 10; width: 100%; object-fit: contain; background: #050b1a; }
 .landing-hero-frame .landing-carousel-caption { background: rgba(255, 255, 255, 0.07); border-top-color: rgba(255, 255, 255, 0.14); }
 .landing-hero-frame .landing-carousel-caption-title { color: #fff; }
 .landing-hero-frame .landing-carousel-caption-desc { color: rgba(255, 255, 255, 0.7); }
