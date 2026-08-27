@@ -266,15 +266,15 @@ async def _check_freshness():
     async with AsyncSessionLocal() as db:
         tenants = await db.execute(select(Tenant).where(Tenant.is_active == True))
         for tenant in tenants.scalars().all():
-            # Existing open staleness incidents for this tenant, so the new
-            # notification wire-up below only fires when a source *newly*
-            # becomes stale, not on every 15-minute tick for a source
-            # that's been stale for hours - this does NOT fix the known,
-            # accepted "creates duplicate Incident rows" gap (see CLAUDE.md's
-            # Known-broken row) - that behavior is untouched. It only
-            # prevents that pre-existing gap from also spamming a real
-            # Slack/email notification every 15 minutes once wired.
-            already_notified_source_ids: set[str] = set()
+            # Existing open staleness incidents for this tenant, keyed by the
+            # source they're about - item 53 fix. Previously this set only
+            # gated the notification below; Incident creation itself was
+            # unconditional, so every 15-minute tick a source stayed stale
+            # added another near-duplicate row. Now a source with an
+            # already-open "Stale data:" incident gets that incident
+            # refreshed in place (title/description/severity re-derived from
+            # the current hours_since) instead of a brand-new row.
+            existing_by_source_id: dict[str, Incident] = {}
             existing_open = await db.execute(
                 select(Incident).where(
                     Incident.tenant_id == tenant.id,
@@ -284,7 +284,7 @@ async def _check_freshness():
             )
             for existing in existing_open.scalars().all():
                 for asset_id in (existing.affected_assets or []):
-                    already_notified_source_ids.add(asset_id)
+                    existing_by_source_id[asset_id] = existing
 
             newly_stale = []
             sources = await db.execute(
@@ -298,18 +298,25 @@ async def _check_freshness():
                 hours_since = (utcnow() - src.last_profiled_at).total_seconds() / 3600
                 sla_hours   = 24
                 if hours_since > sla_hours:
-                    incident = Incident(
-                        id=str(uuid.uuid4()),
-                        tenant_id=tenant.id,
-                        title=f"Stale data: {src.name} ({round(hours_since,1)}h overdue)",
-                        description=f"Source '{src.name}' has not been synced in {round(hours_since,1)} hours. SLA: {sla_hours}h.",
-                        severity=IncidentSeverity.HIGH if hours_since > sla_hours * 2
-                                 else IncidentSeverity.MEDIUM,
-                        affected_assets=[src.id],
-                        detected_at=utcnow()
-                    )
-                    db.add(incident)
-                    if src.id not in already_notified_source_ids:
+                    severity = (IncidentSeverity.HIGH if hours_since > sla_hours * 2
+                                else IncidentSeverity.MEDIUM)
+                    existing = existing_by_source_id.get(src.id)
+                    if existing is not None:
+                        existing.title = f"Stale data: {src.name} ({round(hours_since,1)}h overdue)"
+                        existing.description = f"Source '{src.name}' has not been synced in {round(hours_since,1)} hours. SLA: {sla_hours}h."
+                        existing.severity = severity
+                        db.add(existing)
+                    else:
+                        incident = Incident(
+                            id=str(uuid.uuid4()),
+                            tenant_id=tenant.id,
+                            title=f"Stale data: {src.name} ({round(hours_since,1)}h overdue)",
+                            description=f"Source '{src.name}' has not been synced in {round(hours_since,1)} hours. SLA: {sla_hours}h.",
+                            severity=severity,
+                            affected_assets=[src.id],
+                            detected_at=utcnow()
+                        )
+                        db.add(incident)
                         newly_stale.append({
                             "source_id": src.id, "source_name": src.name,
                             "hours_overdue": round(hours_since, 1),

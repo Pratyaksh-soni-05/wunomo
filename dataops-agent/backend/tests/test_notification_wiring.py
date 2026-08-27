@@ -133,9 +133,9 @@ async def test_freshness_check_notifies_once_per_newly_stale_source_not_every_ti
     """The real anti-spam guard: a source that's already known-stale (an
     open staleness Incident already exists for it) must not re-trigger a
     notification on a later tick -- only a source *newly* going stale
-    should. This does not touch the separate, already-accepted
-    duplicate-Incident-row gap (CLAUDE.md Known-broken) -- that behavior
-    is unchanged; only the notification is guarded."""
+    should. Also covers item 53's fix: repeated ticks must update the
+    existing open Incident in place, not create a new duplicate row every
+    time (the old, now-fixed CLAUDE.md Known-broken behavior)."""
     from services.tasks import _check_freshness
 
     reg = await _register(client)
@@ -168,17 +168,16 @@ async def test_freshness_check_notifies_once_per_newly_stale_source_not_every_ti
     await _check_freshness()
     assert captured == [], "must not re-notify for an already-known-stale source"
 
-    # Confirm the pre-existing duplicate-incident behavior is genuinely
-    # untouched -- two ticks really did create at least two Incident rows
-    # (not exactly 2: this test shares its DB with the real, live
-    # celery_beat/celery_worker containers, whose own independent
-    # 15-minute freshness check can race in and create additional
-    # duplicates for this same real stale source -- that's the
-    # already-known, accepted duplicate-incident gap doing exactly what
-    # it's documented to do, not a bug in this test).
+    # Item 53 fix: repeated ticks must update the one existing open
+    # Incident in place, never create a second row -- true regardless of
+    # how many times _check_freshness() runs (this test's own two explicit
+    # calls, plus however many times the real, live celery_beat/
+    # celery_worker containers this test shares a DB with independently
+    # fire their own 15-minute freshness check against this same tenant in
+    # the meantime).
     async with AsyncSessionLocal() as db:
         from sqlalchemy import select
         r = await db.execute(select(Incident).where(
             Incident.tenant_id == tenant_id, Incident.status == IncidentStatus.OPEN,
         ))
-        assert len(r.scalars().all()) >= 2
+        assert len(r.scalars().all()) == 1
