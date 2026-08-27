@@ -49,21 +49,27 @@ const FEATURES = [
   },
 ];
 
-// 2026-08-27 recapture: 5 screens, all dark-theme/1440@2x, all real and
-// unedited from a fresh "Wunomo Product Demo" tenant seeded specifically for
-// this pass (2 synthetic CSV sources, no real names/emails in the data by
-// design — see WALKTHROUGH_FINDINGS_2026-08.md #65/#66 for the seeding and
-// quota story). Chat's raw pipeline/source/run/tenant UUIDs are visually
-// redacted (black bars, DOM-level) before the screenshot, not edited out of
-// the underlying message. Incidents stays excluded (item 55 still lies
-// about its own count) and Analytics stays excluded (dropped from nav) —
-// every other screen a fresh demo tenant can show honestly is here now.
+// 2026-08-27 recapture, filenames content-hash-suffixed 2026-08-27 (see
+// WALKTHROUGH_FINDINGS_2026-08.md #68): 5 screens, all dark-theme/1440@2x,
+// all real and unedited from demo@axiom-yc.ai — the real, long-running demo
+// tenant, its real contents exactly as they stand (real 22 open incidents,
+// a real failed pipeline run, real task history including QA-verification
+// debris; see #67), not a tenant seeded for the capture. Chat's raw
+// pipeline/source/run/incident/tenant UUIDs are visually redacted (black
+// bars, DOM-level) before the screenshot, not edited out of the underlying
+// message. Incidents stays excluded (item 55 still lies about its own
+// count) and Analytics stays excluded (dropped from nav) — every other
+// screen this tenant can show honestly is here now. Filenames carry a
+// content-hash suffix (first 8 hex chars of the file's own sha256) so a
+// future recapture at the same logical slot never again collides with a
+// still-cached same-path file across Vercel/Cloudflare's two independent
+// CDN layers — see #68 for the wunomo.in incident this fixes.
 const SCREENSHOTS = [
-  { src: "/landing/shot-dashboard.png", title: "Dashboard", desc: "Real pipeline health, quality score, and pending approvals. Nothing fabricated." },
-  { src: "/landing/shot-chat.png", title: "AXIOM chat", desc: "A real conversation, with a visible trace of every tool call AXIOM made." },
-  { src: "/landing/shot-pipelines.png", title: "Pipelines", desc: "Create, schedule, and trigger real pipelines with real run history." },
-  { src: "/landing/shot-tasks.png", title: "Tasks", desc: "Real multi-step plans AXIOM generates, reviews, and executes with human approval on the risky steps." },
-  { src: "/landing/shot-quality.png", title: "Quality", desc: "Real quality rules against real data, with a real pass/fail record." },
+  { src: "/landing/shot-dashboard-9fa65854.png", title: "Dashboard", desc: "Real pipeline health, quality score, and pending approvals. Nothing fabricated." },
+  { src: "/landing/shot-chat-c03e8bc4.png", title: "AXIOM chat", desc: "A real conversation, with a visible trace of every tool call AXIOM made." },
+  { src: "/landing/shot-pipelines-33954878.png", title: "Pipelines", desc: "Create, schedule, and trigger real pipelines with real run history." },
+  { src: "/landing/shot-tasks-36aa441b.png", title: "Tasks", desc: "Real multi-step plans AXIOM generates, reviews, and executes with human approval on the risky steps." },
+  { src: "/landing/shot-quality-f9db6e45.png", title: "Quality", desc: "Real quality rules against real data, with a real pass/fail record." },
 ];
 
 // The landing page is the signed-off, light-tuned "public mode" and must
