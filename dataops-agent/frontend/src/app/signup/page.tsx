@@ -69,10 +69,10 @@ export default function SignupPage() {
     try {
       const res = await requestEmailCode(email);
       if (res.status === "rate_limited") {
-        toast.push("Too many requests — try again later.", "warning");
+        toast.push("You're sending codes too fast. Give it a moment.", "warning");
         return;
       }
-      toast.push("Code sent — check your email.", "success");
+      toast.push("We just emailed you a code.", "success");
       setMode("code-verify");
       setCooldown(60);
     } catch {
@@ -126,7 +126,7 @@ export default function SignupPage() {
         <div className="flex flex-col gap-3">
           <div className="auth-nudge">
             <span>
-              Heads up — this email already has {nudge.length === 1 ? "a workspace" : `${nudge.length} workspaces`}
+              This email already has {nudge.length === 1 ? "a workspace" : `${nudge.length} workspaces`}
               {" "}({nudge.map((w) => w.tenant_name).join(", ")}). Your new workspace was still created.
             </span>
           </div>

@@ -40,7 +40,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("expired") === "1") {
-      toast.push("Session expired — please log in again.", "warning");
+      toast.push("Your session expired. Please log in again.", "warning");
       router.replace("/login");
     }
     // Runs once on mount to consume the ?expired=1 redirect marker.
@@ -74,10 +74,10 @@ export default function LoginPage() {
     try {
       const res = await requestEmailCode(email);
       if (res.status === "rate_limited") {
-        toast.push("Too many requests — try again later.", "warning");
+        toast.push("Too many requests right now. Try again in a bit.", "warning");
         return;
       }
-      toast.push("Code sent — check your email.", "success");
+      toast.push("Check your email for the code.", "success");
       setMode("code-verify");
       setCooldown(60);
     } catch {
