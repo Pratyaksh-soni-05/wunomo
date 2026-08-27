@@ -467,7 +467,12 @@ img { display: block; max-width: 100%; }
 }
 .landing-carousel-track { display: flex; transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1); }
 .landing-carousel-slide { flex: 0 0 100%; }
-.landing-carousel-slide img { display: block; width: 100%; height: auto; }
+/* 2026-08-27: matches the product repo's own .landing-hero-frame image
+   rule exactly (aspect-ratio:16/10 sized off the real 1440x900 capture,
+   object-fit:contain) instead of a plain height:auto box, so both repos
+   size the screenshot the same way rather than two implementations that
+   happen to agree at some widths and drift at others. */
+.landing-carousel-slide img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: #050b1a; }
 .landing-carousel-caption {
   padding: 14px 20px; border-top: 1px solid var(--border); display: flex;
   align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;

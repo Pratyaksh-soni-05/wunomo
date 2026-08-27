@@ -21,7 +21,7 @@ const instrumentSerif = Instrument_Serif({
 const FEATURES = [
   {
     title: "Chat is the whole interface.",
-    desc: "Ask AXIOM in plain language — it runs real pipelines, quality checks, and incident triage against your actual data.",
+    desc: "Ask AXIOM in plain language, and it runs real pipelines, quality checks, and incident triage against your actual data.",
   },
   {
     title: "Pipelines without the plumbing.",
@@ -39,6 +39,10 @@ const FEATURES = [
     title: "Works like a team tool.",
     desc: "Real roles and permissions, usage-based plans, from day one.",
   },
+  {
+    title: "Plans the multi-step work, too.",
+    desc: "Ask for more than one action and AXIOM turns it into a real plan, executing step by step with your approval on anything risky.",
+  },
 ];
 
 // 2026-08-27: same 5 screens as the product repo's own landing page, same
@@ -48,7 +52,7 @@ const FEATURES = [
 // seeded. Replaces the pre-Futurewave 4-shot set (Dashboard/Chat/Pipelines/
 // Governance) so both sites show the same, current product.
 const SCREENSHOTS = [
-  { src: "/landing/shot-dashboard.png", title: "Dashboard", desc: "Real pipeline health, quality score, and pending approvals — no fabricated numbers." },
+  { src: "/landing/shot-dashboard.png", title: "Dashboard", desc: "Real pipeline health, quality score, and pending approvals. Nothing fabricated." },
   { src: "/landing/shot-chat.png", title: "AXIOM chat", desc: "A real conversation, with a visible trace of every tool call AXIOM made." },
   { src: "/landing/shot-pipelines.png", title: "Pipelines", desc: "Create, schedule, and trigger real pipelines with real run history." },
   { src: "/landing/shot-tasks.png", title: "Tasks", desc: "Real multi-step plans AXIOM generates, reviews, and executes with human approval on the risky steps." },
@@ -94,7 +98,7 @@ export default function LandingPage() {
               </div>
               <h1 className="landing-animate-in delay-1">The AI workforce for <em>modern</em> companies.</h1>
               <p className="landing-animate-in delay-1">
-                We&apos;re building autonomous <b>AI employees</b> that handle real operational work — starting with
+                We&apos;re building autonomous <b>AI employees</b> that handle real operational work, beginning with
                 AXIOM, an AI DataOps engineer.
               </p>
               <div className="flex items-center justify-center gap-3 landing-animate-in delay-2">
@@ -160,7 +164,7 @@ export default function LandingPage() {
         <div className="landing-about">
           <p>
             Wunomo is building the AI workforce for modern companies. We think the next generation
-            of operational work — data, finance, DevOps, analytics, security, HR — gets done by
+            of operational work, across data, finance, DevOps, analytics, security, and HR, gets done by
             autonomous AI employees working alongside your team, not another dashboard your team
             has to babysit. We started with the hardest one: AXIOM, an AI DataOps engineer that
             manages pipelines, data quality, and incidents through conversation, with real access
