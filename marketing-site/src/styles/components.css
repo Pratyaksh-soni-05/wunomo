@@ -456,8 +456,11 @@ img { display: block; max-width: 100%; }
 .landing-feature h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
 .landing-feature p { font-size: 13.5px; color: var(--text-secondary); line-height: 1.55; }
 
-/* Product carousel */
-.landing-carousel { position: relative; max-width: 980px; margin: 0 auto; }
+/* Product carousel — widened 2026-08-27 (980px fixed -> min(1200px,92vw),
+   matching the product repo's own carousel) so real product UI (dense
+   tables, the full-width chat panel) renders legibly instead of cramped
+   into a narrower frame than the screenshots were captured at. */
+.landing-carousel { position: relative; max-width: min(1200px, 92vw); margin: 0 auto; }
 .landing-carousel-frame {
   border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden;
   background: var(--surface); box-shadow: var(--shadow-lg);

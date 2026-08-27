@@ -41,11 +41,18 @@ const FEATURES = [
   },
 ];
 
+// 2026-08-27: same 5 screens as the product repo's own landing page, same
+// capture pass (fresh "Wunomo Product Demo" tenant, dark theme, 1440@2x) —
+// see dataops-agent/frontend/src/app/page.tsx and
+// docs/context/WALKTHROUGH_FINDINGS_2026-08.md #65/#66 for how they were
+// seeded. Replaces the pre-Futurewave 4-shot set (Dashboard/Chat/Pipelines/
+// Governance) so both sites show the same, current product.
 const SCREENSHOTS = [
-  { src: "/landing/shot-dashboard.png", title: "Dashboard", desc: "Real pipeline health, quality score, and AXIOM activity — no fabricated numbers." },
+  { src: "/landing/shot-dashboard.png", title: "Dashboard", desc: "Real pipeline health, quality score, and pending approvals — no fabricated numbers." },
   { src: "/landing/shot-chat.png", title: "AXIOM chat", desc: "A real conversation, with a visible trace of every tool call AXIOM made." },
   { src: "/landing/shot-pipelines.png", title: "Pipelines", desc: "Create, schedule, and trigger real pipelines with real run history." },
-  { src: "/landing/shot-governance.png", title: "Data lineage", desc: "Source-to-pipeline lineage, auto-populated as you connect data." },
+  { src: "/landing/shot-tasks.png", title: "Tasks", desc: "Real multi-step plans AXIOM generates, reviews, and executes with human approval on the risky steps." },
+  { src: "/landing/shot-quality.png", title: "Quality", desc: "Real quality rules against real data, with a real pass/fail record." },
 ];
 
 export default function LandingPage() {
@@ -101,6 +108,10 @@ export default function LandingPage() {
       </section>
 
       <section className="landing-section" aria-label="Product screenshots">
+        <div className="landing-section-header">
+          <div className="landing-eyebrow">See It Live</div>
+          <h2 className="font-display">See AXIOM in the product</h2>
+        </div>
         <ScreenshotCarousel slides={SCREENSHOTS} />
       </section>
 
