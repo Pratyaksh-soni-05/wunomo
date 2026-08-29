@@ -1,9 +1,11 @@
 import asyncio
 import time
+from typing import Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_core.messages import BaseMessage
 from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
+from redis import asyncio as aioredis
 from config import settings
 import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -11,6 +13,38 @@ from groq import AuthenticationError as GroqAuthError
 
 
 log = structlog.get_logger()
+
+# Same lazy, loop-aware client pattern as services/auth_service.py's OTP
+# rate limiter (_redis()) - a module-level client bound at import time
+# would break across pytest-asyncio's per-test event loops. Not reusing
+# auth_service._redis() directly since no shared redis-accessor module
+# exists yet in this codebase; each file that needs Redis builds its own.
+_redis_client: Optional[aioredis.Redis] = None
+_redis_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _redis() -> aioredis.Redis:
+    global _redis_client, _redis_loop
+    loop = asyncio.get_running_loop()
+    if _redis_client is None or _redis_loop is not loop:
+        _redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        _redis_loop = loop
+    return _redis_client
+
+
+async def _record_dropped_usage(tenant_id: str, total_tokens: Optional[int]) -> None:
+    """Best-effort detectability signal for a usage row that failed to
+    persist - cumulative counters (not TTL-windowed like the OTP rate
+    limiter's keys), since this is a 'has this ever happened, by how
+    much' gauge to check on demand, not a time-boxed rate gate. Must
+    never itself raise: a Redis hiccup on top of the DB hiccup it's
+    reporting must not break log_llm_usage()'s own never-fail contract."""
+    try:
+        await _redis().incr(f"llm_usage_meter:dropped_events:{tenant_id}")
+        if total_tokens:
+            await _redis().incrby(f"llm_usage_meter:dropped_tokens:{tenant_id}", total_tokens)
+    except Exception as exc:
+        log.warning("dropped_usage_counter_failed", tenant_id=tenant_id, error=str(exc))
 
 # The only models this project has actually live-verified end-to-end for
 # real tool-calling (see CLAUDE.md's LangChain v1.x upgrade row and the
@@ -61,27 +95,36 @@ async def log_llm_usage(
     error_message: str | None = None,
 ) -> None:
     """Best-effort usage logging — a DB hiccup here must never break the
-    actual LLM call it's describing, so failures are logged and swallowed."""
+    actual LLM call it's describing, so failures are logged and swallowed.
+    A dropped row used to vanish with just a warning line carrying the
+    exception text - no token count, no way to tell "this happened once"
+    from "this happened constantly" without grepping logs by hand. Now the
+    full would-be row goes into an error-level log line (a dropped usage
+    row is a real gap in cost accounting, not a routine warning), plus a
+    cumulative Redis counter (see _record_dropped_usage) that can be
+    checked on demand rather than only discovered by re-reading logs."""
     if not tenant_id:
         return
+    usage_metadata = usage_metadata or {}
+    row = {
+        "tenant_id": tenant_id, "user_id": user_id, "session_id": session_id,
+        "request_type": request_type, "provider": provider, "model": model,
+        "used_fallback": used_fallback,
+        "input_tokens": usage_metadata.get("input_tokens"),
+        "output_tokens": usage_metadata.get("output_tokens"),
+        "reasoning_tokens": (usage_metadata.get("output_token_details") or {}).get("reasoning"),
+        "total_tokens": usage_metadata.get("total_tokens"),
+        "latency_ms": latency_ms, "success": success, "error_message": error_message,
+    }
     try:
         from database import AsyncSessionLocal
         from models.all_models import LlmUsageEvent
-        usage_metadata = usage_metadata or {}
         async with AsyncSessionLocal() as db:
-            db.add(LlmUsageEvent(
-                tenant_id=tenant_id, user_id=user_id, session_id=session_id,
-                request_type=request_type, provider=provider, model=model,
-                used_fallback=used_fallback,
-                input_tokens=usage_metadata.get("input_tokens"),
-                output_tokens=usage_metadata.get("output_tokens"),
-                reasoning_tokens=(usage_metadata.get("output_token_details") or {}).get("reasoning"),
-                total_tokens=usage_metadata.get("total_tokens"),
-                latency_ms=latency_ms, success=success, error_message=error_message,
-            ))
+            db.add(LlmUsageEvent(**row))
             await db.commit()
     except Exception as exc:
-        log.warning("log_llm_usage_failed", error=str(exc))
+        log.error("log_llm_usage_dropped", write_error=str(exc), **row)
+        await _record_dropped_usage(tenant_id, row["total_tokens"])
 
 # A failing/quota-exhausted Gemini call doesn't fail fast: google-api-core's own
 # gRPC retry layer respects the server's suggested `retry_delay` (we've seen it

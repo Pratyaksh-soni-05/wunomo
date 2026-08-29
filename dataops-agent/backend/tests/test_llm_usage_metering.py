@@ -197,3 +197,81 @@ async def test_invoke_llm_skips_logging_without_tenant_id(monkeypatch):
 
     result = await llm_service_module.invoke_llm([HumanMessage(content="hello")])
     assert result == "ok"
+
+
+@pytest.mark.asyncio
+async def test_log_llm_usage_swallows_db_failure_but_leaves_it_detectable(monkeypatch):
+    """Gap 1 fix: a DB failure while persisting a usage row must still
+    never raise (log_llm_usage's core contract), but must no longer just
+    vanish into a warning line either. Forces the failure by making
+    LlmUsageEvent's own constructor raise - enough to blow up db.add()
+    without needing to fake an entire broken DB session - then checks
+    both new detectability traces: an error-level log carrying the full
+    would-be row, and the cumulative Redis counters."""
+    import models.all_models as models_module
+
+    class _BoomLlmUsageEvent:
+        def __init__(self, *a, **k):
+            raise RuntimeError("simulated DB failure")
+
+    monkeypatch.setattr(models_module, "LlmUsageEvent", _BoomLlmUsageEvent)
+
+    logged = []
+    monkeypatch.setattr(
+        llm_service_module.log, "error",
+        lambda event, **kw: logged.append((event, kw)),
+    )
+
+    tenant_id = f"gap1-test-{uuid.uuid4().hex[:8]}"
+    redis = llm_service_module._redis()
+    dropped_key = f"llm_usage_meter:dropped_events:{tenant_id}"
+    tokens_key = f"llm_usage_meter:dropped_tokens:{tenant_id}"
+    await redis.delete(dropped_key, tokens_key)
+
+    await llm_service_module.log_llm_usage(
+        tenant_id=tenant_id, request_type="agent_chat",
+        provider="gemini", model="gemini-3.5-flash", used_fallback=False,
+        latency_ms=10, success=True,
+        usage_metadata={"input_tokens": 5, "output_tokens": 7, "total_tokens": 12},
+    )
+
+    assert len(logged) == 1
+    event, kw = logged[0]
+    assert event == "log_llm_usage_dropped"
+    assert kw["tenant_id"] == tenant_id
+    assert kw["total_tokens"] == 12
+    assert kw["request_type"] == "agent_chat"
+
+    assert await redis.get(dropped_key) == "1"
+    assert await redis.get(tokens_key) == "12"
+    await redis.delete(dropped_key, tokens_key)
+
+
+@pytest.mark.asyncio
+async def test_log_llm_usage_still_swallows_if_redis_counter_also_fails(monkeypatch):
+    """Belt-and-suspenders: if Redis is ALSO down when the DB write fails,
+    log_llm_usage() must still never raise - it's best-effort logging on
+    top of best-effort logging, all the way down."""
+    import models.all_models as models_module
+
+    class _BoomLlmUsageEvent:
+        def __init__(self, *a, **k):
+            raise RuntimeError("simulated DB failure")
+
+    monkeypatch.setattr(models_module, "LlmUsageEvent", _BoomLlmUsageEvent)
+
+    class _BoomRedis:
+        async def incr(self, *a, **k):
+            raise RuntimeError("redis also down")
+
+        async def incrby(self, *a, **k):
+            raise RuntimeError("redis also down")
+
+    monkeypatch.setattr(llm_service_module, "_redis", lambda: _BoomRedis())
+
+    await llm_service_module.log_llm_usage(
+        tenant_id="gap1-redis-down-test", request_type="agent_chat",
+        provider="gemini", model="gemini-3.5-flash", used_fallback=False,
+        latency_ms=10, success=True,
+        usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+    )
