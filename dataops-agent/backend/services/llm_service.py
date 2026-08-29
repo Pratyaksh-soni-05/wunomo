@@ -196,12 +196,22 @@ class _TimeoutFallbackChatModel:
     `agent/dataops_agent.py` actually calls.
     """
 
-    def __init__(self, primary, fallback, timeout_seconds, primary_model=None, fallback_model=None):
+    def __init__(
+        self, primary, fallback, timeout_seconds, primary_model=None, fallback_model=None,
+        force_used_fallback=False,
+    ):
         self._primary = primary
         self._fallback = fallback
         self._timeout = timeout_seconds
         self._primary_model = primary_model or settings.PRIMARY_LLM_MODEL
         self._fallback_model = fallback_model or settings.FALLBACK_LLM_MODEL
+        # Set when the caller already knows the "primary" slot holds the
+        # fallback client itself (get_llm_for_agent's build-failure branch)
+        # - the primary-succeeded code path below would otherwise report
+        # used_fallback=False just because nothing raised on this call,
+        # even though the model actually serving the request is the
+        # fallback, not the real primary.
+        self._force_used_fallback = force_used_fallback
 
     def bind_tools(self, tools):
         return _TimeoutFallbackChatModel(
@@ -209,6 +219,7 @@ class _TimeoutFallbackChatModel:
             self._fallback.bind_tools(tools),
             self._timeout,
             self._primary_model, self._fallback_model,
+            force_used_fallback=self._force_used_fallback,
         )
 
     async def ainvoke(self, messages, *args, **kwargs):
@@ -226,7 +237,7 @@ class _TimeoutFallbackChatModel:
             response.additional_kwargs["_llm_usage"] = {
                 "provider": _provider_for_model(self._primary_model),
                 "model": self._primary_model,
-                "used_fallback": False,
+                "used_fallback": self._force_used_fallback,
                 "latency_ms": int((time.monotonic() - start) * 1000),
                 "success": True,
                 "usage_metadata": getattr(response, "usage_metadata", None) or {},
@@ -251,16 +262,37 @@ def get_llm_for_agent(temperature=0.0, primary_model: str | None = None):
     """primary_model overrides settings.PRIMARY_LLM_MODEL for this call
     only (Phase 16's per-tenant AI model override) - the fallback model is
     always the global settings.FALLBACK_LLM_MODEL, since fallback is
-    reliability infrastructure, not a per-tenant preference."""
+    reliability infrastructure, not a per-tenant preference.
+
+    Always returns a _TimeoutFallbackChatModel, never a bare client -
+    agent_node's usage logging depends on the _llm_usage key that only
+    the wrapper stashes onto a response's additional_kwargs. This used to
+    fall back to a bare get_fallback_llm() client on ANY exception here
+    (including the primary failing to even build), which meant every chat
+    turn served that way was completely unmetered - no _llm_usage key, so
+    agent_node's `if usage:` check silently skipped log_llm_usage() the
+    whole time. get_fallback_llm() itself is deliberately NOT wrapped in
+    the try - if there's genuinely no LLM available at all, failing loudly
+    here is more honest than silently returning a broken, unmetered
+    object further down the call chain."""
+    fallback = get_fallback_llm(temperature)
+    force_used_fallback = False
     try:
         primary = get_primary_llm(temperature, model=primary_model)
-        fallback = get_fallback_llm(temperature)
-        return _TimeoutFallbackChatModel(
-            primary, fallback, PRIMARY_LLM_TIMEOUT_SECONDS,
+        primary_model_name = primary_model or settings.PRIMARY_LLM_MODEL
+    except Exception as exc:
+        log.warning(
+            "primary_llm_build_failed", error=str(exc),
             primary_model=primary_model or settings.PRIMARY_LLM_MODEL,
         )
-    except Exception:
-        return get_fallback_llm(temperature)
+        primary = fallback
+        primary_model_name = settings.FALLBACK_LLM_MODEL
+        force_used_fallback = True
+    return _TimeoutFallbackChatModel(
+        primary, fallback, PRIMARY_LLM_TIMEOUT_SECONDS,
+        primary_model=primary_model_name,
+        force_used_fallback=force_used_fallback,
+    )
 
 
 class LLMService:

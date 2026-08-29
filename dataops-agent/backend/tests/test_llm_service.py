@@ -3,6 +3,7 @@ import time
 import pytest
 from langchain_core.messages import AIMessage
 
+import services.llm_service as llm_service_module
 from services.llm_service import _TimeoutFallbackChatModel
 
 
@@ -93,3 +94,45 @@ async def test_bind_tools_propagates_to_both_primary_and_fallback():
     assert result.content == "from fallback"
     assert slow_primary.bind_tools_calls == [["some_tool_schema"]]
     assert fallback.bind_tools_calls == [["some_tool_schema"]]
+
+
+@pytest.mark.asyncio
+async def test_get_llm_for_agent_wraps_even_when_primary_build_fails(monkeypatch):
+    """Gap 2 fix: if building the primary client itself raises (bad model
+    name, SDK-level construction error - not a runtime API failure), the
+    caller must still get back a _TimeoutFallbackChatModel, not a bare
+    client. agent_node's usage logging depends entirely on the _llm_usage
+    key the wrapper stashes onto additional_kwargs; a bare client has no
+    such key, so every turn served that way used to log nothing at all."""
+    fake_fallback = _FakeLLM(response=AIMessage(content="from fallback"))
+
+    def _boom_primary(temperature=0.0, model=None):
+        raise RuntimeError("bad model config")
+
+    monkeypatch.setattr(llm_service_module, "get_primary_llm", _boom_primary)
+    monkeypatch.setattr(llm_service_module, "get_fallback_llm", lambda temperature=0.0: fake_fallback)
+
+    model = llm_service_module.get_llm_for_agent(temperature=0.0)
+    assert isinstance(model, _TimeoutFallbackChatModel)
+
+    result = await model.ainvoke([])
+    assert result.content == "from fallback"
+    usage = result.additional_kwargs["_llm_usage"]
+    assert usage["provider"] == "groq"
+    assert usage["model"] == "llama-3.3-70b-versatile"
+    assert usage["used_fallback"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_llm_for_agent_raises_if_fallback_itself_cant_build(monkeypatch):
+    """If the fallback client can't even be built, there is genuinely no
+    LLM available for this request. Failing loudly here is more honest
+    than the old behavior (silently returning a broken, unmetered bare
+    client further down the call chain)."""
+    def _boom_fallback(temperature=0.0):
+        raise RuntimeError("no groq key configured")
+
+    monkeypatch.setattr(llm_service_module, "get_fallback_llm", _boom_fallback)
+
+    with pytest.raises(RuntimeError, match="no groq key configured"):
+        llm_service_module.get_llm_for_agent(temperature=0.0)
