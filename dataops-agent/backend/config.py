@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "dev-jwt-secret"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60
+    # Fernet key encrypting DataSource.connection_config at rest. Deliberately
+    # defaults to empty rather than to a usable dev key: services/
+    # encryption_service.py raises at startup when it's unset outside tests,
+    # because a silently-defaulted key would encrypt real credentials with a
+    # value that is public in this repo. Never commit a real key here.
+    CREDENTIAL_ENCRYPTION_KEY: str = ""
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
     SMTP_USER: str = ""

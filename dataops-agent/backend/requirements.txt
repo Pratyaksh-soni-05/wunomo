@@ -53,6 +53,12 @@ requests==2.32.5
 # ─── Auth / Security ──────────────────────────────────────────────────────────
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# Fernet, for encrypting DataSource.connection_config credentials at rest
+# (services/encryption_service.py). Already present transitively via
+# python-jose[cryptography], but pinned explicitly here because it is now a
+# direct, load-bearing dependency — the app refuses to start without it, so it
+# must not be able to disappear as a side effect of dropping python-jose.
+cryptography==49.0.0
 
 # ─── Config / Utils ───────────────────────────────────────────────────────────
 python-dotenv==1.0.1

@@ -3,10 +3,57 @@ from datetime import datetime
 from sqlalchemy import (Column, String, Text, Boolean, Integer, Float,
     DateTime, ForeignKey, JSON, Enum as SAEnum, UniqueConstraint)
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import TypeDecorator
 from database import Base
 
 
 def gen_uuid(): return str(uuid.uuid4())
+
+
+class EncryptedJSON(TypeDecorator):
+    """A JSON column whose value is encrypted at rest.
+
+    Reads and writes look exactly like a plain `JSON` column — callers get and
+    set ordinary dicts — but what lands in Postgres is an opaque Fernet token.
+    This is what keeps `DataSource.connection_config` credentials out of
+    database dumps, backups, and read replicas.
+
+    Implemented at the ORM-type layer rather than as explicit encrypt/decrypt
+    calls at each call site deliberately: `connection_config` is read in ~10
+    places (both connectors, the schema profiler, both transform runners, the
+    quality rule engine, the connector factory), three of which are the
+    files CLAUDE.md Hard Rule 1 marks as off-limits for connection changes.
+    Encrypting at write time without decrypting at *every* one of those reads
+    would silently break Postgres profiling, transforms, and every CSV source.
+    Putting it here means there is exactly one place to get right, and no read
+    site can forget to decrypt.
+
+    Legacy plaintext rows are passed through unchanged on read, so the app
+    keeps working before `scripts/encrypt_existing_credentials.py` has run.
+    """
+
+    impl = JSON
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        # Imported lazily: models/ is imported by migrations and by scripts that
+        # may legitimately run without an encryption key configured.
+        from services.encryption_service import encrypt_config, is_encrypted
+        if is_encrypted(value):
+            return value  # already a token (e.g. a re-save of an unmodified row)
+        return encrypt_config(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        from services.encryption_service import decrypt_config, is_encrypted
+        if is_encrypted(value):
+            return decrypt_config(value)
+        # Plaintext row written before encryption shipped, or before the
+        # backfill script ran. Return as-is so nothing breaks mid-migration.
+        return value
 
 
 class SourceType(str, enum.Enum):
@@ -89,7 +136,12 @@ class DataSource(Base):
     tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
     name = Column(String(255), nullable=False)
     source_type = Column(SAEnum(SourceType), nullable=False)
-    connection_config = Column(JSON, nullable=False)
+    # Encrypted at rest — holds host/port/username/password for warehouse
+    # sources. See EncryptedJSON above. The underlying Postgres column type is
+    # unchanged (JSON), so this needs no migration; only the stored value's
+    # shape changes, and `scripts/encrypt_existing_credentials.py` converts
+    # rows written before this landed.
+    connection_config = Column(EncryptedJSON, nullable=False)
     schema_snapshot = Column(JSON, default=dict)
     last_profiled_at = Column(DateTime)
     is_active = Column(Boolean, default=True)

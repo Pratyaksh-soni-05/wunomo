@@ -10,6 +10,93 @@ otherwise only in someone's head or a chat transcript.
 
 ---
 
+## 2026-08-30 — Credential encryption at rest (Security Master Ranking Item #1)
+
+**Baseline note before any number below is trusted:** the 398-passed figure this
+work is measured against is itself post-repair. A stale dev DB failed 319 tests
+on completely unmodified code before feature work started — that has its own
+entry directly below this one; read it first if these numbers look surprising.
+
+### The feature, and the one place the spec couldn't be followed literally
+
+`DataSource.connection_config` stored warehouse credentials — host, port,
+username, **password** — as plaintext JSON, so any dump, backup, or read replica
+handed them over in the clear.
+
+The task specified: encrypt at the write path, decrypt in
+`postgres_connector.py` only, and don't touch `schema_profiler.py`,
+`python_runner.py`, or `sql_runner.py` (Hard Rule 1's off-limits set).
+**Those three constraints are mutually unsatisfiable**, which is the single most
+important thing in this entry. The password is read *directly* by all three of
+those off-limits files, and the whole dict by `file_connector`,
+`rule_engine.py`, `api_connector`, `gsheets_connector`, and
+`_points_at_app_database`'s guard. Encrypting at write while decrypting at one
+read path silently breaks Postgres profiling, both transform runners, and every
+CSV source; the alternative — adding decrypt calls to those three files — means
+editing exactly what the rule protects.
+
+Resolved by moving the crypto into a SQLAlchemy `TypeDecorator`
+(`EncryptedJSON`) instead: ciphertext on disk, ordinary dicts to all ~10
+readers, **zero edits to any off-limits file**, and no migration at all since
+the Postgres column type stays `JSON`. This was raised as a blocking question
+before any code was written rather than being resolved unilaterally, because it
+changes the shape of the codebase and not just its behaviour.
+
+Two properties of that type are load-bearing and easy to drop on a later
+refactor: plaintext rows pass through untouched on read (without it, deploying
+encryption takes every existing source offline until the backfill finishes), and
+already-encrypted values no-op on write (without it, re-saving an unmodified row
+double-encrypts it).
+
+### The second leak, which was not in the task at all
+
+While auditing where a decrypted config could surface, `GET /sources/{id}` turned
+out to be returning the **real plaintext password** to any authenticated member
+of the tenant. Encryption at rest would have done nothing about that. Now masked
+via `redact_config`.
+
+That fix immediately created its own bug, and it's the kind worth remembering: a
+redacting GET turns every read-modify-write client into a credential-corruption
+path, because the natural flow (GET, edit one field, PUT it all back) now sends
+`"password": "********"` as a literal value, and a naive assignment writes the
+mask into storage — no error, request succeeds, the source just quietly stops
+connecting later. `update_source` now treats an echoed mask as "unchanged." Both
+directions are verified live (echoing the mask preserves the old password; a
+genuinely new password still applies), because a merge that's too eager makes
+the field permanently unwritable — the same bug inverted.
+
+Also settled empirically rather than defensively: asyncpg leaks the password into
+**none** of its exception messages across five failure modes (wrong password,
+unknown host, unknown DB, bad port, garbage scheme), so the existing
+`str(e)` → API error paths in `connector_manager.py` need no scrubbing wrapper.
+Recorded so nobody adds one on the assumption that they do.
+
+### Verification standard applied
+
+The guard test was **proven to go red before being trusted** — reverting the
+column to plain `JSON` made it fail with the literal plaintext password visible
+in the assertion output. It queries the raw column with SQL rather than through
+the ORM accessor, which would have passed happily with nothing encrypted at all.
+
+Live end-to-end against the running stack, not mocks: a real source created via
+the API landed as ciphertext; `GET` masked the password while leaving `host`
+visible; **`POST /sources/{id}/profile` returned 200 and profiled a real table,
+proving decryption reaches `schema_profiler.py` with that file unmodified**.
+Backfill: 102 encrypted / 3 already encrypted, re-run 0 / 105 (idempotent), raw
+table then 105 encrypted / **0 plaintext**. Suite **398 → 408**, zero
+regressions.
+
+### Left open, deliberately
+
+**Key rotation has no script.** Rotating `CREDENTIAL_ENCRYPTION_KEY` today means
+decrypt-with-old, re-encrypt-with-new by hand;
+`scripts/encrypt_existing_credentials.py` is the shape such a script would take
+but does not do it. Worth its own ranking item — and worth noting that losing the
+key is unrecoverable by design: every tenant would have to re-enter their
+connection details.
+
+---
+
 ## 2026-08-30 — A stale dev DB failed 319 tests on unmodified code, before any feature work started
 
 Recorded on its own because the failure mode makes you distrust your own change,

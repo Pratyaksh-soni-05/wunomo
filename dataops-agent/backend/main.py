@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from config import settings
 from database import engine, Base
+from services.encryption_service import verify_encryption_key_configured
 from api.v1 import (
     auth, chat, sources, pipelines, runs,
     incidents, quality, governance, uploads,
@@ -25,6 +26,11 @@ log = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Fail loudly here rather than on the first data-source read/write. Without
+    # this the app would boot clean and only surface a missing
+    # CREDENTIAL_ENCRYPTION_KEY when a tenant touched a source — by which point
+    # the deploy looks successful.
+    verify_encryption_key_configured()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     log.info("axiom.startup", env=settings.APP_ENV, version="1.0.0")

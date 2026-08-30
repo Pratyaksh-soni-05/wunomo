@@ -7,6 +7,7 @@ from database import AsyncSessionLocal
 from models.all_models import DataSource
 from modules.ingestion.connector_manager import ConnectorManager
 from modules.ingestion.schema_profiler import SchemaProfiler
+from services.encryption_service import redact_config, REDACTED
 import uuid
 from datetime import datetime, timezone
 def utcnow(): return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -49,8 +50,14 @@ async def get_source(source_id: str, user=Depends(get_current_user)):
         source = r.scalars().first()
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
+        # Credentials are masked, not returned. This endpoint previously served
+        # the source's real plaintext password to any authenticated user of the
+        # tenant; host/port/database stay visible so the Sources edit form
+        # still renders. A client wanting to change the password sends a new
+        # one via PUT — it is never read back out.
         return {"id": source.id, "name": source.name, "source_type": source.source_type,
-                "connection_config": source.connection_config, "tags": source.tags,
+                "connection_config": redact_config(source.connection_config),
+                "tags": source.tags,
                 "owner": source.owner, "is_active": source.is_active,
                 "last_profiled_at": source.last_profiled_at, "created_at": source.created_at}
 
@@ -63,7 +70,18 @@ async def update_source(source_id: str, req: SourceUpdate, user=Depends(require_
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
         if req.name: source.name = req.name
-        if req.connection_config: source.connection_config = req.connection_config
+        if req.connection_config:
+            # GET returns credentials masked as "********". A client that reads
+            # a source, edits one field, and PUTs the whole object back would
+            # otherwise overwrite the real password with the mask itself and
+            # permanently break the connection. Any value still equal to the
+            # mask means "unchanged" — keep what's already stored.
+            existing = source.connection_config or {}
+            merged = dict(req.connection_config)
+            for key, value in req.connection_config.items():
+                if value == REDACTED and key in existing:
+                    merged[key] = existing[key]
+            source.connection_config = merged
         if req.tags is not None: source.tags = req.tags
         if req.owner: source.owner = req.owner
         if req.is_active is not None: source.is_active = req.is_active
