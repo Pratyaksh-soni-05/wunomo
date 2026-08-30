@@ -90,6 +90,7 @@ def content_as_text(content) -> str:
 
 async def log_llm_usage(
     *, tenant_id: str | None, user_id: str | None = None, session_id: str | None = None,
+    task_id: str | None = None,
     request_type: str, provider: str, model: str, used_fallback: bool,
     latency_ms: int, success: bool, usage_metadata: dict | None = None,
     error_message: str | None = None,
@@ -108,6 +109,7 @@ async def log_llm_usage(
     usage_metadata = usage_metadata or {}
     row = {
         "tenant_id": tenant_id, "user_id": user_id, "session_id": session_id,
+        "task_id": task_id,
         "request_type": request_type, "provider": provider, "model": model,
         "used_fallback": used_fallback,
         "input_tokens": usage_metadata.get("input_tokens"),
@@ -186,6 +188,7 @@ def get_fallback_llm(temperature=0.0):
 async def invoke_llm(
     messages: list, temperature=0.0, *, tenant_id: str | None = None,
     user_id: str | None = None, session_id: str | None = None,
+    task_id: str | None = None,
     request_type: str = "general_completion",
 ) -> str:
     start = time.monotonic()
@@ -196,7 +199,7 @@ async def invoke_llm(
         r = await llm.ainvoke(messages)
         latency_ms = int((time.monotonic() - start) * 1000)
         await log_llm_usage(
-            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id, task_id=task_id,
             request_type=request_type, provider=_provider_for_model(model), model=model,
             used_fallback=False, latency_ms=latency_ms, success=True,
             usage_metadata=getattr(r, "usage_metadata", None),
@@ -212,7 +215,7 @@ async def invoke_llm(
             r = await llm.ainvoke(messages)
             latency_ms = int((time.monotonic() - fallback_start) * 1000)
             await log_llm_usage(
-                tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+                tenant_id=tenant_id, user_id=user_id, session_id=session_id, task_id=task_id,
                 request_type=request_type, provider=_provider_for_model(model), model=model,
                 used_fallback=True, latency_ms=latency_ms, success=True,
                 usage_metadata=getattr(r, "usage_metadata", None),
@@ -221,7 +224,7 @@ async def invoke_llm(
         except Exception as fallback_exc:
             latency_ms = int((time.monotonic() - fallback_start) * 1000)
             await log_llm_usage(
-                tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+                tenant_id=tenant_id, user_id=user_id, session_id=session_id, task_id=task_id,
                 request_type=request_type, provider=_provider_for_model(model), model=model,
                 used_fallback=True, latency_ms=latency_ms, success=False,
                 error_message=str(fallback_exc),
@@ -347,12 +350,12 @@ class LLMService:
 
     async def complete(
         self, prompt: str, temperature: float = 0.0, *, tenant_id: str | None = None,
-        user_id: str | None = None, session_id: str | None = None,
+        user_id: str | None = None, session_id: str | None = None, task_id: str | None = None,
         request_type: str = "general_completion",
     ) -> str:
         from langchain_core.messages import HumanMessage
         return await invoke_llm(
             [HumanMessage(content=prompt)], temperature=temperature,
-            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id, task_id=task_id,
             request_type=request_type,
         )

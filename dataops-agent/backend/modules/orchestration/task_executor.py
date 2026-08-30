@@ -313,8 +313,8 @@ _ADAPT_PRIOR_RESULTS_MAX_CHARS = 3000  # keeps the adapt prompt bounded regardle
 
 
 async def _adapt_step_args(
-    tenant_id: str, user_id: str, description: str, tool_name: str, tool_args: dict, error_message: str,
-    prior_results: list[dict] | None = None,
+    tenant_id: str, user_id: str, description: str, tool_name: str, tool_args: dict,
+    error_message: str, prior_results: list[dict] | None = None, task_id: str | None = None,
 ) -> dict:
     """One LLM call: shows the real failure to the model and asks for
     corrected arguments. Falls back to the original arguments (a no-op
@@ -329,7 +329,14 @@ async def _adapt_step_args(
     real, fetched records) is given directly, for the same reason Tier 1
     reads raw_result instead of guessing: an LLM correcting a wrong ID
     from the schema and an error message alone is guessing blind, with no
-    way to know what the real ID actually is unless shown it."""
+    way to know what the real ID actually is unless shown it.
+
+    task_id is trailing/keyword-only, not inserted alongside the original
+    positional params, deliberately: a test fixture that monkeypatches this
+    whole function with its own fake (several do, in tests/test_task_executor*.py)
+    and doesn't yet accept task_id gets a clean, obvious TypeError for a
+    missing kwarg instead of every downstream positional argument silently
+    shifting by one slot."""
     quota = await get_quota_status(tenant_id, "ai_credits")
     if quota["status"] == "exceeded":
         return tool_args
@@ -360,7 +367,7 @@ async def _adapt_step_args(
         raw = await invoke_llm(
             [SystemMessage(content="You output ONLY a JSON object, no prose, no markdown fences."),
              HumanMessage(content=prompt)],
-            tenant_id=tenant_id, user_id=user_id, request_type="task_step_adapt",
+            tenant_id=tenant_id, user_id=user_id, task_id=task_id, request_type="task_step_adapt",
         )
         text = raw.strip().strip("`")
         if text.startswith("json"):
@@ -373,14 +380,31 @@ async def _adapt_step_args(
     return tool_args
 
 
-async def _call_tool(tenant_id: str, tool_name: str, tool_args: dict) -> dict:
+async def _call_tool(
+    tenant_id: str, tool_name: str, tool_args: dict,
+    user_id: str | None = None, task_id: str | None = None,
+) -> dict:
     """Invokes the real registered tool directly (not through the agent's
     ToolNode/LangGraph machinery -- there's no LLM reasoning a task step
     needs to trigger the call itself, the plan already decided that).
     tenant_id is force-injected here, same convention agent_node uses for
-    real chat tool calls -- never trusted from tool_args."""
+    real chat tool calls -- never trusted from tool_args.
+
+    user_id/task_id are injected the same way, but conditionally: unlike
+    tenant_id (every registered tool declares it, by hard rule), most
+    tools don't accept these two at all, and merging an argument a tool's
+    schema doesn't declare would break its own ainvoke() validation. Only
+    inject when the target tool's own schema actually asks for it -- this
+    makes the convention generic, not triage_incident-specific: any future
+    tool that adds a user_id/task_id parameter gets it force-injected here
+    automatically, with no further change to this function."""
     tool_obj = tool_by_name(tool_name)
-    result = await tool_obj.ainvoke({**tool_args, "tenant_id": tenant_id})
+    call_args = {**tool_args, "tenant_id": tenant_id}
+    if "user_id" in tool_obj.args:
+        call_args["user_id"] = user_id
+    if "task_id" in tool_obj.args:
+        call_args["task_id"] = task_id
+    result = await tool_obj.ainvoke(call_args)
     if isinstance(result, str):
         try:
             result = json.loads(result)
@@ -769,7 +793,7 @@ async def execute_next_step(task_id: str) -> dict:
     current_args = tool_args
     for attempt in range(starting_attempt, MAX_ATTEMPTS_PER_STEP + 1):
         try:
-            result = await _call_tool(tenant_id, tool_name, current_args)
+            result = await _call_tool(tenant_id, tool_name, current_args, user_id=task_user_id, task_id=task_id)
         except Exception as exc:
             last_error = f"{type(exc).__name__}: {exc}"
             if attempt < MAX_ATTEMPTS_PER_STEP:
@@ -789,7 +813,7 @@ async def execute_next_step(task_id: str) -> dict:
                     break
                 adapted_args = await _adapt_step_args(
                     tenant_id, task_user_id, description, tool_name, current_args, last_error,
-                    prior_results=prior_results,
+                    prior_results=prior_results, task_id=task_id,
                 )
                 async with AsyncSessionLocal() as guard_db:
                     current_args = await _reject_ungrounded_adaptation(

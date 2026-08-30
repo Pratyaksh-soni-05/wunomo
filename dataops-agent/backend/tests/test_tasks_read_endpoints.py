@@ -38,7 +38,7 @@ async def _token_for_role(user_id: str, role: str) -> str:
 async def _create_mocked_task(client, token, monkeypatch, goal="test goal"):
     import api.v1.tasks as tasks_module
 
-    async def _fake_plan(tenant_id, user_id, goal, task_shape):
+    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None):
         return [{
             "description": "check history", "tool_name": "get_pipeline_run_history",
             "tool_args": {"pipeline_id": "pl-1"}, "depends_on_step_index": None,

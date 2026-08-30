@@ -61,7 +61,7 @@ async def test_step_succeeds_on_first_attempt(client, monkeypatch):
     tenant_id, user_id = await _register(client, "execsuccess")
     task_id, step_id = await _seed_queued_task(tenant_id, user_id)
 
-    async def _fake_call_tool(tenant_id, tool_name, tool_args):
+    async def _fake_call_tool(tenant_id, tool_name, tool_args, **kwargs):
         return {"pipeline_id": "pl-1", "runs": []}
 
     monkeypatch.setattr(executor_module, "_call_tool", _fake_call_tool)
@@ -134,7 +134,7 @@ async def test_transient_exception_gets_one_retry_then_succeeds_no_llm(client, m
 
     calls = {"n": 0}
 
-    async def _flaky_then_ok(tenant_id, tool_name, tool_args):
+    async def _flaky_then_ok(tenant_id, tool_name, tool_args, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             raise ConnectionError("simulated transient network blip")
@@ -162,7 +162,7 @@ async def test_transient_exception_exhausts_budget_and_pauses(client, monkeypatc
     tenant_id, user_id = await _register(client, "exectransientfail")
     task_id, step_id = await _seed_queued_task(tenant_id, user_id)
 
-    async def _always_raises(tenant_id, tool_name, tool_args):
+    async def _always_raises(tenant_id, tool_name, tool_args, **kwargs):
         raise TimeoutError("simulated persistent timeout")
 
     monkeypatch.setattr(executor_module, "_call_tool", _always_raises)
@@ -204,13 +204,13 @@ async def test_domain_error_triggers_exactly_one_adapt_call_then_succeeds(client
     calls = {"n": 0}
     adapt_calls = {"n": 0}
 
-    async def _not_found_then_ok(tenant_id, tool_name, tool_args):
+    async def _not_found_then_ok(tenant_id, tool_name, tool_args, **kwargs):
         calls["n"] += 1
         if tool_args.get("pipeline_id") == "bad-id":
             return {"error": "Pipeline not found"}
         return {"pipeline_id": tool_args["pipeline_id"], "runs": []}
 
-    async def _fake_adapt(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None):
+    async def _fake_adapt(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None, task_id=None):
         adapt_calls["n"] += 1
         assert "Pipeline not found" in error_message
         return {"pipeline_id": "corrected-id"}
@@ -235,10 +235,10 @@ async def test_domain_error_adapt_still_fails_exhausts_budget_with_one_adapt_cal
 
     adapt_calls = {"n": 0}
 
-    async def _always_not_found(tenant_id, tool_name, tool_args):
+    async def _always_not_found(tenant_id, tool_name, tool_args, **kwargs):
         return {"error": "Pipeline not found"}
 
-    async def _fake_adapt(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None):
+    async def _fake_adapt(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None, task_id=None):
         adapt_calls["n"] += 1
         return tool_args  # can't actually fix a genuinely deleted pipeline
 
@@ -293,12 +293,12 @@ async def test_adapt_receives_accumulated_prior_step_results(client, monkeypatch
         await db.commit()
         task_id, step_id = task.id, step.id
 
-    async def _not_found(tenant_id, tool_name, tool_args):
+    async def _not_found(tenant_id, tool_name, tool_args, **kwargs):
         return {"error": "Pipeline not found"}
 
     seen = {}
 
-    async def _fake_adapt(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None):
+    async def _fake_adapt(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None, task_id=None):
         seen["prior_results"] = prior_results
         return tool_args
 
@@ -318,7 +318,7 @@ async def test_task_completes_only_once_no_pending_steps_remain(client, monkeypa
     tenant_id, user_id = await _register(client, "execcomplete")
     task_id, step_id = await _seed_queued_task(tenant_id, user_id)
 
-    async def _ok(tenant_id, tool_name, tool_args):
+    async def _ok(tenant_id, tool_name, tool_args, **kwargs):
         return {"pipeline_id": "pl-1", "runs": []}
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
@@ -351,3 +351,79 @@ async def test_a_non_runnable_task_is_a_safe_noop(client, monkeypatch):
     outcome = await execute_next_step(task_id)
     assert outcome["outcome"] == "not_runnable"
     assert outcome["status"] == "draft_plan"
+
+
+@pytest.mark.asyncio
+async def test_triage_incident_step_attributes_its_llm_call_to_the_real_task(client, monkeypatch):
+    """End-to-end proof for the task_id/user_id injection convention,
+    through the REAL _call_tool() (not mocked, unlike every other test in
+    this file) so the real triage_incident tool -> IncidentManager ->
+    LLMService.complete() -> invoke_llm() -> log_llm_usage() chain runs.
+    Only the underlying LLM client is faked (get_primary_llm), same
+    pattern as test_llm_usage_metering.py's real-row test - everything
+    above that is real. triage_incident is medium-risk (agent/
+    personality.py's RISK_ACTIONS), so this goes through the real
+    approval-gate-then-resume path, not a single execute_next_step() call."""
+    from sqlalchemy import select as sa_select
+    from langchain_core.messages import AIMessage
+    from models.all_models import Incident, IncidentStatus, IncidentSeverity, LlmUsageEvent
+    from modules.orchestration.task_executor import resume_task
+    import services.llm_service as llm_service_module
+
+    tenant_id, user_id = await _register(client, "exectriage")
+
+    async with AsyncSessionLocal() as db:
+        incident = Incident(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, title="test incident",
+            description="something broke", severity=IncidentSeverity.HIGH,
+            status=IncidentStatus.OPEN,
+        )
+        db.add(incident)
+        await db.commit()
+        incident_id = incident.id
+
+    async with AsyncSessionLocal() as db:
+        task = Task(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
+            goal="investigate it", task_shape=TaskShape.INVESTIGATE_INCIDENT,
+            status=TaskStatus.QUEUED, step_budget_max=20,
+        )
+        db.add(task)
+        await db.flush()
+        step = TaskStep(
+            id=str(uuid.uuid4()), task_id=task.id, step_index=0,
+            description="triage the incident", source=TaskStepSource.LLM_PLANNED,
+            tool_name="triage_incident", tool_args={"incident_id": incident_id},
+            status=TaskStepStatus.PENDING,
+        )
+        db.add(step)
+        await db.commit()
+        task_id, step_id = task.id, step.id
+
+    blocked = await execute_next_step(task_id)
+    assert blocked["outcome"] == "blocked_needs_approval"  # medium-risk, real gate
+
+    from unittest.mock import AsyncMock
+    fake_primary = AsyncMock()
+    fake_primary.ainvoke = AsyncMock(return_value=AIMessage(
+        content='{"root_cause": "disk full", "remediation_actions": ["free space"], '
+                '"suggested_severity": "high", "confidence": "high", "summary": "disk full"}',
+        usage_metadata={"input_tokens": 44, "output_tokens": 55, "total_tokens": 99},
+    ))
+    monkeypatch.setattr(llm_service_module, "get_primary_llm", lambda temperature=0.0: fake_primary)
+
+    result = await resume_task(task_id, resolved_by=str(uuid.uuid4()), notes="approved")
+    assert result["outcome"] == "step_succeeded"
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            sa_select(LlmUsageEvent).where(
+                LlmUsageEvent.tenant_id == tenant_id, LlmUsageEvent.request_type == "incident_triage",
+            )
+        )
+        events = r.scalars().all()
+
+    assert len(events) == 1
+    assert events[0].task_id == task_id
+    assert events[0].user_id == user_id
+    assert events[0].total_tokens == 99

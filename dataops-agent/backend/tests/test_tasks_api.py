@@ -148,7 +148,7 @@ async def test_successful_generation_persists_a_real_reviewable_plan(client, mon
     step, not just a description. The real-LLM proof is the test below."""
     import api.v1.tasks as tasks_module
 
-    async def _fake_plan(tenant_id, user_id, goal, task_shape):
+    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None):
         return [
             {"description": "Check recent runs", "tool_name": "get_pipeline_run_history",
              "tool_args": {"pipeline_id": "pl-123", "limit": 5}, "depends_on_step_index": None},

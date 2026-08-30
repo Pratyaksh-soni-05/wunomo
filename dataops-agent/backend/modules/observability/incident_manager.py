@@ -143,13 +143,20 @@ class IncidentManager:
     # 2. Triage Incident (AI Root Cause Analysis)
     # ------------------------------------------------------------------
 
-    async def triage_incident(self, incident_id: str) -> dict:
+    async def triage_incident(self, incident_id: str, user_id: str | None = None, task_id: str | None = None) -> dict:
         """
         Performs AI-powered root cause analysis on a given incident.
         - Fetches the incident, its pipeline, source, and most recent run context
         - Builds a rich prompt and calls the LLM
         - Persists the root_cause, remediation_actions, and updates status → investigating
         - Returns the full triage result
+
+        user_id/task_id are optional, call-time-only attribution for the
+        underlying LLM call's usage row - this is the tool-internal LLM
+        call that's invisible to task_executor's own cost accounting
+        (task_id only reaches here when the triage_incident tool is called
+        from within a task; chat calls always pass task_id=None, correctly,
+        since a chat turn isn't part of any task).
 
         Returns:
             dict with: incident_id, root_cause, remediation_actions,
@@ -242,7 +249,8 @@ class IncidentManager:
                 # Call LLM
                 log.info("triage_incident.llm_call", incident_id=incident_id)
                 llm_response = await self.llm.complete(
-                    prompt, tenant_id=self.tenant_id, request_type="incident_triage",
+                    prompt, tenant_id=self.tenant_id, user_id=user_id, task_id=task_id,
+                    request_type="incident_triage",
                 )
 
                 # Parse JSON from LLM response

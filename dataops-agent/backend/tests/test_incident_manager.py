@@ -1,8 +1,10 @@
 import uuid
 import pytest
+from unittest.mock import AsyncMock
+from langchain_core.messages import AIMessage
 
 from database import AsyncSessionLocal
-from models.all_models import Incident, IncidentStatus, IncidentSeverity
+from models.all_models import Incident, IncidentStatus, IncidentSeverity, LlmUsageEvent
 from modules.observability.incident_manager import IncidentManager
 from services.llm_service import LLMService
 import services.llm_service as llm_service_module
@@ -148,3 +150,57 @@ async def test_observability_tools_call_real_incident_manager_methods(client, mo
         "tenant_id": tenant_id, "incident_id": incident.id, "resolution_notes": "done",
     })
     assert resolved.get("status") == "resolved"
+
+
+@pytest.mark.asyncio
+async def test_triage_incident_tool_threads_task_id_and_user_id_to_a_real_usage_row(client, monkeypatch):
+    """End-to-end proof for the task_id/user_id injection convention: calling
+    the triage_incident TOOL (not IncidentManager directly, and not mocking
+    LLMService.complete like the other tests here) with task_id/user_id must
+    produce a real llm_usage_events row carrying both - this is the
+    proof-of-concept that a tool-internal LLM call (invisible to
+    task_executor's own accounting today) can now be attributed to the task
+    that triggered it. Mocks get_primary_llm (not LLMService.complete) so
+    invoke_llm()'s real body runs, including its real log_llm_usage() call -
+    same pattern as test_llm_usage_metering.py's
+    test_invoke_llm_passes_usage_metadata_to_logger."""
+    from sqlalchemy import select
+    from agent.tools.observability_tools import triage_incident
+
+    reg = await client.post("/api/v1/auth/register", json={
+        "email": f"incidenttest-{uuid.uuid4().hex[:8]}@example.com",
+        "password": "test1234",
+        "full_name": "Incident Test 4",
+        "tenant_name": "Incident Test Corp 4",
+    })
+    tenant_id = reg.json()["tenant_id"]
+    incident = await _make_incident(tenant_id, status=IncidentStatus.OPEN)
+
+    fake_primary = AsyncMock()
+    fake_primary.ainvoke = AsyncMock(return_value=AIMessage(
+        content='{"root_cause": "x", "remediation_actions": [], "suggested_severity": "low", '
+                '"confidence": "low", "summary": "x"}',
+        usage_metadata={"input_tokens": 11, "output_tokens": 22, "total_tokens": 33},
+    ))
+    monkeypatch.setattr(llm_service_module, "get_primary_llm", lambda temperature=0.0: fake_primary)
+
+    fake_task_id = str(uuid.uuid4())
+    fake_user_id = str(uuid.uuid4())
+    result = await triage_incident.ainvoke({
+        "tenant_id": tenant_id, "incident_id": incident.id,
+        "user_id": fake_user_id, "task_id": fake_task_id,
+    })
+    assert "error" not in result
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(LlmUsageEvent).where(
+                LlmUsageEvent.tenant_id == tenant_id, LlmUsageEvent.request_type == "incident_triage",
+            )
+        )
+        events = r.scalars().all()
+
+    assert len(events) == 1
+    assert events[0].task_id == fake_task_id
+    assert events[0].user_id == fake_user_id
+    assert events[0].total_tokens == 33

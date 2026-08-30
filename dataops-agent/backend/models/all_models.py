@@ -290,6 +290,15 @@ class LlmUsageEvent(Base):
     tenant_id = Column(String, nullable=False, index=True)
     user_id = Column(String, nullable=True)
     session_id = Column(String, nullable=True)
+    # Nullable, no FK - a planning attempt can log a real row under a
+    # task_id whose Task was never persisted (a failed/invalid plan means
+    # nothing gets written to `tasks`, per api/v1/tasks.py's create_task()),
+    # and an unattended/system-triggered call may legitimately have no task
+    # at all. A hard FK here would either reject the first case's real
+    # spend or force a two-phase write; a plain indexed column costs
+    # nothing and lets a rollup query LEFT JOIN and treat "no matching Task
+    # row" as its own honest bucket instead of failing the insert.
+    task_id = Column(String, nullable=True, index=True)
     request_type = Column(String(50), nullable=False)
     provider = Column(String(50), nullable=False)
     model = Column(String(100), nullable=False)

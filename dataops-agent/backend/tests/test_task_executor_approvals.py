@@ -92,7 +92,7 @@ async def test_resume_approves_and_continues_execution(client, monkeypatch):
     task_id, step_id = await _seed_queued_task(tenant_id, user_id)
     await execute_next_step(task_id)  # blocks
 
-    async def _ok(tenant_id, tool_name, tool_args):
+    async def _ok(tenant_id, tool_name, tool_args, **kwargs):
         return {"status": "synced", "rows": 5}
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)

@@ -110,7 +110,7 @@ async def test_resolution_is_noop_on_resume(client, monkeypatch):
 
     seen_args = {}
 
-    async def _capture(tenant_id, tool_name, tool_args):
+    async def _capture(tenant_id, tool_name, tool_args, **kwargs):
         seen_args.update(tool_args)
         return {"status": "synced", "rows": 5}
     monkeypatch.setattr(executor_module, "_call_tool", _capture)
@@ -182,11 +182,11 @@ async def test_tier2_never_substitutes_an_undiscovered_or_ambiguous_entity(clien
 
     seen_args = []
 
-    async def _always_not_found(tenant_id, tool_name, tool_args):
+    async def _always_not_found(tenant_id, tool_name, tool_args, **kwargs):
         seen_args.append(dict(tool_args))
         return {"error": "Pipeline not found"}
 
-    async def _wrongly_substitutes(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None):
+    async def _wrongly_substitutes(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None, task_id=None):
         # Simulates exactly the live bug: picks a REAL id from prior_results
         # that has nothing to do with what the step actually asked for.
         return {**tool_args, "pipeline_id": "pl-real-2"}
@@ -234,10 +234,10 @@ async def test_honest_failure_message_when_neither_tier_resolves(client, monkeyp
         step_description="Check recent runs for a pipeline nothing here describes by name.",
     )
 
-    async def _always_not_found(tenant_id, tool_name, tool_args):
+    async def _always_not_found(tenant_id, tool_name, tool_args, **kwargs):
         return {"error": "Pipeline not found"}
 
-    async def _cant_improve(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None):
+    async def _cant_improve(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None, task_id=None):
         return tool_args  # Tier 2 also has nothing to go on
 
     monkeypatch.setattr(executor_module, "_call_tool", _always_not_found)

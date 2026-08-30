@@ -106,7 +106,7 @@ async def test_loop_detection_does_not_false_positive_on_a_normal_plan(client, m
          "tool_name": "check_freshness", "tool_args": {}, "status": TaskStepStatus.PENDING},
     ], status=TaskStatus.RUNNING, started_at=datetime.utcnow())
 
-    async def _ok(tenant_id, tool_name, tool_args):
+    async def _ok(tenant_id, tool_name, tool_args, **kwargs):
         return {"status": "ok"}
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
@@ -183,7 +183,7 @@ async def test_credit_exhaustion_pauses_not_fails(client, monkeypatch):
         "status": TaskStepStatus.PENDING,
     }], status=TaskStatus.RUNNING, started_at=datetime.utcnow())
 
-    async def _domain_error(tenant_id, tool_name, tool_args):
+    async def _domain_error(tenant_id, tool_name, tool_args, **kwargs):
         return {"error": "Pipeline not found"}
 
     async def _quota_exceeded(tenant_id, resource):
@@ -216,7 +216,7 @@ async def test_resume_after_quota_pause_continues_the_same_attempt_budget_not_a_
         "status": TaskStepStatus.PENDING,
     }], status=TaskStatus.RUNNING, started_at=datetime.utcnow())
 
-    async def _domain_error(tenant_id, tool_name, tool_args):
+    async def _domain_error(tenant_id, tool_name, tool_args, **kwargs):
         return {"error": "Pipeline not found"}
 
     async def _quota_exceeded(tenant_id, resource):
@@ -234,7 +234,7 @@ async def test_resume_after_quota_pause_continues_the_same_attempt_budget_not_a_
     async def _quota_ok(tenant_id, resource):
         return {"resource": resource, "status": "ok", "used": 100, "limit": 25000}
 
-    async def _now_ok(tenant_id, tool_name, tool_args):
+    async def _now_ok(tenant_id, tool_name, tool_args, **kwargs):
         return {"pipeline_id": "bad-id", "runs": []}
 
     monkeypatch.setattr(executor_module, "get_quota_status", _quota_ok)
@@ -283,7 +283,7 @@ async def test_cancel_of_a_completed_task_is_not_cancellable(client, monkeypatch
         "tool_name": "get_system_health", "tool_args": {}, "status": TaskStepStatus.PENDING,
     }], status=TaskStatus.RUNNING, started_at=datetime.utcnow())
 
-    async def _ok(tenant_id, tool_name, tool_args):
+    async def _ok(tenant_id, tool_name, tool_args, **kwargs):
         return {"status": "ok"}
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
@@ -311,7 +311,7 @@ async def test_step_in_flight_when_cancelled_still_records_its_real_outcome_but_
 
     calls = {"n": 0}
 
-    async def _flaky_then_ok(tenant_id, tool_name, tool_args):
+    async def _flaky_then_ok(tenant_id, tool_name, tool_args, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
             raise ConnectionError("simulated transient failure -- creates a real in-flight window")

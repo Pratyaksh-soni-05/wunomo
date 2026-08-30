@@ -19,6 +19,14 @@ async def fake_identity_tool(tenant_id: str, x: str = "") -> str:
 
 
 @tool
+async def fake_task_id_tool(tenant_id: str, task_id: str | None = None) -> str:
+    """Return whatever task_id it was actually invoked with, as a string
+    (test-only) - str() so None round-trips through ToolMessage.content
+    (always a string) distinguishably from the literal string "None"."""
+    return repr(task_id)
+
+
+@tool
 async def fake_full_identity_tool(tenant_id: str, user_id: str, session_id: str) -> str:
     """Return the tenant_id/user_id/session_id it was actually invoked with,
     joined by '|' (test-only)."""
@@ -259,6 +267,40 @@ async def test_agent_forces_real_user_id_and_session_id_too(monkeypatch):
 
     tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert tool_messages[0].content == "real-tenant|real-user|real-session"
+
+
+@pytest.mark.asyncio
+async def test_agent_forces_task_id_to_none_even_if_llm_hallucinates_one(monkeypatch):
+    """A chat turn is never part of a task - AgentState carries no task_id
+    at all - so any tool declaring a task_id param (e.g. triage_incident,
+    once it's reachable from within a task) must always see task_id=None
+    from chat, never whatever the LLM's tool call happened to supply. Same
+    hallucination-defense reasoning as tenant_id/user_id/session_id above,
+    exercised through the real agent graph end to end, not by re-deriving
+    agent_node's override logic in the test."""
+    fake_llm = FakeToolCallLLM([
+        AIMessage(content="", tool_calls=[
+            {
+                "name": "fake_task_id_tool",
+                "args": {"tenant_id": "wrong-tenant", "task_id": "hallucinated-task-id"},
+                "id": "call_1",
+            },
+        ]),
+        AIMessage(content="Done."),
+    ])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_task_id_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_task_id_tool": "view"})
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    result = await dataops_agent.run_agent(
+        user_message="do the thing",
+        tenant_id="real-tenant", user_id="real-user", session_id="real-session", caller_role="owner",
+    )
+
+    tool_messages = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert tool_messages[0].content == "None"
 
 
 @tool

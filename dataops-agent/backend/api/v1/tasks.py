@@ -306,14 +306,25 @@ async def create_task(body: CreateTaskRequest, current_user: dict = Depends(enfo
     tenant_id = current_user["tenant_id"]
     user_id = current_user["sub"]
 
+    # Generated before generate_plan() runs (not after, at Task-construction
+    # time) so the planning LLM call can be tagged with the real task_id for
+    # cost attribution -- Task.id has no DB-side default that would force
+    # this ordering (it's a plain client-generated uuid4, same as always),
+    # so this is a pure reorder, not a behavior change to ID assignment. If
+    # the plan fails generation/validation below, this id is never written
+    # to `tasks` -- the real, already-logged llm_usage_events row(s) for
+    # this attempt end up carrying a task_id with no matching Task, which
+    # is expected (see generate_plan()'s docstring), not a bug.
+    task_id = str(uuid.uuid4())
+
     try:
-        steps = await generate_plan(tenant_id, user_id, body.goal, task_shape)
+        steps = await generate_plan(tenant_id, user_id, body.goal, task_shape, task_id=task_id)
     except (PlanGenerationError, PlanValidationError) as exc:
         raise HTTPException(status_code=422, detail=f"Could not generate a valid plan: {exc}")
 
     async with AsyncSessionLocal() as db:
         task = Task(
-            id=str(uuid.uuid4()),
+            id=task_id,
             tenant_id=tenant_id,
             user_id=user_id,
             goal=body.goal,

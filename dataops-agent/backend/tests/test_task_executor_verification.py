@@ -91,7 +91,7 @@ async def test_async_dispatch_result_inserts_a_system_inserted_verify_step(clien
         step.approval_request_id = approval.id
         await db.commit()
 
-    async def _dispatch(tenant_id, tool_name, tool_args):
+    async def _dispatch(tenant_id, tool_name, tool_args, **kwargs):
         return {"run_id": "run-abc", "pipeline_id": "pl-1", "status": RunStatus.PENDING, "dispatch": "queued"}
 
     monkeypatch.setattr(executor_module, "_call_tool", _dispatch)
@@ -174,7 +174,7 @@ async def test_unresolved_verify_step_moves_on_to_an_independent_pending_step(cl
     async def _still_pending(tool_name, dispatch_result):
         return {"terminal": False, "success": None, "detail": "still running"}
 
-    async def _ok(tenant_id, tool_name, tool_args):
+    async def _ok(tenant_id, tool_name, tool_args, **kwargs):
         return {"status": "healthy"}
 
     monkeypatch.setattr(executor_module, "_poll_dispatch_status", _still_pending)

@@ -177,7 +177,12 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
         # prompt-injected tool result can never redirect a call at another tenant.
         # user_id/session_id get the same treatment for the tools that need them
         # (currently just request_approval) — same reasoning, see the Gotcha on
-        # this in CLAUDE.md. Also coerce any dict/list-typed arg that arrived
+        # this in CLAUDE.md. task_id is forced to None, not to a real value —
+        # AgentState carries no task_id (a chat turn is never part of a task),
+        # so a tool like triage_incident that declares task_id must always log
+        # task_id=None here rather than whatever the LLM might invent for it;
+        # task_executor._call_tool() is the only place a real task_id is ever
+        # injected. Also coerce any dict/list-typed arg that arrived
         # stringified — see _coerce_stringified_object_args' module-level comment.
         for call in (response.tool_calls or []):
             args = call.get("args", {})
@@ -187,6 +192,8 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
                 args["user_id"] = state["user_id"]
             if "session_id" in args:
                 args["session_id"] = state["session_id"]
+            if "task_id" in args:
+                args["task_id"] = None
             _coerce_stringified_object_args(call["name"], args)
 
         # Role-permission gate — evaluated before and independently of

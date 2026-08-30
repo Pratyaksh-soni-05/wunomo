@@ -26,7 +26,7 @@ async def _register(client, prefix="taskadvance"):
 
 
 async def _create_and_approve_task(client, token, monkeypatch, goal="advance test goal"):
-    async def _fake_plan(tenant_id, user_id, goal, task_shape):
+    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None):
         return [{
             "description": "check health", "tool_name": "get_system_health",
             "tool_args": {}, "depends_on_step_index": None,
@@ -50,7 +50,7 @@ async def test_advance_resolves_one_step_and_returns_the_outcome(client, monkeyp
     token, _, _ = await _register(client, "advbasic")
     task = await _create_and_approve_task(client, token, monkeypatch)
 
-    async def _ok(tenant_id, tool_name, tool_args):
+    async def _ok(tenant_id, tool_name, tool_args, **kwargs):
         return {"status": "healthy"}
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
@@ -64,7 +64,7 @@ async def test_advance_resolves_one_step_and_returns_the_outcome(client, monkeyp
 
 @pytest.mark.asyncio
 async def test_advance_on_a_task_still_in_draft_plan_is_409(client, monkeypatch):
-    async def _fake_plan(tenant_id, user_id, goal, task_shape):
+    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None):
         return [{"description": "x", "tool_name": "get_system_health", "tool_args": {}, "depends_on_step_index": None}]
 
     monkeypatch.setattr(tasks_module, "generate_plan", _fake_plan)
@@ -84,7 +84,7 @@ async def test_advance_on_a_completed_task_is_409(client, monkeypatch):
     token, _, _ = await _register(client, "advdone")
     task = await _create_and_approve_task(client, token, monkeypatch)
 
-    async def _ok(tenant_id, tool_name, tool_args):
+    async def _ok(tenant_id, tool_name, tool_args, **kwargs):
         return {"status": "healthy"}
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
@@ -130,7 +130,7 @@ async def test_pause_reason_is_null_while_the_task_is_healthy(client, monkeypatc
     task = await _create_and_approve_task(client, token, monkeypatch)
     assert task["pause_reason"] is None
 
-    async def _ok(tenant_id, tool_name, tool_args):
+    async def _ok(tenant_id, tool_name, tool_args, **kwargs):
         return {"status": "healthy"}
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
@@ -143,7 +143,7 @@ async def test_pause_reason_names_the_real_step_and_real_error(client, monkeypat
     token, _, _ = await _register(client, "advpausereason")
     task = await _create_and_approve_task(client, token, monkeypatch, goal="a specific real failure")
 
-    async def _always_fails(tenant_id, tool_name, tool_args):
+    async def _always_fails(tenant_id, tool_name, tool_args, **kwargs):
         raise RuntimeError("simulated: the underlying service is down")
 
     monkeypatch.setattr(executor_module, "_call_tool", _always_fails)
@@ -174,7 +174,7 @@ async def test_advance_accepts_a_task_paused_for_quota_not_just_queued_and_runni
         db_task.status = TaskStatus.PAUSED_QUOTA_EXCEEDED
         await db.commit()
 
-    async def _ok(tenant_id, tool_name, tool_args):
+    async def _ok(tenant_id, tool_name, tool_args, **kwargs):
         return {"status": "ok"}
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
