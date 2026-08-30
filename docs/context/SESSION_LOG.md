@@ -10,6 +10,53 @@ otherwise only in someone's head or a chat transcript.
 
 ---
 
+## 2026-08-30 — A stale dev DB failed 319 tests on unmodified code, before any feature work started
+
+Recorded on its own because the failure mode makes you distrust your own change,
+and the correct response is only obvious in hindsight.
+
+A routine baseline suite run — taken before starting unrelated feature work,
+precisely so there'd be a trustworthy "before" number — came back **319 failed /
+79 passed on completely unmodified code**. Every failure traced to
+`UndefinedColumnError: column users.google_id does not exist`.
+
+Nothing in the session had caused it. The dev DB's `users` table was missing
+`google_id`, `email_verified`, `theme`, and `hashed_password`'s nullability,
+because it sits stamped at `alembic_version = db3efa7d4d82` while the chain head
+is `a4f8c2e91b06` — and `create_all()`, which runs on every backend boot, had
+created all 28 *tables* while being structurally unable to ALTER the one that
+was behind.
+
+**This supersedes the long-standing Gotcha claiming this dev DB has no
+`alembic_version` table.** It has one now. That is worse, not better: a
+stamped-but-stale database reports a real revision from `alembic current` and
+looks entirely healthy. `alembic upgrade head` doesn't rescue it either — it
+dies at `DuplicateTable: relation "llm_usage_events" already exists`, the
+already-documented non-idempotency, because `create_all()` got there first.
+
+Fixed by running Alembic's own `compare_metadata()` against the **live** DB
+rather than guessing at what was missing. Worth noting explicitly:
+`test_schema_drift.py` structurally cannot catch this class of drift — it builds
+a scratch DB from the migrations and compares migrations-vs-models, never the
+live DB against the models. The comparison named exactly 5 diffs, all confined
+to `users`, i.e. precisely migration `0ba23e06e635` plus the later `theme`
+column. Took a `pg_dump`, applied those 5 as DDL copied from `0ba23e06e635`'s
+own `upgrade()` body rather than hand-invented equivalents, re-ran the
+comparison: **0 diffs**, suite **398 passed**.
+
+The `alembic_version` stamp was deliberately left as-is rather than force-stamped
+to head — the schema now matches the models, and re-stamping without replaying
+the chain would only relocate the same latent inconsistency somewhere less
+visible.
+
+**The generalizable lesson:** a green `/health/db`, a populated
+`alembic_version`, and a booting app together still prove nothing about whether
+this database's schema matches the models. Only `compare_metadata()` against the
+live DB does. Run it before trusting a baseline, and especially before
+concluding that a wall of red is something you just broke.
+
+---
+
 ## 2026-08-19 — ⚠️ BLOCKING BACKEND ESCALATION: `_check_freshness()`'s unbounded incident-creation loop, read this before touching `services/tasks.py` or the `incidents` table
 
 **If you are a backend-focused session picking up work in this repo, read this
