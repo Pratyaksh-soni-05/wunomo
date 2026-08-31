@@ -2,6 +2,7 @@ import structlog
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, func, desc, and_
 from database import AsyncSessionLocal
+from services.tenant_context import tenant_scoped
 from models.all_models import (
     DataSource,
     Pipeline,
@@ -18,6 +19,7 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+@tenant_scoped
 class Monitor:
     """
     Observability monitor for AXIOM.

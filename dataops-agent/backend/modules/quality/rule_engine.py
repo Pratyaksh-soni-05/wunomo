@@ -5,6 +5,7 @@ import structlog
 
 from database import AsyncSessionLocal
 from models.all_models import QualityRule, Pipeline
+from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
 
@@ -16,6 +17,7 @@ RULE_TYPES = [
 ]
 
 
+@tenant_scoped
 class QualityRuleEngine:
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id

@@ -39,7 +39,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    engine = create_engine(settings.SYNC_DATABASE_URL)
+    # ADMIN_DATABASE_URL (dataops_user), not SYNC_DATABASE_URL (dataops_app):
+    # this is a deliberately cross-tenant maintenance script, and the app role
+    # is subject to Row-Level Security — running it as dataops_app would see
+    # zero rows and cheerfully report "0 encrypted, nothing to do".
+    engine = create_engine(settings.ADMIN_DATABASE_URL)
 
     encrypted_count = 0
     already_count = 0

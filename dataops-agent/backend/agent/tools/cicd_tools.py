@@ -1,8 +1,10 @@
 # agent/tools/cicd_tools.py
 
 from langchain_core.tools import tool
+from services.tenant_context import with_tenant_context
 
 @tool
+@with_tenant_context
 async def get_cicd_status(tenant_id: str, query: str = "") -> str:
     """
     Get CICD pipeline deployment status for the authenticated tenant.

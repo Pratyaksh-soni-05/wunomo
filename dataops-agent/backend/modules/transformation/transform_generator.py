@@ -7,6 +7,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from database import AsyncSessionLocal
 from models.all_models import DataSource, Pipeline
 from services.llm_service import invoke_llm
+from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
 
@@ -60,6 +61,7 @@ User transformation request:
 Generate a Pandas transformation. Input DataFrame is `df`. Output must be `result_df`."""
 
 
+@tenant_scoped
 class TransformGenerator:
     """
     Generates SQL or Pandas transformation code from natural language using LLM.

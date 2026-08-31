@@ -5,6 +5,7 @@ from sqlalchemy import select
 from database import AsyncSessionLocal
 from models.all_models import DataContract, DataSource
 from modules.governance.audit_trail import AuditTrail
+from services.tenant_context import with_tenant_context
 
 log = structlog.get_logger()
 
@@ -29,6 +30,7 @@ def serialize_contract(c: DataContract) -> dict:
     }
 
 
+@with_tenant_context
 async def create_contract(
     tenant_id: str,
     actor: str,
@@ -84,6 +86,7 @@ async def create_contract(
         return {"error": str(exc)}
 
 
+@with_tenant_context
 async def validate_contract(tenant_id: str, actor: str, contract_id: str) -> dict:
     """Validates a data contract against the current source schema snapshot.
     Shared by the REST endpoint and the validate_data_contract agent tool."""

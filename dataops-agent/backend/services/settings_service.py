@@ -30,11 +30,13 @@ from sqlalchemy import select
 from database import AsyncSessionLocal
 from models.all_models import Tenant
 from services.llm_service import SUPPORTED_MODEL_OVERRIDES
+from services.tenant_context import with_tenant_context
 
 NOTIFY_ON_KEYS = ("incident_created", "pipeline_failed", "deployment_failed", "approval_required")
 DEFAULT_NOTIFY_ON = {k: True for k in NOTIFY_ON_KEYS}
 
 
+@with_tenant_context
 async def get_tenant_settings(tenant_id: str) -> dict:
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
@@ -62,6 +64,7 @@ def _validate_notification_prefs(prefs) -> str | None:
     return None
 
 
+@with_tenant_context
 async def update_tenant_settings(tenant_id: str, updates: dict) -> dict:
     """Shallow-merges top-level `updates` into the tenant's existing
     settings dict, except: `name` writes to the real Tenant.name column,

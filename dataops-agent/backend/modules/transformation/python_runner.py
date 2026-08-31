@@ -11,6 +11,7 @@ from typing import Any
 from database import AsyncSessionLocal
 from models.all_models import DataSource
 from modules.governance.audit_trail import AuditTrail
+from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
 
@@ -50,6 +51,7 @@ BLOCKED_NAMES = frozenset([
 # PythonRunner
 # ---------------------------------------------------------------------------
 
+@tenant_scoped
 class PythonRunner:
     """
     Executes Pandas transformation code in a restricted Python environment.

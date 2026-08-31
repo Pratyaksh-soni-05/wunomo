@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, desc
 from database import AsyncSessionLocal
 from models.all_models import Pipeline, PipelineRun, PipelineStatus, RunStatus
+from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
 
@@ -23,6 +24,7 @@ def _safe_div(a, b, default=0.0):
     return a / b if b else default
 
 
+@tenant_scoped
 class AnomalyDetector:
     """
     Detects statistical anomalies in pipeline run data.

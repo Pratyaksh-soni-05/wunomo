@@ -9,6 +9,7 @@ from models.all_models import (
 )
 from modules.observability.monitor import Monitor
 from modules.observability.incident_manager import IncidentManager
+from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
 
@@ -17,6 +18,7 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+@tenant_scoped
 class ReportGenerator:
     """
     Assembles role-based reports for AXIOM.

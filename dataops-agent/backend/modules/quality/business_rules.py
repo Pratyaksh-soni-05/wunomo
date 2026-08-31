@@ -8,6 +8,7 @@ from models.all_models import (
     KpiValue, RunStatus,
 )
 from modules.quality.rule_engine import QualityRuleEngine
+from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
 
@@ -36,6 +37,7 @@ BUSINESS_RULE_TYPES = frozenset([
 # BusinessRules
 # ---------------------------------------------------------------------------
 
+@tenant_scoped
 class BusinessRules:
     """
     Evaluates business-level data quality rules that span multiple sources,

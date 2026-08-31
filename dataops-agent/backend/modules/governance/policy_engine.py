@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, desc
 from database import AsyncSessionLocal
 from models.all_models import ApprovalRequest, ApprovalStatus
+from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
 
@@ -91,6 +92,7 @@ TOOL_REGISTRY: dict[str, dict] = {
 }
 
 
+@tenant_scoped
 class PolicyEngine:
     """
     Manages approval requests for AXIOM's assisted and autonomous operation modes.

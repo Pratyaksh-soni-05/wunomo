@@ -331,7 +331,13 @@ def run_ci_pipeline(self, commit_id: str, tenant_id: str) -> None:
         await _run()
 
     try:
-        asyncio.run(_run_with_fresh_pool())
+        # RLS context from this task's own tenant_id argument, exactly as
+        # services/tasks.py's Celery tasks do — a background job has no HTTP
+        # request or JWT. Without it every query below reads zero rows and the
+        # CI gate silently never runs (gate_decision stays None).
+        from services.tenant_context import tenant_context
+        with tenant_context(tenant_id):
+            asyncio.run(_run_with_fresh_pool())
     except Exception as exc:
         log.error("cicd.task_crashed", commit_id=commit_id, error=str(exc))
         raise self.retry(exc=exc, countdown=30)

@@ -29,8 +29,10 @@ from database import AsyncSessionLocal
 from models.all_models import Tenant
 from services.quota_service import PLANS, get_all_quota_statuses, get_quota_status
 from sqlalchemy import select
+from services.tenant_context import tenant_scoped
 
 
+@tenant_scoped
 class BillingService:
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id

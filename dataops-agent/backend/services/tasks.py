@@ -1,6 +1,7 @@
 from services.celery_app import celery_app   # ✅ correct — Celery boots from /app, services is a package
 from datetime import datetime, timezone
 import structlog
+from services.tenant_context import with_tenant_context
 
 
 log = structlog.get_logger()
@@ -14,6 +15,7 @@ def execute_pipeline_run(self, run_id: str, pipeline_id: str, tenant_id: str):
     """Execute a pipeline run — called by trigger_run()."""
     import asyncio
     from database import engine
+    from services.tenant_context import tenant_context
 
     async def _run():
         # Celery calls asyncio.run() fresh per task invocation/retry, but the
@@ -25,12 +27,18 @@ def execute_pipeline_run(self, run_id: str, pipeline_id: str, tenant_id: str):
         await _execute_run(run_id, pipeline_id, tenant_id)
 
     try:
-        asyncio.run(_run())
+        # RLS context comes from this task's own tenant_id argument — Celery has
+        # no HTTP request or JWT to read it from. Set outside asyncio.run() so
+        # every session opened anywhere inside the task inherits it; without
+        # this a background run would see zero rows and silently do nothing.
+        with tenant_context(tenant_id):
+            asyncio.run(_run())
     except Exception as exc:
         log.error("pipeline_run_failed", run_id=run_id, error=str(exc))
         raise self.retry(exc=exc)
 
 
+@with_tenant_context
 async def _execute_run(run_id: str, pipeline_id: str, tenant_id: str):
     from modules.orchestration.dag_manager import DAGManager
     from models.all_models import RunStatus
@@ -119,6 +127,7 @@ async def _execute_run(run_id: str, pipeline_id: str, tenant_id: str):
         raise
 
 
+@with_tenant_context
 async def _create_scheduled_run(pipeline_id: str, tenant_id: str):
     """Pre-creates a PipelineRun row for a scheduled firing - unlike the
     manual/API trigger path (DAGManager.trigger_run(), which pre-creates the
@@ -165,6 +174,7 @@ def execute_scheduled_pipeline_run(self, pipeline_id: str, tenant_id: str):
     uses for manual/API-triggered runs."""
     import asyncio
     from database import engine
+    from services.tenant_context import tenant_context
 
     async def _run():
         await engine.dispose()
@@ -175,7 +185,10 @@ def execute_scheduled_pipeline_run(self, pipeline_id: str, tenant_id: str):
         await _execute_run(run_id, pipeline_id, tenant_id)
 
     try:
-        asyncio.run(_run())
+        # Same reasoning as execute_pipeline_run: the tenant comes from the
+        # task argument, set before the loop so every nested session inherits it.
+        with tenant_context(tenant_id):
+            asyncio.run(_run())
     except Exception as exc:
         log.error("scheduled_pipeline_run_failed", pipeline_id=pipeline_id, error=str(exc))
         raise self.retry(exc=exc)
@@ -211,20 +224,48 @@ def check_scheduled_pipelines(self):
         raise self.retry(exc=exc)
 
 
+async def _list_active_tenant_ids() -> list[str]:
+    """Enumerate tenants for the cross-tenant sweepers, without any RLS bypass.
+
+    `tenants` is itself RLS-protected (its `settings` column holds each tenant's
+    alert_email and slack_webhook_url — a real credential), so a plain
+    `SELECT ... FROM tenants` here would correctly return nothing. `tenant_registry`
+    is a view exposing only (id, is_active); because a view runs with its
+    owner's privileges, it reads past the policy while exposing no settings and
+    granting the app role no bypass attribute of its own.
+    """
+    from sqlalchemy import text
+    from database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(text(
+            "SELECT id FROM tenant_registry WHERE is_active = true"
+        ))
+        return [row[0] for row in r.fetchall()]
+
+
 async def _check_scheduled_pipelines():
     from sqlalchemy import select
     from database import AsyncSessionLocal
     from models.all_models import Pipeline, PipelineStatus
+    from services.tenant_context import async_tenant_context
     from croniter import croniter
 
     now = utcnow().replace(second=0, microsecond=0)
 
-    async with AsyncSessionLocal() as db:
-        r = await db.execute(select(Pipeline).where(
-            Pipeline.status == PipelineStatus.ACTIVE,
-            Pipeline.schedule_cron.isnot(None),
-        ))
-        pipelines = r.scalars().all()
+    # One explicitly-scoped pass per tenant rather than a single blanket query.
+    # Under RLS an unscoped sweep returns zero rows, so this is the shape that
+    # works without a bypass role — and it keeps the sweeper honest: it can only
+    # ever see what a real request for that same tenant could see.
+    pipelines = []
+    for tenant_id in await _list_active_tenant_ids():
+        async with async_tenant_context(tenant_id):
+            async with AsyncSessionLocal() as db:
+                r = await db.execute(select(Pipeline).where(
+                    Pipeline.status == PipelineStatus.ACTIVE,
+                    Pipeline.schedule_cron.isnot(None),
+                ))
+                pipelines.extend(r.scalars().all())
 
     fired = 0
     for p in pipelines:
@@ -263,9 +304,62 @@ async def _check_freshness():
     from models.all_models import Tenant, DataSource, Incident, IncidentSeverity, IncidentStatus
     import uuid
 
+    from services.tenant_context import async_tenant_context
+
+    # Was a single session iterating `select(Tenant)` across every tenant at
+    # once. Under RLS that returns nothing (tenants is policy-protected because
+    # its settings column carries per-tenant webhook/alert-email credentials),
+    # so the sweep now enumerates ids via the tenant_registry view and does one
+    # explicitly-scoped pass per tenant. No bypass role anywhere in this path.
+    # Each tenant is isolated in its own session and its own try, so one
+    # tenant's failure can't abort the sweep for the rest.
+    tenant_ids = await _list_active_tenant_ids()
+    tenants_ok = 0
+    tenants_failed = 0
+    for tenant_id in tenant_ids:
+        async with async_tenant_context(tenant_id):
+            try:
+                await _check_freshness_for_tenant(tenant_id)
+                tenants_ok += 1
+            except Exception as exc:
+                # Deliberately NOT a warning. A per-tenant failure here means a
+                # tenant's staleness genuinely went unchecked and its alerts
+                # were never sent — real lost work, not a hiccup. This was a
+                # log.warning() that swallowed the exception type entirely, and
+                # a sweep that failed for every tenant still finished by
+                # logging "freshness_check_complete", which read as success.
+                # Same fail-quiet shape as the audit-log writes in
+                # transform_run_log.py / llm_service.py.
+                tenants_failed += 1
+                log.error("freshness_check_tenant_failed",
+                          tenant_id=tenant_id,
+                          error_type=type(exc).__name__, error=str(exc))
+    # Counts are the point: "complete" alone can never again mean "silently
+    # lost work". A non-zero tenants_failed is the signal to look at the
+    # per-tenant errors above it.
+    log.info("freshness_check_complete",
+             tenants_total=len(tenant_ids),
+             tenants_ok=tenants_ok,
+             tenants_failed=tenants_failed)
+
+
+@with_tenant_context
+async def _check_freshness_for_tenant(tenant_id: str):
+    """One tenant's freshness pass. Caller must already hold that tenant's
+    RLS context — every query below relies on it rather than re-deriving it."""
+    from database import AsyncSessionLocal
+    from sqlalchemy import select
+    from models.all_models import Tenant, DataSource, Incident, IncidentSeverity, IncidentStatus
+    import uuid
+
     async with AsyncSessionLocal() as db:
-        tenants = await db.execute(select(Tenant).where(Tenant.is_active == True))
-        for tenant in tenants.scalars().all():
+            tenant = (await db.execute(
+                select(Tenant).where(Tenant.id == tenant_id)
+            )).scalars().first()
+            if tenant is None:
+                # Scoped session can't see it — deleted mid-sweep, or its RLS
+                # context didn't take. Skip rather than crash the whole sweep.
+                return
             # Existing open staleness incidents for this tenant, so the new
             # notification wire-up below only fires when a source *newly*
             # becomes stale, not on every 15-minute tick for a source
@@ -321,8 +415,7 @@ async def _check_freshness():
                     await NotificationService(tenant.id).notify_stale_sources(newly_stale)
                 except Exception as notify_exc:
                     log.warning("stale_source_notification_error", tenant_id=tenant.id, error=str(notify_exc))
-        await db.commit()
-    log.info("freshness_check_complete")
+            await db.commit()
 
 
 @celery_app.task

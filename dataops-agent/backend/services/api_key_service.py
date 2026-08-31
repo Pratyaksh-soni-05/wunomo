@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from database import AsyncSessionLocal
 from models.all_models import ApiKey
+from services.tenant_context import with_tenant_context
 
 KEY_PREFIX = "axm_live_"
 
@@ -33,6 +34,7 @@ def _mask(key: ApiKey) -> dict:
     }
 
 
+@with_tenant_context
 async def create_api_key(tenant_id: str, name: str, created_by_user_id: str) -> dict:
     if not (name or "").strip():
         return {"error": "Key name cannot be empty"}
@@ -55,6 +57,7 @@ async def create_api_key(tenant_id: str, name: str, created_by_user_id: str) -> 
     return {**_mask(key), "raw_key": raw_key}
 
 
+@with_tenant_context
 async def list_api_keys(tenant_id: str) -> list[dict]:
     async with AsyncSessionLocal() as db:
         r = await db.execute(
@@ -63,6 +66,7 @@ async def list_api_keys(tenant_id: str) -> list[dict]:
         return [_mask(k) for k in r.scalars().all()]
 
 
+@with_tenant_context
 async def revoke_api_key(tenant_id: str, key_id: str) -> dict:
     async with AsyncSessionLocal() as db:
         r = await db.execute(

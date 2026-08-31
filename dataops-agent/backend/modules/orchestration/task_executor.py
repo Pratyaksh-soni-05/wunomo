@@ -824,7 +824,9 @@ async def execute_next_step(task_id: str) -> dict:
                 r2 = await db.execute(select(func.max(TaskStep.step_index)).where(TaskStep.task_id == task_id))
                 max_index = r2.scalar_one()
                 verify_step = TaskStep(
-                    id=str(uuid.uuid4()), task_id=task_id, step_index=(max_index or 0) + 1,
+                    id=str(uuid.uuid4()), task_id=task_id,
+                    tenant_id=step.tenant_id,  # denormalized for RLS; always the parent's
+                    step_index=(max_index or 0) + 1,
                     description=f'Verify that "{description}" reached a final state.',
                     source=TaskStepSource.SYSTEM_INSERTED,
                     tool_name=tool_name,  # what kind of dispatch to poll, not a tool to call again

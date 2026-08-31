@@ -9,6 +9,7 @@ import structlog
 from database import AsyncSessionLocal
 from models.all_models import DataSource, SourceType
 from config import settings
+from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
 
@@ -32,6 +33,7 @@ SUPPORTED_EXTS = {
 }
 
 
+@tenant_scoped
 class ConnectorManager:
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id

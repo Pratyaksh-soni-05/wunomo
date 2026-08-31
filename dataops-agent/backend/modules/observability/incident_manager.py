@@ -12,6 +12,7 @@ from models.all_models import (
     DataSource,
 )
 from services.llm_service import LLMService
+from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
 
@@ -64,6 +65,7 @@ Retry Policy: {retry_policy}
 """
 
 
+@tenant_scoped
 class IncidentManager:
     """
     Manages incident lifecycle for AXIOM:

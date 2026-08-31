@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, desc, and_
 from database import AsyncSessionLocal
 from models.all_models import AuditLog
+from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
 
@@ -11,6 +12,7 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+@tenant_scoped
 class AuditTrail:
     """
     Writes and queries the AuditLog table for AXIOM.

@@ -9,6 +9,7 @@ import asyncpg
 from database import AsyncSessionLocal
 from models.all_models import DataSource
 from modules.governance.audit_trail import AuditTrail
+from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
 
@@ -27,6 +28,7 @@ BLOCKED_KEYWORDS = frozenset([
 ])
 
 
+@tenant_scoped
 class SqlRunner:
     """
     Executes SQL against a registered DataSource with full safety controls.

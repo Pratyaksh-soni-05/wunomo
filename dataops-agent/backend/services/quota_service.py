@@ -47,6 +47,7 @@ from sqlalchemy import select, func
 
 from database import AsyncSessionLocal
 from models.all_models import LlmUsageEvent, PipelineRun, Pipeline, DataSource, User, Tenant
+from services.tenant_context import with_tenant_context
 
 WARNING_THRESHOLD = 0.8
 
@@ -131,6 +132,7 @@ async def _plan_limits(db, tenant_id: str) -> dict:
     return PLANS.get(plan, PLANS["starter"])
 
 
+@with_tenant_context
 async def get_quota_status(tenant_id: str, resource: str) -> dict:
     """Returns {resource, used, limit, percent, status}. status is
     "ok" | "warning" (>= 80%) | "exceeded" (>= 100%). limit is None for an

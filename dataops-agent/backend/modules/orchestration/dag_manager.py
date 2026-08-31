@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 import structlog
 
 from database import AsyncSessionLocal
+from services.tenant_context import tenant_scoped
 from models.all_models import (
     Pipeline, PipelineRun, PipelineStatus, RunStatus,
     QualityRule, Incident, IncidentSeverity, IncidentStatus,
@@ -44,6 +45,7 @@ def _next_run_at(pipeline) -> str | None:
         return None
 
 
+@tenant_scoped
 class DAGManager:
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id

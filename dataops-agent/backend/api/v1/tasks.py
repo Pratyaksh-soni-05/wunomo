@@ -330,6 +330,7 @@ async def create_task(body: CreateTaskRequest, current_user: dict = Depends(enfo
             ts = TaskStep(
                 id=str(uuid.uuid4()),
                 task_id=task.id,
+                tenant_id=task.tenant_id,  # denormalized for RLS; always the parent's
                 step_index=i,
                 description=step["description"],
                 source=TaskStepSource.LLM_PLANNED,
@@ -424,7 +425,9 @@ async def edit_task_steps(task_id: str, body: EditStepsRequest, current_user: di
         task_steps = []
         for i, (step, source) in enumerate(planned_steps):
             ts = TaskStep(
-                id=str(uuid.uuid4()), task_id=task.id, step_index=i,
+                id=str(uuid.uuid4()), task_id=task.id,
+                tenant_id=task.tenant_id,  # denormalized for RLS; always the parent's
+                step_index=i,
                 description=step["description"], source=source,
                 tool_name=step["tool_name"], tool_args=step.get("tool_args") or {},
                 depends_on_step_index=step.get("depends_on_step_index"),

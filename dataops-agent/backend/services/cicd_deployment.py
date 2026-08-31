@@ -5,6 +5,7 @@ from sqlalchemy import select, update
 
 from database import AsyncSessionLocal
 from models.cicd import PipelineCommit, PipelineDeployment, DeploymentStatus
+from services.tenant_context import with_tenant_context
 
 log = structlog.get_logger()
 
@@ -27,6 +28,7 @@ def deploy_pipeline(self, commit_id: str, tenant_id: str, approved_by: str = "au
         raise self.retry(exc=exc, countdown=30)
 
 
+@with_tenant_context
 async def _deploy(commit_id: str, tenant_id: str, approved_by: str):
     async with AsyncSessionLocal() as db:
         result = await db.execute(
