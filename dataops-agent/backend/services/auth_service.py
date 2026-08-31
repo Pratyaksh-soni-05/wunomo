@@ -17,6 +17,7 @@ from sqlalchemy import select
 from config import settings
 from database import AsyncSessionLocal
 from models.all_models import EmailLoginCode, Tenant, User, UserWorkspacePreference
+from services.tenant_context import with_tenant_context, async_tenant_context, apply_tenant_to_session
 
 log = structlog.get_logger()
 
@@ -107,6 +108,7 @@ async def issue_token_and_remember(user: User, auth_method: str) -> str:
     return token
 
 
+@with_tenant_context
 async def _remember_workspace(email: str, tenant_id: str) -> None:
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(UserWorkspacePreference).where(UserWorkspacePreference.email == email))
@@ -150,9 +152,22 @@ async def create_new_tenant_and_user(
     hashed_password: Optional[str] = None, google_id: Optional[str] = None,
     email_verified: bool = False, full_name: Optional[str] = None,
 ) -> tuple[Tenant, User]:
-    async with AsyncSessionLocal() as db:
+    # Creating a tenant is the one operation that has to establish its own RLS
+    # context rather than inherit one: `tenants` is policy-protected with
+    # WITH CHECK (id = current_setting('app.current_tenant_id')), and at signup
+    # there is no tenant yet to have been set. Because the id is generated here
+    # rather than by the database, it can simply be minted first and the context
+    # set to it — so the INSERT satisfies its own policy, and the User INSERT
+    # that follows satisfies `users`' policy for the same tenant.
+    #
+    # This is deliberately NOT solved with a permissive INSERT policy on
+    # tenants, nor by running signup as the privileged role: either would carve
+    # a genuine hole (any session could then mint rows for any tenant id) to
+    # avoid what turns out to be a two-line ordering change.
+    tenant_id = str(uuid.uuid4())
+    async with async_tenant_context(tenant_id), AsyncSessionLocal() as db:
         tenant = Tenant(
-            id=str(uuid.uuid4()), name=tenant_name,
+            id=tenant_id, name=tenant_name,
             slug=slugify(tenant_name) + "-" + str(uuid.uuid4())[:6],
             created_at=utcnow(),
         )
@@ -186,8 +201,20 @@ async def find_existing_tenants_for_email(email: str, active_only: bool = False)
         users = r.scalars().all()
         if not users:
             return []
-        tr = await db.execute(select(Tenant).where(Tenant.id.in_([u.tenant_id for u in users])))
-        return [{"tenant_id": t.id, "tenant_name": t.name} for t in tr.scalars().all()]
+        # Deliberately cross-tenant: the whole point is to surface workspaces
+        # belonging to OTHER tenants, and this runs before (or independently of)
+        # any tenant context. `tenants` is policy-scoped by id, so a direct
+        # select here returns at most the caller's own row. Read through
+        # tenant_registry instead — the same view the Celery sweepers use, which
+        # runs with its owner's privileges and exposes only id/name/is_active,
+        # never settings (webhook URLs, alert emails) or plan.
+        from sqlalchemy import text as _text
+        tenant_ids = [u.tenant_id for u in users]
+        tr = await db.execute(
+            _text("SELECT id, name FROM tenant_registry WHERE id = ANY(:ids)"),
+            {"ids": tenant_ids},
+        )
+        return [{"tenant_id": row[0], "tenant_name": row[1]} for row in tr.fetchall()]
 
 
 class WorkspaceSwitchRateLimited(Exception):
@@ -341,6 +368,21 @@ async def resolve_identity(
 
 
 async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_email_verified) -> dict:
+    # This is the write half of the pre-auth chicken-and-egg. The caller found
+    # this user by email across all tenants, which the `pre_auth_read` policy
+    # permits precisely because the tenant isn't known until the user is. The
+    # UPDATE below is governed by the ordinary tenant_isolation policy, though,
+    # so without a context it matches zero rows and SQLAlchemy raises
+    # StaleDataError ("expected to update 1 row(s); 0 were matched").
+    #
+    # The tenant is no longer unknown at this point — the row we just read tells
+    # us. So scope the write to that tenant and leave the policy strict, rather
+    # than widening pre_auth_read to cover UPDATE (which would let any session
+    # modify any tenant's users).
+    if (auth_method == "google" and not user.google_id) or \
+       (auth_method == "email_code" and not user.email_verified):
+        await apply_tenant_to_session(db, user.tenant_id)
+
     if auth_method == "google" and not user.google_id:
         if not provider_email_verified:
             return {"status": "blocked_unverified"}

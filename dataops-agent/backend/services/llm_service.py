@@ -8,6 +8,9 @@ from config import settings
 import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
 from groq import AuthenticationError as GroqAuthError
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+
+from services.tenant_context import with_tenant_context
 
 
 log = structlog.get_logger()
@@ -54,14 +57,16 @@ def content_as_text(content) -> str:
     return str(content)
 
 
+@with_tenant_context
 async def log_llm_usage(
     *, tenant_id: str | None, user_id: str | None = None, session_id: str | None = None,
     request_type: str, provider: str, model: str, used_fallback: bool,
     latency_ms: int, success: bool, usage_metadata: dict | None = None,
     error_message: str | None = None,
 ) -> None:
-    """Best-effort usage logging — a DB hiccup here must never break the
-    actual LLM call it's describing, so failures are logged and swallowed."""
+    """Usage logging — a transient DB hiccup must never break the actual LLM
+    call it's describing, but a permission/RLS denial is not a hiccup and is
+    re-raised rather than swallowed (see the except blocks below)."""
     if not tenant_id:
         return
     try:
@@ -80,8 +85,29 @@ async def log_llm_usage(
                 latency_ms=latency_ms, success=success, error_message=error_message,
             ))
             await db.commit()
+    except (OperationalError, InterfaceError, DBAPIError) as exc:
+        # Transient only: dropped connection, exhausted pool, DB briefly
+        # unreachable. The LLM call itself already happened and its answer is
+        # about to be returned — a metering blip shouldn't fail the request.
+        log.warning("log_llm_usage.transient_failure",
+                    tenant_id=tenant_id, request_type=request_type,
+                    provider=provider, model=model, error=str(exc))
     except Exception as exc:
-        log.warning("log_llm_usage_failed", error=str(exc))
+        # Not transient — specifically InsufficientPrivilege from a Row-Level
+        # Security denial. Previously this was caught, warned, and dropped, so
+        # under RLS the usage meter would silently go blank while every request
+        # kept succeeding. Since this table drives quota enforcement and billing
+        # figures, silent gaps are worse than a loud failure.
+        #
+        # NOTE for Master Ranking Item #9 (tamper-evident audit trail): the
+        # same caveat as transform_run_log.py — re-raising makes a *failed*
+        # write loud, but these rows remain plain, mutable, unsigned records
+        # with no chaining, so a successful write is still not tamper-evident.
+        log.error("log_llm_usage.write_failed",
+                  tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+                  request_type=request_type, provider=provider, model=model,
+                  error_type=type(exc).__name__, error=str(exc))
+        raise
 
 # A failing/quota-exhausted Gemini call doesn't fail fast: google-api-core's own
 # gRPC retry layer respects the server's suggested `retry_delay` (we've seen it

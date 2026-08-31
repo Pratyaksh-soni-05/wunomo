@@ -22,6 +22,7 @@ from database import AsyncSessionLocal
 from models.all_models import TeamInvite, Tenant, User
 from services.auth_service import hash_password, issue_token_and_remember
 from services.rbac import ALL_ROLES
+from services.tenant_context import with_tenant_context, apply_tenant_to_session
 
 log = structlog.get_logger()
 
@@ -41,6 +42,7 @@ def _invite_link(token: str) -> str:
     return f"{base}/invite/accept?token={token}"
 
 
+@with_tenant_context
 async def create_invite(*, tenant_id: str, email: str, role: str, invited_by_user_id: str) -> dict:
     """Returns {"error": ...} | {"invite": TeamInvite, "token": <raw token, shown once>}."""
     if role not in ALL_ROLES:
@@ -143,6 +145,18 @@ async def accept_invite(*, token: str, password: str, full_name: str) -> dict:
             # consumed to create anything; leave it pending so a retry
             # with correct state (or an admin revoking it) still works.
             return {"error": "This email is already a member of this workspace"}
+
+        # Same pre-auth write problem as _link_and_issue(): the invite was
+        # located by token hash alone, with no tenant context — which the
+        # `pre_auth_read` policy on team_invites exists to allow, since the
+        # tenant is exactly what the token is being redeemed to discover. Both
+        # writes below (a new User row, and marking the invite accepted) are
+        # governed by the ordinary tenant_isolation policy, so without a context
+        # they match zero rows and raise StaleDataError.
+        #
+        # The invite itself names the tenant, so scope the writes to it and keep
+        # the policy strict rather than allowing unconditional UPDATE.
+        await apply_tenant_to_session(db, invite.tenant_id)
 
         user = User(
             id=str(uuid.uuid4()), tenant_id=invite.tenant_id, email=invite.email,
