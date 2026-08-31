@@ -5,6 +5,7 @@ from database import AsyncSessionLocal
 from models.all_models import User, ApiKey
 from sqlalchemy import select
 from services.auth_service import issue_token_for_user
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="apikeytest"):
@@ -36,7 +37,7 @@ async def test_created_key_is_stored_hashed_not_raw(client):
     r = await client.post("/api/v1/api-keys/", json={"name": "test key"}, headers={"Authorization": f"Bearer {token}"})
     raw_key = r.json()["raw_key"]
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         rr = await db.execute(select(ApiKey).where(ApiKey.tenant_id == tenant_id))
         stored = rr.scalars().first()
         assert stored.key_hash != raw_key
@@ -100,7 +101,7 @@ async def test_create_rejects_empty_name(client):
 @pytest.mark.asyncio
 async def test_viewer_cannot_create_list_or_revoke_keys(client):
     _, tenant_id, user_id = await _register(client)
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = "viewer"

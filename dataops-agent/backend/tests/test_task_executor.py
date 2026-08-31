@@ -15,6 +15,23 @@ import modules.orchestration.task_executor as executor_module
 from database import AsyncSessionLocal
 from modules.orchestration.task_executor import execute_next_step
 from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus, User
+from services.tenant_context import tenant_session
+
+
+async def _as_tenant(tenant_id, fn, *args, **kwargs):
+    """Call an executor entrypoint the way a real request does.
+
+    In production `execute_next_step`/`resume_task`/`reject_task_step` run
+    inside an HTTP request, where TenantContextMiddleware has already put the
+    caller's tenant in the RLS context; they look their Task up by id with no
+    tenant argument, so without that context RLS hides the row and they return
+    "task_not_found". Tests call them directly, so they must establish the same
+    context rather than be handed a bypass.
+    """
+    from services.tenant_context import async_tenant_context
+    async with async_tenant_context(tenant_id):
+        return await fn(*args, **kwargs)
+
 
 
 async def _register(client, prefix="taskexec"):
@@ -28,7 +45,7 @@ async def _register(client, prefix="taskexec"):
 
 
 async def _seed_queued_task(tenant_id: str, user_id: str, tool_name="get_pipeline_run_history", tool_args=None):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -37,7 +54,7 @@ async def _seed_queued_task(tenant_id: str, user_id: str, tool_name="get_pipelin
         db.add(task)
         await db.flush()
         step = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=0,
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=task.tenant_id, step_index=0,
             description="check history", source=TaskStepSource.LLM_PLANNED,
             tool_name=tool_name, tool_args=tool_args or {"pipeline_id": "pl-1"},
             status=TaskStepStatus.PENDING,
@@ -47,8 +64,8 @@ async def _seed_queued_task(tenant_id: str, user_id: str, tool_name="get_pipelin
         return task.id, step.id
 
 
-async def _fresh(task_id, step_id):
-    async with AsyncSessionLocal() as db:
+async def _fresh(tenant_id, task_id, step_id):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
@@ -66,11 +83,11 @@ async def test_step_succeeds_on_first_attempt(client, monkeypatch):
 
     monkeypatch.setattr(executor_module, "_call_tool", _fake_call_tool)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_succeeded"
     assert outcome["attempt_count"] == 1
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert step.status == TaskStepStatus.SUCCEEDED
     assert step.attempt_count == 1
     assert task.status == TaskStatus.RUNNING
@@ -88,17 +105,17 @@ async def test_permission_denied_blocks_immediately_attempt_count_one_no_tool_ca
     monkeypatch.setattr(executor_module, "_call_tool", _fail_if_called)
 
     # check_freshness requires "sources.profile" -- demote to viewer (only "view").
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = "viewer"
         await db.commit()
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "blocked_permission"
     assert outcome["attempt_count"] == 1
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert step.status == TaskStepStatus.FAILED
     assert step.attempt_count == 1
     assert "permission" in step.error_message.lower() or "no longer" in step.error_message.lower()
@@ -115,15 +132,15 @@ async def test_deactivated_user_blocks_the_next_step(client, monkeypatch):
 
     monkeypatch.setattr(executor_module, "_call_tool", _fail_if_called)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.is_active = False
         await db.commit()
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "blocked_permission"
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert "no longer active" in step.error_message
 
 
@@ -147,12 +164,12 @@ async def test_transient_exception_gets_one_retry_then_succeeds_no_llm(client, m
     monkeypatch.setattr(executor_module, "_adapt_step_args", _fail_if_adapted)
     monkeypatch.setattr(executor_module, "TRANSIENT_RETRY_BACKOFF_SECONDS", 0)  # don't slow the test down
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_succeeded"
     assert outcome["attempt_count"] == 2
     assert calls["n"] == 2
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert step.status == TaskStepStatus.SUCCEEDED
     assert step.attempt_count == 2
 
@@ -168,12 +185,12 @@ async def test_transient_exception_exhausts_budget_and_pauses(client, monkeypatc
     monkeypatch.setattr(executor_module, "_call_tool", _always_raises)
     monkeypatch.setattr(executor_module, "TRANSIENT_RETRY_BACKOFF_SECONDS", 0)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_failed"
     assert outcome["attempt_count"] == 3
     assert "TimeoutError" in outcome["reason"]
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert step.status == TaskStepStatus.FAILED
     assert step.attempt_count == 3
     assert "simulated persistent timeout" in step.error_message
@@ -191,9 +208,9 @@ async def test_domain_error_triggers_exactly_one_adapt_call_then_succeeds(client
     # that single real candidate so this test still exercises the retry
     # mechanics it's named for, not the guardrail (that has its own
     # dedicated tests in test_task_executor_resolution.py).
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         db.add(TaskStep(
-            id=str(uuid.uuid4()), task_id=task_id, step_index=99,
+            id=str(uuid.uuid4()), task_id=task_id, tenant_id=tenant_id, step_index=99,
             description="discovery", source=TaskStepSource.LLM_PLANNED,
             tool_name="list_pipelines", tool_args={},
             status=TaskStepStatus.SUCCEEDED,
@@ -218,12 +235,12 @@ async def test_domain_error_triggers_exactly_one_adapt_call_then_succeeds(client
     monkeypatch.setattr(executor_module, "_call_tool", _not_found_then_ok)
     monkeypatch.setattr(executor_module, "_adapt_step_args", _fake_adapt)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_succeeded"
     assert adapt_calls["n"] == 1
     assert calls["n"] == 2
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert step.status == TaskStepStatus.SUCCEEDED
     assert step.tool_args == {"pipeline_id": "corrected-id"}
 
@@ -245,12 +262,12 @@ async def test_domain_error_adapt_still_fails_exhausts_budget_with_one_adapt_cal
     monkeypatch.setattr(executor_module, "_call_tool", _always_not_found)
     monkeypatch.setattr(executor_module, "_adapt_step_args", _fake_adapt)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_failed"
     assert outcome["attempt_count"] == 3
     assert adapt_calls["n"] == 1  # never called a second time even though 3 attempts happened
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert step.status == TaskStepStatus.FAILED
     assert "Pipeline not found" in step.error_message
     assert task.status == TaskStatus.PAUSED_FAILED_STEP
@@ -267,7 +284,7 @@ async def test_adapt_receives_accumulated_prior_step_results(client, monkeypatch
     _adapt_step_args intact -- see test_task_executor_resolution.py for
     Tier 1's own deterministic-match coverage."""
     tenant_id, user_id = await _register(client, "execadaptcontext")
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -276,14 +293,14 @@ async def test_adapt_receives_accumulated_prior_step_results(client, monkeypatch
         db.add(task)
         await db.flush()
         earlier = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=0,
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=task.tenant_id, step_index=0,
             description="check health", source=TaskStepSource.LLM_PLANNED,
             tool_name="get_system_health", tool_args={},
             status=TaskStepStatus.SUCCEEDED,
             raw_result={"note": "the real prior result the fallback should see"},
         )
         step = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=1,
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=task.tenant_id, step_index=1,
             description="check history", source=TaskStepSource.LLM_PLANNED,
             tool_name="get_pipeline_run_history", tool_args={"pipeline_id": "bad-id"},
             status=TaskStepStatus.PENDING, depends_on_step_index=0,
@@ -305,7 +322,7 @@ async def test_adapt_receives_accumulated_prior_step_results(client, monkeypatch
     monkeypatch.setattr(executor_module, "_call_tool", _not_found)
     monkeypatch.setattr(executor_module, "_adapt_step_args", _fake_adapt)
 
-    await execute_next_step(task_id)
+    await _as_tenant(tenant_id, execute_next_step, task_id)
 
     assert seen["prior_results"] == [
         {"step_index": 0, "tool_name": "get_system_health",
@@ -323,14 +340,14 @@ async def test_task_completes_only_once_no_pending_steps_remain(client, monkeypa
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
 
-    first = await execute_next_step(task_id)
+    first = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert first["outcome"] == "step_succeeded"
-    task, _ = await _fresh(task_id, step_id)
+    task, _ = await _fresh(tenant_id, task_id, step_id)
     assert task.status == TaskStatus.RUNNING  # not yet detected as complete
 
-    second = await execute_next_step(task_id)
+    second = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert second["outcome"] == "task_completed"
-    task, _ = await _fresh(task_id, step_id)
+    task, _ = await _fresh(tenant_id, task_id, step_id)
     assert task.status == TaskStatus.COMPLETED
     assert task.completed_at is not None
 
@@ -338,7 +355,7 @@ async def test_task_completes_only_once_no_pending_steps_remain(client, monkeypa
 @pytest.mark.asyncio
 async def test_a_non_runnable_task_is_a_safe_noop(client, monkeypatch):
     tenant_id, user_id = await _register(client, "execnotrunnable")
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -348,6 +365,6 @@ async def test_a_non_runnable_task_is_a_safe_noop(client, monkeypatch):
         await db.commit()
         task_id = task.id
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "not_runnable"
     assert outcome["status"] == "draft_plan"

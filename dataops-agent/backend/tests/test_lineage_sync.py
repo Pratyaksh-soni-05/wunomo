@@ -3,6 +3,7 @@ import pytest
 
 from database import AsyncSessionLocal
 from models.all_models import DataSource, Pipeline, SourceType, PipelineStatus
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="lineage"):
@@ -69,7 +70,7 @@ async def test_pre_existing_source_and_pipeline_are_backfilled_on_read(client):
     token, tenant_id = await _register(client, "lineagebackfill")
     headers = {"Authorization": f"Bearer {token}"}
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name="Legacy Source",
             source_type=SourceType.CSV, connection_config={},

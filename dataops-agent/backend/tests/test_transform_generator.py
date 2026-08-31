@@ -4,6 +4,7 @@ import pytest
 from database import AsyncSessionLocal
 from models.all_models import DataSource, SourceType
 from modules.transformation.transform_generator import TransformGenerator
+from services.tenant_context import tenant_session
 
 
 async def _make_profiled_source(tenant_id: str, schema_snapshot: dict) -> DataSource:
@@ -12,7 +13,7 @@ async def _make_profiled_source(tenant_id: str, schema_snapshot: dict) -> DataSo
     actually produce (table-name-keyed dict of {"columns": [...], "row_count": N},
     each column using "column_name"/"data_type"/"is_nullable") — not a
     hand-rolled shape that would silently agree with a wrong assumption."""
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,

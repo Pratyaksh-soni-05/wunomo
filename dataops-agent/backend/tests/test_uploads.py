@@ -6,6 +6,7 @@ from database import AsyncSessionLocal
 from models.all_models import User
 from services.auth_service import issue_token_for_user
 from sqlalchemy import select
+from services.tenant_context import tenant_session
 
 
 def _csv_bytes():
@@ -86,13 +87,17 @@ async def test_upload_register_requires_sources_create_permission(client):
         "tenant_name": "Upload Viewer Corp",
     })
     user_id = reg.json()["user_id"]
+    tenant_id = reg.json()["tenant_id"]
 
-    async with AsyncSessionLocal() as db:
+    # The SELECT below is allowed by the pre_auth_read policy, but the UPDATE
+    # is governed by tenant_isolation - without the tenant it matches 0 rows
+    # and raises StaleDataError. Same fix as the production pre-auth writes.
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = "viewer"
         await db.commit()
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         viewer_token = issue_token_for_user(user, "password")

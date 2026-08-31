@@ -16,6 +16,7 @@ import pytest
 from database import AsyncSessionLocal
 from models.all_models import ChatMessage
 from models.approval_model import ApprovalRequest, ApprovalStatus
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="chatapproval"):
@@ -30,7 +31,7 @@ async def _register(client, prefix="chatapproval"):
 async def _seed_blocked_chat_message(tenant_id: str, user_id: str, session_id: str) -> None:
     """Simulates what POST /chat/ writes for a turn that blocked one tool
     call -- the exact shape _extract_tool_trace() produces."""
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         db.add(ChatMessage(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             session_id=session_id, role="assistant",
@@ -45,7 +46,7 @@ async def _seed_blocked_chat_message(tenant_id: str, user_id: str, session_id: s
 
 async def _seed_approval_request(tenant_id: str, user_id: str, session_id: str,
                                   status: ApprovalStatus, execution_result=None) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         approval = ApprovalRequest(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             session_id=session_id, action_name="pause_pipeline",

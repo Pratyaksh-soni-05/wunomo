@@ -13,7 +13,26 @@ from sqlalchemy import select
 import modules.orchestration.task_executor as executor_module
 from database import AsyncSessionLocal
 from modules.orchestration.task_executor import execute_next_step
+from services.tenant_context import tenant_session
+
+async def _as_tenant(tenant_id, fn, *args, **kwargs):
+    """Call an executor entrypoint the way a real request does.
+
+    In production `execute_next_step`/`resume_task`/`reject_task_step` run
+    inside an HTTP request, where TenantContextMiddleware has already put the
+    caller's tenant in the RLS context; they look their Task up by id with no
+    tenant argument, so without that context RLS hides the row and they return
+    "task_not_found". Tests call them directly, so they must establish the same
+    context rather than be handed a bypass.
+    """
+    from services.tenant_context import async_tenant_context
+    async with async_tenant_context(tenant_id):
+        return await fn(*args, **kwargs)
+
 from models.all_models import (
+
+
+
     ApprovalRequest, ApprovalStatus, RunStatus, Task, TaskShape, TaskStatus, TaskStep,
     TaskStepSource, TaskStepStatus, User,
 )
@@ -30,7 +49,7 @@ async def _register(client, prefix="taskverify"):
 
 
 async def _seed_task(tenant_id, user_id, steps: list[dict]):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             goal="test", task_shape=TaskShape.SYNC_PROFILE_QUALITY,
@@ -40,15 +59,15 @@ async def _seed_task(tenant_id, user_id, steps: list[dict]):
         await db.flush()
         step_ids = []
         for s in steps:
-            ts = TaskStep(id=str(uuid.uuid4()), task_id=task.id, **s)
+            ts = TaskStep(id=str(uuid.uuid4()), task_id=task.id, tenant_id=task.tenant_id, **s)
             db.add(ts)
             step_ids.append(ts.id)
         await db.commit()
         return task.id, step_ids
 
 
-async def _fresh(task_id, step_id=None):
-    async with AsyncSessionLocal() as db:
+async def _fresh(tenant_id, task_id, step_id=None):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         if step_id is None:
@@ -57,8 +76,8 @@ async def _fresh(task_id, step_id=None):
         return task, r.scalar_one()
 
 
-async def _all_steps(task_id):
-    async with AsyncSessionLocal() as db:
+async def _all_steps(tenant_id, task_id):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id).order_by(TaskStep.step_index))
         return r.scalars().all()
 
@@ -78,7 +97,7 @@ async def test_async_dispatch_result_inserts_a_system_inserted_verify_step(clien
         "tool_name": "run_pipeline", "tool_args": {"pipeline_id": "pl-1"}, "status": TaskStepStatus.PENDING,
     }])
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         approval = ApprovalRequest(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, session_id=task_id,
             action_name="run_pipeline", action_args={"pipeline_id": "pl-1"}, risk_level="medium",
@@ -96,10 +115,10 @@ async def test_async_dispatch_result_inserts_a_system_inserted_verify_step(clien
 
     monkeypatch.setattr(executor_module, "_call_tool", _dispatch)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_dispatched_pending_verification"
 
-    steps = await _all_steps(task_id)
+    steps = await _all_steps(tenant_id, task_id)
     assert len(steps) == 2
     dispatch_step, verify_step = steps[0], steps[1]
     assert dispatch_step.status == TaskStepStatus.SUCCEEDED  # it DID successfully dispatch
@@ -125,10 +144,10 @@ async def test_verify_step_resolves_to_success_on_next_call(client, monkeypatch)
 
     monkeypatch.setattr(executor_module, "_poll_dispatch_status", _resolved_ok)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_verified_succeeded"
 
-    task, verify_step = await _fresh(task_id, verify_id)
+    task, verify_step = await _fresh(tenant_id, task_id, verify_id)
     assert verify_step.status == TaskStepStatus.SUCCEEDED
     assert "completed successfully" in verify_step.outcome_summary
 
@@ -147,10 +166,10 @@ async def test_verify_step_resolves_to_failure_pauses_the_task(client, monkeypat
 
     monkeypatch.setattr(executor_module, "_poll_dispatch_status", _resolved_fail)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_verification_failed"
 
-    task, verify_step = await _fresh(task_id, verify_id)
+    task, verify_step = await _fresh(tenant_id, task_id, verify_id)
     assert verify_step.status == TaskStepStatus.FAILED
     assert "source not found" in verify_step.error_message
     assert task.status == TaskStatus.PAUSED_FAILED_STEP
@@ -181,13 +200,13 @@ async def test_unresolved_verify_step_moves_on_to_an_independent_pending_step(cl
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
     monkeypatch.setattr(executor_module, "VERIFY_TIMEOUT_SECONDS", 300)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_succeeded"  # the independent step, not the verify step
 
-    task, verify_step = await _fresh(task_id, verify_id)
+    task, verify_step = await _fresh(tenant_id, task_id, verify_id)
     assert verify_step.status == TaskStepStatus.VERIFYING  # still unresolved
     assert verify_step.attempt_count == 1  # but it WAS polled this call
-    _, indep_step = await _fresh(task_id, indep_id)
+    _, indep_step = await _fresh(tenant_id, task_id, indep_id)
     assert indep_step.status == TaskStepStatus.SUCCEEDED
     assert task.status == TaskStatus.RUNNING
 
@@ -207,10 +226,10 @@ async def test_unresolved_verify_with_nothing_else_to_do_stays_running_within_ti
     monkeypatch.setattr(executor_module, "_poll_dispatch_status", _still_pending)
     monkeypatch.setattr(executor_module, "VERIFY_TIMEOUT_SECONDS", 300)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "still_verifying"
 
-    task = await _fresh(task_id)
+    task = await _fresh(tenant_id, task_id)
     assert task.status == TaskStatus.RUNNING  # still honestly waiting, not done
 
 
@@ -233,10 +252,10 @@ async def test_verify_timeout_with_nothing_else_to_do_completes_with_unconfirmed
     monkeypatch.setattr(executor_module, "_poll_dispatch_status", _still_pending)
     monkeypatch.setattr(executor_module, "VERIFY_TIMEOUT_SECONDS", 300)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "task_completed_with_unconfirmed_steps"
 
-    task = await _fresh(task_id)
+    task = await _fresh(tenant_id, task_id)
     assert task.status == TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS
     assert task.status != TaskStatus.COMPLETED
     assert task.completed_at is not None

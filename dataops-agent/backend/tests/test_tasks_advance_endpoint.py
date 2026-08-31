@@ -13,6 +13,7 @@ import modules.orchestration.task_executor as executor_module
 from database import AsyncSessionLocal
 from models.all_models import Task, TaskStatus, User
 from services.auth_service import hash_password, issue_token_for_user
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="taskadvance"):
@@ -47,7 +48,7 @@ async def _create_and_approve_task(client, token, monkeypatch, goal="advance tes
 
 @pytest.mark.asyncio
 async def test_advance_resolves_one_step_and_returns_the_outcome(client, monkeypatch):
-    token, _, _ = await _register(client, "advbasic")
+    token, tenant_id, _ = await _register(client, "advbasic")
     task = await _create_and_approve_task(client, token, monkeypatch)
 
     async def _ok(tenant_id, tool_name, tool_args):
@@ -68,7 +69,7 @@ async def test_advance_on_a_task_still_in_draft_plan_is_409(client, monkeypatch)
         return [{"description": "x", "tool_name": "get_system_health", "tool_args": {}, "depends_on_step_index": None}]
 
     monkeypatch.setattr(tasks_module, "generate_plan", _fake_plan)
-    token, _, _ = await _register(client, "advdraft")
+    token, tenant_id, _ = await _register(client, "advdraft")
     r = await client.post(
         "/api/v1/tasks/", json={"goal": "x", "task_shape": "diagnose_pipeline_failure"},
         headers={"Authorization": f"Bearer {token}"},
@@ -81,7 +82,7 @@ async def test_advance_on_a_task_still_in_draft_plan_is_409(client, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_advance_on_a_completed_task_is_409(client, monkeypatch):
-    token, _, _ = await _register(client, "advdone")
+    token, tenant_id, _ = await _register(client, "advdone")
     task = await _create_and_approve_task(client, token, monkeypatch)
 
     async def _ok(tenant_id, tool_name, tool_args):
@@ -103,7 +104,7 @@ async def test_only_creator_may_advance(client, monkeypatch):
     token, tenant_id, _ = await _register(client, "advnotmine")
     task = await _create_and_approve_task(client, token, monkeypatch)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         other = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=f"other-{uuid.uuid4().hex[:8]}@example.com",
             hashed_password=hash_password("test1234"), full_name="Other", role="owner",
@@ -119,14 +120,14 @@ async def test_only_creator_may_advance(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_advance_a_nonexistent_task_is_404(client):
-    token, _, _ = await _register(client, "advnotfound")
+    token, tenant_id, _ = await _register(client, "advnotfound")
     r = await client.post(f"/api/v1/tasks/{uuid.uuid4()}/advance", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_pause_reason_is_null_while_the_task_is_healthy(client, monkeypatch):
-    token, _, _ = await _register(client, "advnopause")
+    token, tenant_id, _ = await _register(client, "advnopause")
     task = await _create_and_approve_task(client, token, monkeypatch)
     assert task["pause_reason"] is None
 
@@ -140,7 +141,7 @@ async def test_pause_reason_is_null_while_the_task_is_healthy(client, monkeypatc
 
 @pytest.mark.asyncio
 async def test_pause_reason_names_the_real_step_and_real_error(client, monkeypatch):
-    token, _, _ = await _register(client, "advpausereason")
+    token, tenant_id, _ = await _register(client, "advpausereason")
     task = await _create_and_approve_task(client, token, monkeypatch, goal="a specific real failure")
 
     async def _always_fails(tenant_id, tool_name, tool_args):
@@ -165,10 +166,10 @@ async def test_advance_accepts_a_task_paused_for_quota_not_just_queued_and_runni
     supported it -- the mocked/direct-call tests didn't catch this
     because they call execute_next_step() directly, bypassing this
     endpoint's own separate status check entirely."""
-    token, _, _ = await _register(client, "advquotaresume")
+    token, tenant_id, _ = await _register(client, "advquotaresume")
     task = await _create_and_approve_task(client, token, monkeypatch)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task["id"]))
         db_task = r.scalar_one()
         db_task.status = TaskStatus.PAUSED_QUOTA_EXCEEDED

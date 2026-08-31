@@ -35,7 +35,7 @@ def _url(dbname: str) -> str:
     # render_as_string(hide_password=False), not str(url) -- SQLAlchemy's
     # URL.__str__ masks the password as a literal "***" by default, which
     # psycopg2 would then try to authenticate with verbatim.
-    url = make_url(settings.DATABASE_URL).set(drivername="postgresql", database=dbname)
+    url = make_url(settings.ADMIN_DATABASE_URL).set(drivername="postgresql", database=dbname)
     return url.render_as_string(hide_password=False)
 
 
@@ -70,21 +70,24 @@ def test_migrations_match_the_models(drift_db):
     """Migrate a genuinely empty DB to head, then diff the result against
     Base.metadata via Alembic's own compare_metadata. Any real diff means
     a model changed without a matching migration, or vice versa."""
-    # migrations/env.py reads DATABASE_URL directly from the environment
+    # migrations/env.py reads ADMIN_DATABASE_URL directly from the environment
+    # (it prefers it over DATABASE_URL since the RLS role split — overriding
+    # DATABASE_URL alone here would be ignored and this would migrate the REAL
+    # dev database instead of the throwaway one)
     # (not from the Config object passed to `command.upgrade`), so this
     # is the only way to point it at the throwaway DB instead of the real
     # one this env var normally names.
-    original = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = drift_db
+    original = os.environ.get("ADMIN_DATABASE_URL")
+    os.environ["ADMIN_DATABASE_URL"] = drift_db
     try:
         cfg = Config()
         cfg.set_main_option("script_location", MIGRATIONS_DIR)
         command.upgrade(cfg, "head")
     finally:
         if original is None:
-            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("ADMIN_DATABASE_URL", None)
         else:
-            os.environ["DATABASE_URL"] = original
+            os.environ["ADMIN_DATABASE_URL"] = original
 
     engine = create_engine(drift_db)
     try:
@@ -114,17 +117,17 @@ def test_migrated_task_enum_labels_match_the_python_enum_member_names(drift_db):
     compare_metadata(), which is exactly why this check exists now."""
     from models.all_models import TaskShape, TaskStatus, TaskStepStatus, TaskStepSource
 
-    original = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = drift_db
+    original = os.environ.get("ADMIN_DATABASE_URL")
+    os.environ["ADMIN_DATABASE_URL"] = drift_db
     try:
         cfg = Config()
         cfg.set_main_option("script_location", MIGRATIONS_DIR)
         command.upgrade(cfg, "head")
     finally:
         if original is None:
-            os.environ.pop("DATABASE_URL", None)
+            os.environ.pop("ADMIN_DATABASE_URL", None)
         else:
-            os.environ["DATABASE_URL"] = original
+            os.environ["ADMIN_DATABASE_URL"] = original
 
     conn = psycopg2.connect(drift_db)
     try:

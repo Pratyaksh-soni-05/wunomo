@@ -16,6 +16,7 @@ import modules.orchestration.task_planner as task_planner_module
 from database import AsyncSessionLocal
 from models.all_models import LlmUsageEvent, Task
 from services.quota_service import PLANS
+from services.tenant_context import tenant_session
 
 
 def utcnow():
@@ -33,7 +34,7 @@ async def _register(client, prefix="taskapi"):
 
 
 async def _seed_llm_usage(tenant_id: str, credits: int):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         db.add(LlmUsageEvent(
             id=str(uuid.uuid4()), tenant_id=tenant_id, request_type="test",
             provider="test", model="test", used_fallback=False,
@@ -44,7 +45,7 @@ async def _seed_llm_usage(tenant_id: str, credits: int):
 
 
 async def _tasks_for_tenant(tenant_id: str) -> list[Task]:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.tenant_id == tenant_id))
         return r.scalars().all()
 

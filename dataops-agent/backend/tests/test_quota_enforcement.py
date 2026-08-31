@@ -6,6 +6,7 @@ from database import AsyncSessionLocal
 from models.all_models import DataSource, PipelineRun, LlmUsageEvent, SourceType, RunStatus, User
 from services.quota_service import credits_for_event, get_quota_status, PLANS
 from sqlalchemy import select
+from services.tenant_context import tenant_session
 
 
 def utcnow():
@@ -23,7 +24,7 @@ async def _register(client, prefix="quota"):
 
 
 async def _seed_sources(tenant_id: str, count: int):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         for _ in range(count):
             db.add(DataSource(
                 id=str(uuid.uuid4()), tenant_id=tenant_id, name="seed",
@@ -37,7 +38,7 @@ async def _seed_llm_usage(tenant_id: str, credits: int):
     requested amount exactly, via input_tokens only (1x weight, so no
     rounding - output_tokens' 3x weight would need a division that could
     undershoot the target on integer truncation)."""
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         db.add(LlmUsageEvent(
             id=str(uuid.uuid4()), tenant_id=tenant_id, request_type="test",
             provider="test", model="test", used_fallback=False,
@@ -104,7 +105,7 @@ async def test_pipeline_runs_quota_exceeded_blocks_trigger(client):
     pipeline_id = pipe.json()["id"]
 
     limit = PLANS["starter"]["pipeline_runs_per_month"]  # 100
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         for _ in range(limit):
             db.add(PipelineRun(
                 id=str(uuid.uuid4()), pipeline_id=pipeline_id, tenant_id=tenant_id,
@@ -136,7 +137,7 @@ async def test_team_members_quota_exceeded_blocks_invite(client):
     token, tenant_id = await _register(client)
     limit = PLANS["starter"]["max_team_members"]  # 3, owner counts as 1
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         for _ in range(limit - 1):
             db.add(User(
                 id=str(uuid.uuid4()), tenant_id=tenant_id,
@@ -174,7 +175,7 @@ async def test_billing_plans_endpoint_is_public(client):
 @pytest.mark.asyncio
 async def test_scale_tier_has_unlimited_data_sources(client):
     token, tenant_id = await _register(client)
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from models.all_models import Tenant
         r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         tenant = r.scalar_one()

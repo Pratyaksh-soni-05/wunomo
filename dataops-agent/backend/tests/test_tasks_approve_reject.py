@@ -15,6 +15,7 @@ from models.all_models import Task, TaskStep, User
 from services.auth_service import hash_password, issue_token_for_user
 
 import api.v1.tasks as tasks_module
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="taskapprove"):
@@ -60,7 +61,7 @@ async def test_approve_sets_provenance_and_transitions_to_queued(client, monkeyp
 
 @pytest.mark.asyncio
 async def test_approving_twice_is_409(client, monkeypatch):
-    token, _, _ = await _register(client, "approvetwice")
+    token, tenant_id, _ = await _register(client, "approvetwice")
     created = await _create_task(client, token, monkeypatch)
 
     r1 = await client.post(f"/api/v1/tasks/{created['id']}/approve-plan", headers={"Authorization": f"Bearer {token}"})
@@ -74,7 +75,7 @@ async def test_only_creator_may_approve(client, monkeypatch):
     token, tenant_id, _ = await _register(client, "approvenotmine")
     created = await _create_task(client, token, monkeypatch)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         other = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=f"other-{uuid.uuid4().hex[:8]}@example.com",
             hashed_password=hash_password("test1234"), full_name="Other", role="owner",
@@ -96,10 +97,10 @@ async def test_cannot_approve_a_plan_with_zero_steps(client, monkeypatch):
     draft_plan task (generation/edit both require >=1 step), but this
     guards the invariant directly in case something upstream ever
     changes."""
-    token, _, _ = await _register(client, "approvenosteps")
+    token, tenant_id, _ = await _register(client, "approvenosteps")
     created = await _create_task(client, token, monkeypatch)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(TaskStep).where(TaskStep.task_id == created["id"]))
         for s in r.scalars().all():
             await db.delete(s)
@@ -113,7 +114,7 @@ async def test_cannot_approve_a_plan_with_zero_steps(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_reject_is_terminal_and_returns_a_clear_next_step_message(client, monkeypatch):
-    token, _, _ = await _register(client, "rejectbasic")
+    token, tenant_id, _ = await _register(client, "rejectbasic")
     created = await _create_task(client, token, monkeypatch)
 
     r = await client.post(
@@ -136,7 +137,7 @@ async def test_only_creator_may_reject(client, monkeypatch):
     token, tenant_id, _ = await _register(client, "rejectnotmine")
     created = await _create_task(client, token, monkeypatch)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         other = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=f"other2-{uuid.uuid4().hex[:8]}@example.com",
             hashed_password=hash_password("test1234"), full_name="Other2", role="owner",
@@ -157,7 +158,7 @@ async def test_full_lifecycle_create_edit_approve_edit_again_is_409(client, monk
     """The end-to-end proof the whole design was built around: editing a
     plan never implicitly approves it, and once genuinely approved, the
     plan is locked -- a fresh, explicit approval is the only way in."""
-    token, _, user_id = await _register(client, "lifecycle")
+    token, tenant_id, user_id = await _register(client, "lifecycle")
     created = await _create_task(client, token, monkeypatch)
 
     edit = await client.patch(
@@ -193,7 +194,7 @@ async def test_full_lifecycle_create_edit_approve_edit_again_is_409(client, monk
     )
     assert edit_again.status_code == 409
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == created["id"]))
         task = r.scalar_one()
         assert task.status.value == "queued"

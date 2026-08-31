@@ -3,10 +3,11 @@ import pytest
 
 from database import AsyncSessionLocal
 from models.all_models import DataSource, Pipeline, PipelineRun, SourceType, PipelineStatus, RunStatus
+from services.tenant_context import tenant_session
 
 
 async def _make_active_pipeline_with_failed_run(tenant_id: str):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,

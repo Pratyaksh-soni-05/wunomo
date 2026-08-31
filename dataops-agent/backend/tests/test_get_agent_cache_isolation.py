@@ -14,6 +14,7 @@ from database import AsyncSessionLocal
 from models.all_models import Tenant
 from sqlalchemy import select
 from tests.test_agent_graph import FakeToolCallLLM, fake_echo_tool, _tool_call_then_final_responses
+from services.tenant_context import tenant_session
 
 
 def test_get_agent_requires_tenant_id():
@@ -89,7 +90,7 @@ async def test_run_agent_threads_the_resolved_override_through_to_the_llm_layer(
     the same assertion."""
     dataops_agent._cache.clear()
     tenant_id = await _register_tenant(client)
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         tenant = r.scalar_one()
         tenant.settings = {"ai_model_override": "llama-3.3-70b-versatile"}
@@ -122,10 +123,16 @@ async def test_run_agent_two_tenants_different_overrides_do_not_cross_contaminat
     tenant_a = await _register_tenant(client, "crossa")
     tenant_b = await _register_tenant(client, "crossb")
 
-    async with AsyncSessionLocal() as db:
+    # One session per tenant: `tenants` is policy-scoped by id, so a single
+    # transaction cannot read or write two tenants' rows (same reason the
+    # multi-tenant seeding in test_task_models had to be split).
+    async with tenant_session(tenant_a) as db:
         ra = await db.execute(select(Tenant).where(Tenant.id == tenant_a))
         ta = ra.scalar_one()
         ta.settings = {"ai_model_override": "gemini-3.5-flash"}
+        await db.commit()
+
+    async with tenant_session(tenant_b) as db:
         rb = await db.execute(select(Tenant).where(Tenant.id == tenant_b))
         tb = rb.scalar_one()
         tb.settings = {"ai_model_override": "llama-3.3-70b-versatile"}
@@ -151,7 +158,7 @@ async def test_run_agent_two_tenants_different_overrides_do_not_cross_contaminat
 @pytest.mark.asyncio
 async def test_get_ai_model_override_returns_valid_override(client):
     tenant_id = await _register_tenant(client)
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         tenant = r.scalar_one()
         tenant.settings = {"ai_model_override": "llama-3.3-70b-versatile"}
@@ -166,7 +173,7 @@ async def test_get_ai_model_override_rejects_unsupported_model(client):
     silently used, must not crash, and must resolve to None (use the
     global default) rather than a value that would degrade chat."""
     tenant_id = await _register_tenant(client)
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         tenant = r.scalar_one()
         tenant.settings = {"ai_model_override": "gpt-4-not-a-real-supported-model"}

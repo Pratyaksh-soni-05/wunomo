@@ -13,6 +13,7 @@ import pytest
 from agent.dataops_agent import role_denied_tool_calls
 from agent.tools import ALL_TOOLS
 from services.rbac import TOOL_CAPABILITIES, PERMISSIONS, Role, has_permission
+from services.tenant_context import tenant_session
 
 
 def test_every_registered_tool_has_a_capability_entry():
@@ -100,13 +101,15 @@ async def test_viewer_blocked_from_pipeline_trigger_both_consumers(client):
         "tenant_name": f"Cross Consumer Corp {uuid.uuid4().hex[:6]}",
     })
     user_id = reg.json()["user_id"]
+    tenant_id = reg.json()["tenant_id"]
 
-    async with AsyncSessionLocal() as db:
+    # Read is permitted by pre_auth_read; the role UPDATE is tenant-scoped.
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = "viewer"
         await db.commit()
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         viewer_token = issue_token_for_user(user, "password")

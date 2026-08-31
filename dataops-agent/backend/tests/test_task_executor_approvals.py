@@ -17,7 +17,26 @@ from sqlalchemy import select
 import modules.orchestration.task_executor as executor_module
 from database import AsyncSessionLocal
 from modules.orchestration.task_executor import execute_next_step, reject_task_step, resume_task
+from services.tenant_context import tenant_session
+
+async def _as_tenant(tenant_id, fn, *args, **kwargs):
+    """Call an executor entrypoint the way a real request does.
+
+    In production `execute_next_step`/`resume_task`/`reject_task_step` run
+    inside an HTTP request, where TenantContextMiddleware has already put the
+    caller's tenant in the RLS context; they look their Task up by id with no
+    tenant argument, so without that context RLS hides the row and they return
+    "task_not_found". Tests call them directly, so they must establish the same
+    context rather than be handed a bypass.
+    """
+    from services.tenant_context import async_tenant_context
+    async with async_tenant_context(tenant_id):
+        return await fn(*args, **kwargs)
+
 from models.all_models import (
+
+
+
     ApprovalRequest, ApprovalStatus, Task, TaskShape, TaskStatus, TaskStep,
     TaskStepSource, TaskStepStatus, User,
 )
@@ -34,7 +53,7 @@ async def _register(client, prefix="taskapproval"):
 
 
 async def _seed_queued_task(tenant_id, user_id, tool_name="sync_source", tool_args=None):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             goal="test", task_shape=TaskShape.SYNC_PROFILE_QUALITY,
@@ -43,7 +62,7 @@ async def _seed_queued_task(tenant_id, user_id, tool_name="sync_source", tool_ar
         db.add(task)
         await db.flush()
         step = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=0,
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=task.tenant_id, step_index=0,
             description="sync a source", source=TaskStepSource.LLM_PLANNED,
             tool_name=tool_name, tool_args=tool_args or {"source_id": "src-1"},
             status=TaskStepStatus.PENDING,
@@ -53,8 +72,8 @@ async def _seed_queued_task(tenant_id, user_id, tool_name="sync_source", tool_ar
         return task.id, step.id
 
 
-async def _fresh(task_id, step_id=None):
-    async with AsyncSessionLocal() as db:
+async def _fresh(tenant_id, task_id, step_id=None):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         if step_id is None:
@@ -68,17 +87,17 @@ async def test_medium_risk_step_blocks_and_creates_a_real_approval_request(clien
     tenant_id, user_id = await _register(client, "approvalblock")
     task_id, step_id = await _seed_queued_task(tenant_id, user_id)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "blocked_needs_approval"
     assert outcome["risk_level"] == "medium"
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert task.status == TaskStatus.PAUSED_NEEDS_APPROVAL
     assert task.paused_at is not None
     assert step.status == TaskStepStatus.BLOCKED_APPROVAL
     assert step.approval_request_id is not None
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == step.approval_request_id))
         approval = r.scalar_one()
         assert approval.status == ApprovalStatus.PENDING
@@ -90,7 +109,7 @@ async def test_medium_risk_step_blocks_and_creates_a_real_approval_request(clien
 async def test_resume_approves_and_continues_execution(client, monkeypatch):
     tenant_id, user_id = await _register(client, "approvalresume")
     task_id, step_id = await _seed_queued_task(tenant_id, user_id)
-    await execute_next_step(task_id)  # blocks
+    await _as_tenant(tenant_id, execute_next_step, task_id)  # blocks
 
     async def _ok(tenant_id, tool_name, tool_args):
         return {"status": "synced", "rows": 5}
@@ -98,22 +117,22 @@ async def test_resume_approves_and_continues_execution(client, monkeypatch):
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
 
     approver_id = str(uuid.uuid4())
-    result = await resume_task(task_id, resolved_by=approver_id, notes="looks fine")
+    result = await _as_tenant(tenant_id, resume_task, task_id, resolved_by=approver_id, notes="looks fine")
     assert result["outcome"] == "step_succeeded"
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert step.status == TaskStepStatus.SUCCEEDED
     # Completion is detected on the NEXT call, not automatically after a
     # step's own success -- the same "one call, one thing" model stages
     # 3/4 already established (see test_task_completes_only_once_no_
     # pending_steps_remain). Confirm that next call really does finish it.
     assert task.status == TaskStatus.RUNNING
-    final = await execute_next_step(task_id)
+    final = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert final["outcome"] == "task_completed"
-    task, _ = await _fresh(task_id, step_id)
+    task, _ = await _fresh(tenant_id, task_id, step_id)
     assert task.status == TaskStatus.COMPLETED
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == step.approval_request_id))
         approval = r.scalar_one()
         assert approval.status == ApprovalStatus.APPROVED
@@ -126,18 +145,18 @@ async def test_resume_approves_and_continues_execution(client, monkeypatch):
 async def test_reject_step_fails_the_step_and_pauses_the_task(client):
     tenant_id, user_id = await _register(client, "approvalreject")
     task_id, step_id = await _seed_queued_task(tenant_id, user_id)
-    await execute_next_step(task_id)  # blocks
+    await _as_tenant(tenant_id, execute_next_step, task_id)  # blocks
 
     approver_id = str(uuid.uuid4())
-    result = await reject_task_step(task_id, resolved_by=approver_id, notes="too risky right now")
+    result = await _as_tenant(tenant_id, reject_task_step, task_id, resolved_by=approver_id, notes="too risky right now")
     assert result["outcome"] == "step_rejected"
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert step.status == TaskStepStatus.FAILED
     assert "too risky right now" in step.error_message
     assert task.status == TaskStatus.PAUSED_FAILED_STEP
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == step.approval_request_id))
         approval = r.scalar_one()
         assert approval.status == ApprovalStatus.REJECTED
@@ -149,7 +168,7 @@ async def test_resume_on_a_task_not_awaiting_approval_is_not_resumable(client):
     tenant_id, user_id = await _register(client, "approvalnotwaiting")
     task_id, step_id = await _seed_queued_task(tenant_id, user_id, tool_name="get_system_health", tool_args={})
 
-    result = await resume_task(task_id, resolved_by=str(uuid.uuid4()))
+    result = await _as_tenant(tenant_id, resume_task, task_id, resolved_by=str(uuid.uuid4()))
     assert result["outcome"] == "not_resumable"
     assert result["status"] == "queued"
 
@@ -163,18 +182,18 @@ async def test_authority_is_re_validated_on_resume_not_trusted_from_when_it_was_
     valid when the step was first blocked."""
     tenant_id, user_id = await _register(client, "approvalauth")
     task_id, step_id = await _seed_queued_task(tenant_id, user_id)
-    await execute_next_step(task_id)  # blocks, user is still "owner" here
+    await _as_tenant(tenant_id, execute_next_step, task_id)  # blocks, user is still "owner" here
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = "viewer"
         await db.commit()
 
-    result = await resume_task(task_id, resolved_by=str(uuid.uuid4()))
+    result = await _as_tenant(tenant_id, resume_task, task_id, resolved_by=str(uuid.uuid4()))
     assert result["outcome"] == "blocked_permission"
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert step.status == TaskStepStatus.FAILED
     assert "no longer" in step.error_message
     assert task.status == TaskStatus.PAUSED_FAILED_STEP
@@ -184,23 +203,23 @@ async def test_authority_is_re_validated_on_resume_not_trusted_from_when_it_was_
 async def test_resume_past_the_timeout_expires_instead_of_resuming(client, monkeypatch):
     tenant_id, user_id = await _register(client, "approvalexpire")
     task_id, step_id = await _seed_queued_task(tenant_id, user_id)
-    await execute_next_step(task_id)  # blocks, paused_at = now
+    await _as_tenant(tenant_id, execute_next_step, task_id)  # blocks, paused_at = now
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         task.paused_at = datetime.utcnow() - timedelta(hours=999)
         await db.commit()
 
-    result = await resume_task(task_id, resolved_by=str(uuid.uuid4()))
+    result = await _as_tenant(tenant_id, resume_task, task_id, resolved_by=str(uuid.uuid4()))
     assert result["outcome"] == "expired"
 
-    task = await _fresh(task_id)
+    task = await _fresh(tenant_id, task_id)
     assert task.status == TaskStatus.EXPIRED
 
     # And it stays expired -- a second resume attempt doesn't somehow
     # revive it (status is no longer PAUSED_NEEDS_APPROVAL at all).
-    result2 = await resume_task(task_id, resolved_by=str(uuid.uuid4()))
+    result2 = await _as_tenant(tenant_id, resume_task, task_id, resolved_by=str(uuid.uuid4()))
     assert result2["outcome"] == "not_resumable"
 
 
@@ -208,15 +227,15 @@ async def test_resume_past_the_timeout_expires_instead_of_resuming(client, monke
 async def test_reject_past_the_timeout_also_expires_rather_than_rejecting(client):
     tenant_id, user_id = await _register(client, "approvalexpirereject")
     task_id, step_id = await _seed_queued_task(tenant_id, user_id)
-    await execute_next_step(task_id)
+    await _as_tenant(tenant_id, execute_next_step, task_id)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         task.paused_at = datetime.utcnow() - timedelta(hours=999)
         await db.commit()
 
-    result = await reject_task_step(task_id, resolved_by=str(uuid.uuid4()))
+    result = await _as_tenant(tenant_id, reject_task_step, task_id, resolved_by=str(uuid.uuid4()))
     assert result["outcome"] == "expired"
-    task = await _fresh(task_id)
+    task = await _fresh(tenant_id, task_id)
     assert task.status == TaskStatus.EXPIRED

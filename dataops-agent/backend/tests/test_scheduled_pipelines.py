@@ -4,6 +4,7 @@ import pytest
 from database import AsyncSessionLocal
 from models.all_models import Pipeline, PipelineRun, PipelineStatus, RunStatus
 from services.tasks import _create_scheduled_run, _check_scheduled_pipelines
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="scheduled"):
@@ -18,7 +19,7 @@ async def _register(client, prefix="scheduled"):
 
 
 async def _make_pipeline(tenant_id: str, cron: str | None, status=PipelineStatus.ACTIVE) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         p = Pipeline(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name="test pipeline",
             status=status, schedule_cron=cron,
@@ -36,7 +37,7 @@ async def test_create_scheduled_run_creates_a_real_pending_run(client):
     run_id = await _create_scheduled_run(pipeline_id, tenant_id)
     assert run_id is not None
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         run = await db.get(PipelineRun, run_id)
     assert run.status == RunStatus.PENDING
     assert run.triggered_by == "scheduled"
@@ -101,7 +102,7 @@ async def test_check_scheduled_pipelines_invalid_cron_does_not_crash(client, mon
     same fix) must be skipped with a warning, not crash the whole poll and
     starve every other tenant's pipelines of their own scheduled runs."""
     _, tenant_id = await _register(client)
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         p = Pipeline(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name="malformed cron pipeline",
             status=PipelineStatus.ACTIVE, schedule_cron="not a real cron",

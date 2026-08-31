@@ -20,6 +20,7 @@ from models.all_models import User
 from services.auth_service import issue_token_for_user
 from services.rbac import PERMISSIONS, Role
 from sqlalchemy import select
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="matrix"):
@@ -33,13 +34,13 @@ async def _register(client, prefix="matrix"):
     return body["access_token"], body["tenant_id"], body["user_id"]
 
 
-async def _token_for_role(user_id: str, role: str) -> str:
-    async with AsyncSessionLocal() as db:
+async def _token_for_role(tenant_id, user_id: str, role: str) -> str:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = role
         await db.commit()
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         return issue_token_for_user(user, "password")
@@ -87,7 +88,7 @@ async def test_permission_matrix(client, capability, method, path, body):
     allowed_roles = PERMISSIONS[capability]
 
     for role in Role:
-        token = await _token_for_role(user_id, role.value)
+        token = await _token_for_role(tenant_id, user_id, role.value)
         headers = {"Authorization": f"Bearer {token}"}
         req = getattr(client, method)
         kwargs = {"headers": headers}

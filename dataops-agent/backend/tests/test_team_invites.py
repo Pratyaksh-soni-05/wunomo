@@ -3,6 +3,7 @@ import pytest
 
 import api.v1.team as team_api
 from services.team_service import _invite_link
+from services.tenant_context import tenant_session
 
 
 @pytest.fixture
@@ -93,7 +94,7 @@ async def test_viewer_cannot_create_invite(client, captured_invite):
     from database import AsyncSessionLocal
     from models.all_models import User
     from sqlalchemy import select
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.tenant_id == tenant_id))
         user = r.scalars().first()
         user.role = "viewer"

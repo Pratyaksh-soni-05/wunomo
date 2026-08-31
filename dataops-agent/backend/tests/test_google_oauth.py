@@ -6,6 +6,7 @@ from services.auth_service import (
     create_new_tenant_and_user, hash_password, get_google_authorize_url,
     _verify_google_id_token_sync,
 )
+from services.tenant_context import tenant_session
 
 
 def unique_email():
@@ -108,7 +109,7 @@ async def test_auto_links_to_existing_password_account_when_google_verified(clie
 
     from database import AsyncSessionLocal
     from models.all_models import User
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant.id) as db:
         refreshed = await db.get(User, user.id)
     assert refreshed.google_id == "google-sub-2"
     assert refreshed.email_verified is True
@@ -135,7 +136,7 @@ async def test_blocks_auto_link_when_google_email_not_verified(client, monkeypat
 
     from database import AsyncSessionLocal
     from models.all_models import User
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant.id) as db:
         refreshed = await db.get(User, user.id)
     assert refreshed.google_id is None
     assert refreshed.email_verified is False
@@ -179,11 +180,14 @@ async def test_deactivated_user_cannot_log_back_in_via_google(client, monkeypatc
     })
     assert first.status_code == 200
     user_id = first.json()["user_id"]
+    tenant_id = first.json()["tenant_id"]
 
     from database import AsyncSessionLocal
     from models.all_models import User as UserModel
     from sqlalchemy import select
-    async with AsyncSessionLocal() as db:
+    # Deactivating a user is a tenant-scoped UPDATE; the read that finds them
+    # is not. Scope the write to the tenant the registration just returned.
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(UserModel).where(UserModel.id == user_id))
         u = r.scalar_one()
         u.is_active = False

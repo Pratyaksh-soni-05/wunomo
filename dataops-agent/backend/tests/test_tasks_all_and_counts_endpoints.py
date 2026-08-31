@@ -13,6 +13,7 @@ import api.v1.tasks as tasks_module
 from database import AsyncSessionLocal
 from models.all_models import Task, TaskStatus, User
 from services.auth_service import hash_password, issue_token_for_user
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="taskallcounts"):
@@ -26,7 +27,7 @@ async def _register(client, prefix="taskallcounts"):
 
 
 async def _member(tenant_id, role, prefix="member"):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         user = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id,
             email=f"{prefix}-{uuid.uuid4().hex[:8]}@example.com",
@@ -54,8 +55,8 @@ async def _create_mocked_task(client, token, monkeypatch, goal="test goal"):
     return r.json()
 
 
-async def _set_status(task_id, status):
-    async with AsyncSessionLocal() as db:
+async def _set_status(tenant_id, task_id, status):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         task.status = status
@@ -99,12 +100,12 @@ async def test_all_never_leaks_another_tenants_tasks(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_counts_excludes_terminal_statuses(client, monkeypatch):
-    token, _, _ = await _register(client, "countsterm")
+    token, tenant_id, _ = await _register(client, "countsterm")
     active_draft = await _create_mocked_task(client, token, monkeypatch, goal="still draft")
     done = await _create_mocked_task(client, token, monkeypatch, goal="done")
     failed = await _create_mocked_task(client, token, monkeypatch, goal="failed")
-    await _set_status(done["id"], TaskStatus.COMPLETED)
-    await _set_status(failed["id"], TaskStatus.FAILED)
+    await _set_status(tenant_id, done["id"], TaskStatus.COMPLETED)
+    await _set_status(tenant_id, failed["id"], TaskStatus.FAILED)
 
     r = await client.get("/api/v1/tasks/counts", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
@@ -116,13 +117,13 @@ async def test_counts_includes_paused_and_queued_states_as_active(client, monkey
     """A task needing approval or paused on a failed step still needs the
     user's attention -- it must count as 'active', not be silently
     excluded just because nothing is currently executing."""
-    token, _, _ = await _register(client, "countspaused")
+    token, tenant_id, _ = await _register(client, "countspaused")
     needs_approval = await _create_mocked_task(client, token, monkeypatch, goal="needs approval")
     paused_failed = await _create_mocked_task(client, token, monkeypatch, goal="paused failed")
     queued = await _create_mocked_task(client, token, monkeypatch, goal="queued")
-    await _set_status(needs_approval["id"], TaskStatus.PAUSED_NEEDS_APPROVAL)
-    await _set_status(paused_failed["id"], TaskStatus.PAUSED_FAILED_STEP)
-    await _set_status(queued["id"], TaskStatus.QUEUED)
+    await _set_status(tenant_id, needs_approval["id"], TaskStatus.PAUSED_NEEDS_APPROVAL)
+    await _set_status(tenant_id, paused_failed["id"], TaskStatus.PAUSED_FAILED_STEP)
+    await _set_status(tenant_id, queued["id"], TaskStatus.QUEUED)
 
     r = await client.get("/api/v1/tasks/counts", headers={"Authorization": f"Bearer {token}"})
     assert r.json()["active"] == 3

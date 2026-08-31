@@ -3,6 +3,7 @@ import pytest
 
 from database import AsyncSessionLocal
 from models.all_models import OnboardingProfile
+from services.tenant_context import tenant_session
 
 
 async def _register(client, name):
@@ -45,7 +46,7 @@ async def test_onboarding_submit_persists_and_is_retrievable(client):
     assert body["industry"] == "Fintech"
     assert body["use_cases"] == ["Pipeline monitoring", "Data quality"]
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         row = await db.get(OnboardingProfile, post.json()["id"])
     assert row is not None
     assert row.tenant_id == tenant_id
@@ -61,7 +62,7 @@ async def test_onboarding_resubmit_upserts_instead_of_duplicating(client):
     assert first.json()["id"] == second.json()["id"]
     assert second.json()["role"] == "Analytics Lead"
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from sqlalchemy import select
         r = await db.execute(select(OnboardingProfile).where(OnboardingProfile.tenant_id == tenant_id))
         rows = r.scalars().all()

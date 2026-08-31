@@ -13,6 +13,7 @@ import api.v1.tasks as tasks_module
 from database import AsyncSessionLocal
 from models.all_models import Task, User
 from services.auth_service import hash_password, issue_token_for_user
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="taskcancelapi"):
@@ -26,7 +27,7 @@ async def _register(client, prefix="taskcancelapi"):
 
 
 async def _member(tenant_id, role):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         user = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=f"{role}-{uuid.uuid4().hex[:8]}@example.com",
             hashed_password=hash_password("test1234"), full_name=role, role=role,

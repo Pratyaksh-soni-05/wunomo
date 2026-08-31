@@ -27,6 +27,23 @@ import modules.orchestration.task_executor as executor_module
 from database import AsyncSessionLocal
 from modules.orchestration.task_executor import execute_next_step, resume_task
 from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus
+from services.tenant_context import tenant_session
+
+
+async def _as_tenant(tenant_id, fn, *args, **kwargs):
+    """Call an executor entrypoint the way a real request does.
+
+    In production `execute_next_step`/`resume_task`/`reject_task_step` run
+    inside an HTTP request, where TenantContextMiddleware has already put the
+    caller's tenant in the RLS context; they look their Task up by id with no
+    tenant argument, so without that context RLS hides the row and they return
+    "task_not_found". Tests call them directly, so they must establish the same
+    context rather than be handed a bypass.
+    """
+    from services.tenant_context import async_tenant_context
+    async with async_tenant_context(tenant_id):
+        return await fn(*args, **kwargs)
+
 
 
 async def _register(client, prefix="taskresolve"):
@@ -47,7 +64,7 @@ async def _seed_task_with_discovery(
     raw_result, and the dependent step PENDING right behind it — matching
     exactly the shape execute_next_step() picks up next (lowest step_index
     PENDING step whose depends_on_step_index is already SUCCEEDED)."""
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             goal="test", task_shape=TaskShape.SYNC_PROFILE_QUALITY,
@@ -56,14 +73,14 @@ async def _seed_task_with_discovery(
         db.add(task)
         await db.flush()
         discovery_step = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=0,
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=task.tenant_id, step_index=0,
             description="Discover the real entities.", source=TaskStepSource.LLM_PLANNED,
             tool_name=discovery_tool_name, tool_args={},
             status=TaskStepStatus.SUCCEEDED, raw_result=discovery_raw_result,
             attempt_count=1,
         )
         step = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=1,
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=task.tenant_id, step_index=1,
             description=step_description, source=step_source,
             tool_name=step_tool_name, tool_args=step_tool_args,
             status=TaskStepStatus.PENDING, depends_on_step_index=0,
@@ -74,8 +91,8 @@ async def _seed_task_with_discovery(
         return task.id, step.id
 
 
-async def _fresh_step(step_id):
-    async with AsyncSessionLocal() as db:
+async def _fresh_step(tenant_id, step_id):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
         return r.scalar_one()
 
@@ -92,10 +109,10 @@ async def test_resolution_is_noop_on_resume(client, monkeypatch):
         step_description="Trigger an incremental sync for the Sales Orders data source.",
     )
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "blocked_needs_approval"
 
-    step = await _fresh_step(step_id)
+    step = await _fresh_step(tenant_id, step_id)
     # Tier 1 resolved it before the approval card could ever render this
     # value — this is what the human would have seen on the card.
     assert step.tool_args["source_id"] == "src-real-123"
@@ -115,13 +132,13 @@ async def test_resolution_is_noop_on_resume(client, monkeypatch):
         return {"status": "synced", "rows": 5}
     monkeypatch.setattr(executor_module, "_call_tool", _capture)
 
-    result = await resume_task(task_id, resolved_by=str(uuid.uuid4()))
+    result = await _as_tenant(tenant_id, resume_task, task_id, resolved_by=str(uuid.uuid4()))
     assert result["outcome"] == "step_succeeded"
 
     # What executed is byte-identical to what was displayed on the card —
     # the entire point of resolving before the gate, not after it.
     assert seen_args == approved_args
-    step = await _fresh_step(step_id)
+    step = await _fresh_step(tenant_id, step_id)
     assert step.tool_args["source_id"] == "src-real-123"
 
 
@@ -142,10 +159,10 @@ async def test_resolution_skips_human_edited_args(client):
         step_source=TaskStepSource.HUMAN_EDITED,
     )
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "blocked_needs_approval"
 
-    step = await _fresh_step(step_id)
+    step = await _fresh_step(tenant_id, step_id)
     assert step.tool_args["source_id"] == "human-typed-value"
 
 
@@ -194,14 +211,14 @@ async def test_tier2_never_substitutes_an_undiscovered_or_ambiguous_entity(clien
     monkeypatch.setattr(executor_module, "_call_tool", _always_not_found)
     monkeypatch.setattr(executor_module, "_adapt_step_args", _wrongly_substitutes)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_failed"
 
     # The guardrail must have reverted the substitution on every attempt --
     # the wrong-but-real id must never have reached the tool at all.
     assert all(a["pipeline_id"] != "pl-real-2" for a in seen_args)
 
-    step = await _fresh_step(step_id)
+    step = await _fresh_step(tenant_id, step_id)
     assert step.status == TaskStepStatus.FAILED
     assert "Could not determine the real value for 'pipeline_id'" in step.error_message
     # Tier 1's own (description-text-matched) candidate count is 0 here --
@@ -243,10 +260,10 @@ async def test_honest_failure_message_when_neither_tier_resolves(client, monkeyp
     monkeypatch.setattr(executor_module, "_call_tool", _always_not_found)
     monkeypatch.setattr(executor_module, "_adapt_step_args", _cant_improve)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_failed"
 
-    step = await _fresh_step(step_id)
+    step = await _fresh_step(tenant_id, step_id)
     assert step.status == TaskStepStatus.FAILED
     assert "Could not determine the real value for 'pipeline_id'" in step.error_message
     assert "no match" in step.error_message

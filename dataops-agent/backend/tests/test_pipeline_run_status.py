@@ -5,6 +5,7 @@ from database import AsyncSessionLocal
 from models.all_models import DataSource, Pipeline, PipelineRun, SourceType, PipelineStatus, RunStatus
 from modules.orchestration.dag_manager import DAGManager
 from services.tasks import _execute_run
+from services.tenant_context import tenant_session
 
 
 @pytest.mark.asyncio
@@ -24,7 +25,7 @@ async def test_run_marked_failed_when_sync_errors(client):
     })
     tenant_id = reg.json()["tenant_id"]
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,
@@ -56,7 +57,7 @@ async def test_run_marked_failed_when_sync_errors(client):
     with pytest.raises(RuntimeError):
         await _execute_run(run_id, pipeline.id, tenant_id)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         run = await db.get(PipelineRun, run_id)
 
     assert run.status == RunStatus.FAILED, (
@@ -78,7 +79,7 @@ async def test_run_marked_success_when_sync_succeeds(client):
     })
     tenant_id = reg.json()["tenant_id"]
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         pipeline = Pipeline(
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,
@@ -96,7 +97,7 @@ async def test_run_marked_success_when_sync_succeeds(client):
 
     await _execute_run(run_id, pipeline.id, tenant_id)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         run = await db.get(PipelineRun, run_id)
 
     assert run.status == RunStatus.SUCCESS

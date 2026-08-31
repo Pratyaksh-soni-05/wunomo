@@ -6,6 +6,7 @@ from models.all_models import User, Tenant
 from sqlalchemy import select
 from services.auth_service import issue_token_for_user
 from services.billing_service import BillingService
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="billing"):
@@ -39,7 +40,7 @@ async def test_change_plan_updates_tenant_and_is_reflected_in_get_plan(client):
     result = await BillingService(tenant_id).change_plan("growth")
     assert result["plan"] == "growth"
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Tenant.plan).where(Tenant.id == tenant_id))
         assert r.scalar() == "growth"
 
@@ -79,7 +80,7 @@ async def test_viewer_cannot_change_plan(client):
     from services.auth_service import hash_password
     _, tenant_id, user_id = await _register(client)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = "viewer"

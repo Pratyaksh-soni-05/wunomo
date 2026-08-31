@@ -3,6 +3,7 @@ import pytest
 
 from database import AsyncSessionLocal
 from models.all_models import DataSource, SourceType
+from services.tenant_context import tenant_session
 
 
 async def _register(client, name: str) -> dict:
@@ -15,7 +16,7 @@ async def _register(client, name: str) -> dict:
 
 async def _create_source(tenant_id: str, name: str, source_type: SourceType,
                           schema_snapshot: dict | None = None, tags=None, owner=None) -> DataSource:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name, source_type=source_type,
             connection_config={"file_path": "/tmp/x.csv"}, schema_snapshot=schema_snapshot,

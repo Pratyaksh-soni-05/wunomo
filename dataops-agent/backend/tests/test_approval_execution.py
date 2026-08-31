@@ -21,6 +21,7 @@ from models.all_models import (
     Pipeline, PipelineStatus,
 )
 from modules.governance.policy_engine import PolicyEngine
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="approvexec"):
@@ -33,7 +34,7 @@ async def _register(client, prefix="approvexec"):
 
 
 async def _make_active_pipeline(tenant_id: str) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         pipeline = Pipeline(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name="test-pipeline",
             status=PipelineStatus.ACTIVE,
@@ -44,7 +45,7 @@ async def _make_active_pipeline(tenant_id: str) -> str:
 
 
 async def _make_open_incident(tenant_id: str) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         incident = Incident(
             id=str(uuid.uuid4()), tenant_id=tenant_id, title="test incident",
             severity=IncidentSeverity.MEDIUM, status=IncidentStatus.OPEN,
@@ -76,7 +77,7 @@ async def test_approving_pause_pipeline_actually_pauses_it(client):
     assert result["status"] == "executed", result
     assert "error" not in result["execution_result"], result["execution_result"]
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
         pipeline = r.scalar_one()
         assert pipeline.status == PipelineStatus.PAUSED, "pipeline was never actually paused"
@@ -104,7 +105,7 @@ async def test_approving_resolve_incident_actually_resolves_it(client):
 
     assert result["status"] == "executed", result
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Incident).where(Incident.id == incident_id))
         incident = r.scalar_one()
         assert incident.status == IncidentStatus.RESOLVED, "incident was never actually resolved"
@@ -137,6 +138,6 @@ async def test_approve_rest_endpoint_actually_executes_the_real_action(client):
     body = r.json()
     assert body["status"] == "executed", body
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         pr = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
         assert pr.scalar_one().status == PipelineStatus.PAUSED

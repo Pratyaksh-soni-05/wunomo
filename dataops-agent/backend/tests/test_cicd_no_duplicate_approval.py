@@ -7,6 +7,7 @@ from models.cicd import PipelineCommit
 from models.all_models import ApprovalRequest
 from sqlalchemy import select
 import services.cicd_tasks as cicd_tasks
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="cicdnodupe"):
@@ -41,7 +42,7 @@ async def test_high_risk_commit_sets_pending_approval_but_creates_no_duplicate_a
     pipeline_id = pipe.json()["id"]
 
     commit_id = str(uuid.uuid4())
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         db.add(PipelineCommit(
             id=commit_id, tenant_id=tenant_id, pipeline_id=pipeline_id,
             commit_sha="deadbeef1234", branch="main", author="tester",
@@ -56,7 +57,7 @@ async def test_high_risk_commit_sets_pending_approval_but_creates_no_duplicate_a
     # loop - run it in a separate thread, which gets its own fresh loop.
     await asyncio.to_thread(cicd_tasks.run_ci_pipeline.run, commit_id, tenant_id)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(PipelineCommit).where(PipelineCommit.id == commit_id))
         commit = r.scalar_one()
         assert commit.gate_decision == "pending_approval"  # the real, tested path still works
@@ -83,7 +84,7 @@ async def test_merged_approvals_shows_the_commit_exactly_once(client, monkeypatc
     pipeline_id = pipe.json()["id"]
 
     commit_id = str(uuid.uuid4())
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         db.add(PipelineCommit(
             id=commit_id, tenant_id=tenant_id, pipeline_id=pipeline_id,
             commit_sha="cafebabe5678", branch="main", author="tester",

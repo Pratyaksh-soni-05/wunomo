@@ -20,6 +20,7 @@ import modules.reporting.notification_service as notification_service_module
 from database import AsyncSessionLocal
 from models.all_models import DataSource, Incident, IncidentStatus, Pipeline, PipelineStatus, SourceType
 from services.settings_service import update_tenant_settings
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="notifywire"):
@@ -95,7 +96,7 @@ async def test_pipeline_failure_sends_a_real_notification(client, monkeypatch):
         "notification_prefs": {"slack_webhook_url": "https://hooks.slack.com/services/PIPELINE_FAIL_TEST"}
     })
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         # source_id points nowhere real -> ConnectorManager.sync() will
         # report an error, which _execute_run() already turns into a real
         # failure (see the pre-existing "pipeline-run false success" fix).
@@ -145,7 +146,7 @@ async def test_freshness_check_notifies_once_per_newly_stale_source_not_every_ti
     })
 
     stale_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=48)
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name="stale-source",
             source_type=SourceType.CSV, connection_config={"file_path": "/tmp/x.csv"},
@@ -176,7 +177,7 @@ async def test_freshness_check_notifies_once_per_newly_stale_source_not_every_ti
     # duplicates for this same real stale source -- that's the
     # already-known, accepted duplicate-incident gap doing exactly what
     # it's documented to do, not a bug in this test).
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from sqlalchemy import select
         r = await db.execute(select(Incident).where(
             Incident.tenant_id == tenant_id, Incident.status == IncidentStatus.OPEN,

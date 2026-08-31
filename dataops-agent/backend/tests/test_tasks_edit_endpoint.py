@@ -13,6 +13,7 @@ from models.all_models import Task, TaskStatus, User
 from services.auth_service import hash_password, issue_token_for_user
 
 import api.v1.tasks as tasks_module
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="taskedit"):
@@ -49,7 +50,7 @@ async def _create_task(client, token, monkeypatch, goal="edit test goal"):
 
 @pytest.mark.asyncio
 async def test_edit_persists_new_content_and_marks_plan_edited(client, monkeypatch):
-    token, _, _ = await _register(client, "editbasic")
+    token, tenant_id, _ = await _register(client, "editbasic")
     created = await _create_task(client, token, monkeypatch)
 
     new_steps = {
@@ -74,7 +75,7 @@ async def test_edit_persists_new_content_and_marks_plan_edited(client, monkeypat
 async def test_edit_never_sets_approval_fields(client, monkeypatch):
     """The core invariant: an edited plan cannot execute without a fresh,
     explicit approval -- editing must never implicitly approve."""
-    token, _, _ = await _register(client, "editnoapprove")
+    token, tenant_id, _ = await _register(client, "editnoapprove")
     created = await _create_task(client, token, monkeypatch)
 
     r = await client.patch(
@@ -94,7 +95,7 @@ async def test_edit_never_sets_approval_fields(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_reedit_with_identical_content_does_not_flip_plan_edited(client, monkeypatch):
-    token, _, _ = await _register(client, "editnoop")
+    token, tenant_id, _ = await _register(client, "editnoop")
     created = await _create_task(client, token, monkeypatch)
 
     identical_steps = {"steps": [
@@ -117,7 +118,7 @@ async def test_mixed_edit_preserves_source_on_unchanged_steps_only(client, monke
     """The provenance-preserving guarantee: an edit that only changes ONE
     of several steps must leave the untouched ones as llm_planned and
     only mark the genuinely changed one human_edited."""
-    token, _, _ = await _register(client, "editmixed")
+    token, tenant_id, _ = await _register(client, "editmixed")
     created = await _create_task(client, token, monkeypatch)
     assert len(created["steps"]) == 2
 
@@ -147,7 +148,7 @@ async def test_mixed_edit_preserves_source_on_unchanged_steps_only(client, monke
 async def test_edit_rejects_a_tool_outside_the_shapes_allowlist(client, monkeypatch):
     """The same validator plan generation is bound by -- a human editing a
     plan cannot insert a tool the planner itself couldn't have proposed."""
-    token, _, _ = await _register(client, "editbadtool")
+    token, tenant_id, _ = await _register(client, "editbadtool")
     created = await _create_task(client, token, monkeypatch)
 
     r = await client.patch(
@@ -162,7 +163,7 @@ async def test_edit_rejects_a_tool_outside_the_shapes_allowlist(client, monkeypa
     assert "not permitted" in r.json()["detail"]
 
     # Confirm the rejection didn't mutate anything -- the original plan is intact.
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r2 = await db.execute(select(Task).where(Task.id == created["id"]))
         task = r2.scalar_one()
         assert task.plan_edited is False
@@ -170,10 +171,10 @@ async def test_edit_rejects_a_tool_outside_the_shapes_allowlist(client, monkeypa
 
 @pytest.mark.asyncio
 async def test_edit_after_plan_leaves_draft_plan_is_409(client, monkeypatch):
-    token, _, _ = await _register(client, "editafterleave")
+    token, tenant_id, _ = await _register(client, "editafterleave")
     created = await _create_task(client, token, monkeypatch)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == created["id"]))
         task = r.scalar_one()
         task.status = TaskStatus.QUEUED
@@ -195,7 +196,7 @@ async def test_only_the_creator_may_edit_the_plan(client, monkeypatch):
     token, tenant_id, _ = await _register(client, "editnotmine")
     created = await _create_task(client, token, monkeypatch)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         other = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=f"other-{uuid.uuid4().hex[:8]}@example.com",
             hashed_password=hash_password("test1234"), full_name="Other Member",

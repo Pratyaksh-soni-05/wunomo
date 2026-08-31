@@ -5,6 +5,7 @@ from database import AsyncSessionLocal
 from models.all_models import User
 from sqlalchemy import select
 from services.auth_service import hash_password, issue_token_for_user
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="themetest"):
@@ -74,7 +75,7 @@ async def test_theme_is_per_user_not_per_tenant(client):
     themes independently - it's a personal preference, not workspace-wide."""
     owner_token, tenant_id, owner_id = await _register(client)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         member = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id,
             email=f"member-{uuid.uuid4().hex[:8]}@example.com",

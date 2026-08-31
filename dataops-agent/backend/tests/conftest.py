@@ -4,6 +4,8 @@ os.environ["APP_ENV"] = "test"  # MUST be before all project imports
 import pytest_asyncio
 import asyncio
 from httpx import AsyncClient, ASGITransport
+from contextlib import asynccontextmanager
+from database import AsyncSessionLocal
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -41,3 +43,22 @@ async def _reset_email_code_rate_limits():
     async for key in redis.scan_iter(match="otp:*"):
         await redis.delete(key)
     yield
+
+# ── RLS-aware test sessions ──────────────────────────────────────────────────
+# Every tenant-scoped table is protected by Row-Level Security (migration
+# b7d419e3f2a8), and the policy reads `app.current_tenant_id`, set per
+# transaction from a ContextVar. In the running app that ContextVar is
+# populated by TenantContextMiddleware (HTTP) or the Celery task wrappers
+# (background) — neither of which exists when a test seeds rows directly.
+#
+# So a bare `AsyncSessionLocal()` in a test has no tenant, and RLS correctly
+# refuses the write ("new row violates row-level security policy"). Use
+# `services.tenant_context.tenant_session(tenant_id)` instead: it opens a
+# session already inside that tenant's context, which is the same path
+# production takes. It lives in services/ rather than here because conftest is
+# a pytest plugin, not an importable module.
+#
+# Deliberately NOT solved by pointing the test suite at the superuser role.
+# That would make everything pass while proving nothing — RLS would be bypassed
+# in every test, and a regression dropping tenant context would go unnoticed.
+# test_rls_cross_tenant.py depends on the suite genuinely running under RLS.

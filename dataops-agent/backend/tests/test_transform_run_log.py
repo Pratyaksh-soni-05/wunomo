@@ -6,6 +6,7 @@ from database import AsyncSessionLocal
 from models.all_models import TransformRun, DataSource, SourceType
 from modules.transformation.transform_run_log import log_transform_run
 from agent.tools.transformation_tools import execute_sql_transform, run_python_transform
+from services.tenant_context import tenant_session
 
 
 async def _register(client, name: str) -> dict:
@@ -24,7 +25,7 @@ async def _create_source(tenant_id: str) -> str:
     actually points at this app's own Postgres DB is deliberately blocked
     (modules/ingestion/connector_manager.py's internal-DB guard), so a fake
     csv path is used instead of trying to route around that guard."""
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name="test-source.csv",
             source_type=SourceType.CSV, connection_config={"file_path": "/tmp/test.csv"},
@@ -35,7 +36,7 @@ async def _create_source(tenant_id: str) -> str:
 
 
 async def _runs_for_tenant(tenant_id: str) -> list[TransformRun]:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(TransformRun).where(TransformRun.tenant_id == tenant_id))
         return r.scalars().all()
 

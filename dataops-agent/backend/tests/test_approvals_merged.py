@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from database import AsyncSessionLocal
 from models.cicd import PipelineCommit
 from modules.governance.policy_engine import PolicyEngine
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="mergedapproval"):
@@ -19,7 +20,7 @@ async def _register(client, prefix="mergedapproval"):
 
 
 async def _make_pending_commit(tenant_id, commit_sha="abc123def456", risk_score=0.8, minutes_ago=0):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         commit = PipelineCommit(
             id=str(uuid.uuid4()), tenant_id=tenant_id, commit_sha=commit_sha,
             branch="main", author="tester", commit_message="risky change",
@@ -56,7 +57,7 @@ async def test_merged_excludes_non_pending_commits(client):
     headers = {"Authorization": f"Bearer {token}"}
 
     await _make_pending_commit(tenant_id, commit_sha="pending111")
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         approved = PipelineCommit(
             id=str(uuid.uuid4()), tenant_id=tenant_id, commit_sha="approved222",
             branch="main", gate_decision="approved", risk_score=0.1,

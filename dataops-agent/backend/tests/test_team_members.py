@@ -5,6 +5,7 @@ from database import AsyncSessionLocal
 from models.all_models import User
 from sqlalchemy import select
 from services.auth_service import issue_token_for_user
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="teammember"):
@@ -22,7 +23,7 @@ async def _add_member(tenant_id: str, role: str) -> tuple[str, str, str]:
     flow exercised here - that's covered in test_team_invites.py) and
     returns (user_id, email, token)."""
     email = f"member-{uuid.uuid4().hex[:8]}@example.com"
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from services.auth_service import hash_password
         user = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=email,
@@ -57,7 +58,7 @@ async def test_admin_can_change_a_data_analysts_role(client):
     )
     assert r.status_code == 200
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         rr = await db.execute(select(User).where(User.id == analyst_id))
         assert rr.scalar_one().role == "data_engineer"
 

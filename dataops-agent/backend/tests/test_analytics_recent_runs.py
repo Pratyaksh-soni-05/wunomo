@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from database import AsyncSessionLocal
 from models.all_models import DataSource, Pipeline, PipelineRun, SourceType, PipelineStatus, RunStatus
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="recentruns"):
@@ -20,7 +21,7 @@ async def _register(client, prefix="recentruns"):
 async def _make_pipeline_with_runs(tenant_id, run_specs):
     """run_specs: list of (status, minutes_ago, rows_processed) tuples,
     oldest listed first — returns the created run ids in insertion order."""
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name="test source",
             source_type=SourceType.CSV, connection_config={},

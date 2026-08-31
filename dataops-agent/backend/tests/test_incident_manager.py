@@ -6,10 +6,11 @@ from models.all_models import Incident, IncidentStatus, IncidentSeverity
 from modules.observability.incident_manager import IncidentManager
 from services.llm_service import LLMService
 import services.llm_service as llm_service_module
+from services.tenant_context import tenant_session
 
 
 async def _make_incident(tenant_id: str, status=IncidentStatus.OPEN) -> Incident:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         incident = Incident(
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,
@@ -66,7 +67,7 @@ async def test_resolve_incident_marks_resolved_and_rejects_double_resolve(client
     assert result.get("status") == "resolved"
     assert "error" not in result
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         refreshed = await db.get(Incident, incident.id)
     assert refreshed.status == IncidentStatus.RESOLVED
     assert refreshed.resolution_notes == "fixed it"
@@ -106,7 +107,7 @@ async def test_triage_incident_updates_status_via_llm(client, monkeypatch):
     assert "error" not in result
     assert result["root_cause"] == "disk full"
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         refreshed = await db.get(Incident, incident.id)
     assert refreshed.status == IncidentStatus.INVESTIGATING
     assert refreshed.root_cause == "disk full"

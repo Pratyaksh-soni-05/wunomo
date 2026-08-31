@@ -25,6 +25,23 @@ from database import AsyncSessionLocal
 from modules.orchestration.task_executor import cancel_task, execute_next_step, reject_task_step, resume_task
 from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus, User
 from services.settings_service import update_tenant_settings
+from services.tenant_context import tenant_session
+
+
+async def _as_tenant(tenant_id, fn, *args, **kwargs):
+    """Call an executor entrypoint the way a real request does.
+
+    In production `execute_next_step`/`resume_task`/`reject_task_step` run
+    inside an HTTP request, where TenantContextMiddleware has already put the
+    caller's tenant in the RLS context; they look their Task up by id with no
+    tenant argument, so without that context RLS hides the row and they return
+    "task_not_found". Tests call them directly, so they must establish the same
+    context rather than be handed a bypass.
+    """
+    from services.tenant_context import async_tenant_context
+    async with async_tenant_context(tenant_id):
+        return await fn(*args, **kwargs)
+
 
 
 async def _register(client, prefix="tasknotify"):
@@ -58,7 +75,7 @@ async def _seed_task(tenant_id, user_id, steps: list[dict], **task_overrides):
         "task_shape": TaskShape.DIAGNOSE_PIPELINE_FAILURE,
     }
     defaults.update(task_overrides)
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             goal="notify test goal", **defaults,
@@ -67,15 +84,15 @@ async def _seed_task(tenant_id, user_id, steps: list[dict], **task_overrides):
         await db.flush()
         step_ids = []
         for s in steps:
-            ts = TaskStep(id=str(uuid.uuid4()), task_id=task.id, **s)
+            ts = TaskStep(id=str(uuid.uuid4()), task_id=task.id, tenant_id=task.tenant_id, **s)
             db.add(ts)
             step_ids.append(ts.id)
         await db.commit()
         return task.id, step_ids
 
 
-async def _fresh(task_id):
-    async with AsyncSessionLocal() as db:
+async def _fresh(tenant_id, task_id):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         return r.scalar_one()
 
@@ -92,7 +109,7 @@ async def test_wall_clock_termination_notifies(client, monkeypatch):
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "terminated_wall_clock"
     assert captured == ["https://hooks.slack.com/services/WALLCLOCK"]
 
@@ -109,7 +126,7 @@ async def test_step_budget_termination_notifies(client, monkeypatch):
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "terminated_step_budget"
     assert captured == ["https://hooks.slack.com/services/STEPBUDGET"]
 
@@ -131,7 +148,7 @@ async def test_loop_detected_termination_notifies(client, monkeypatch):
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "terminated_loop_detected"
     assert captured == ["https://hooks.slack.com/services/LOOP"]
 
@@ -153,8 +170,8 @@ async def test_task_completed_notifies_with_the_real_goal(client, monkeypatch):
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    await execute_next_step(task_id)  # runs the one step
-    final = await execute_next_step(task_id)  # detects completion
+    await _as_tenant(tenant_id, execute_next_step, task_id)  # runs the one step
+    final = await _as_tenant(tenant_id, execute_next_step, task_id)  # detects completion
     assert final["outcome"] == "task_completed"
     assert captured == ["https://hooks.slack.com/services/COMPLETE"]
 
@@ -179,7 +196,7 @@ async def test_completed_with_unconfirmed_steps_notifies_naming_the_stuck_step(c
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "task_completed_with_unconfirmed_steps"
     assert captured == ["https://hooks.slack.com/services/UNCONFIRMED"]
 
@@ -196,7 +213,7 @@ async def test_blocked_needs_approval_notifies(client, monkeypatch):
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "blocked_needs_approval"
     assert captured == ["https://hooks.slack.com/services/NEEDSAPPROVAL"]
 
@@ -209,9 +226,9 @@ async def test_expiry_on_resume_notifies(client, monkeypatch):
         "step_index": 0, "description": "sync a source", "source": TaskStepSource.LLM_PLANNED,
         "tool_name": "sync_source", "tool_args": {"source_id": "src-1"}, "status": TaskStepStatus.PENDING,
     }], task_shape=TaskShape.SYNC_PROFILE_QUALITY)
-    await execute_next_step(task_id)  # blocks, paused_at = now
+    await _as_tenant(tenant_id, execute_next_step, task_id)  # blocks, paused_at = now
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         task.paused_at = datetime.utcnow() - timedelta(hours=999)
@@ -220,7 +237,7 @@ async def test_expiry_on_resume_notifies(client, monkeypatch):
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    result = await resume_task(task_id, resolved_by=str(uuid.uuid4()))
+    result = await _as_tenant(tenant_id, resume_task, task_id, resolved_by=str(uuid.uuid4()))
     assert result["outcome"] == "expired"
     assert captured == ["https://hooks.slack.com/services/EXPIRERESUME"]
 
@@ -233,9 +250,9 @@ async def test_expiry_on_reject_notifies(client, monkeypatch):
         "step_index": 0, "description": "sync a source", "source": TaskStepSource.LLM_PLANNED,
         "tool_name": "sync_source", "tool_args": {"source_id": "src-1"}, "status": TaskStepStatus.PENDING,
     }], task_shape=TaskShape.SYNC_PROFILE_QUALITY)
-    await execute_next_step(task_id)
+    await _as_tenant(tenant_id, execute_next_step, task_id)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         task.paused_at = datetime.utcnow() - timedelta(hours=999)
@@ -244,7 +261,7 @@ async def test_expiry_on_reject_notifies(client, monkeypatch):
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    result = await reject_task_step(task_id, resolved_by=str(uuid.uuid4()))
+    result = await _as_tenant(tenant_id, reject_task_step, task_id, resolved_by=str(uuid.uuid4()))
     assert result["outcome"] == "expired"
     assert captured == ["https://hooks.slack.com/services/EXPIREREJECT"]
 
@@ -261,7 +278,7 @@ async def test_cancel_notifies(client, monkeypatch):
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    result = await cancel_task(task_id, cancelled_by=user_id)
+    result = await _as_tenant(tenant_id, cancel_task, task_id, cancelled_by=user_id)
     assert result["outcome"] == "cancelled"
     assert captured == ["https://hooks.slack.com/services/CANCEL"]
 
@@ -286,7 +303,7 @@ async def test_paused_failed_step_does_not_notify(client, monkeypatch):
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_failed"
     assert captured == []
 
@@ -315,7 +332,7 @@ async def test_paused_quota_exceeded_does_not_notify(client, monkeypatch):
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "paused_quota_exceeded"
     assert captured == []
 
@@ -336,9 +353,9 @@ async def test_notification_failure_never_breaks_the_real_state_transition(clien
         raise RuntimeError("simulated network failure")
     monkeypatch.setattr(notification_service_module.urllib.request, "urlopen", broken_urlopen)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "terminated_wall_clock"  # real transition still happened
 
-    task = await _fresh(task_id)
+    task = await _fresh(tenant_id, task_id)
     assert task.status == TaskStatus.FAILED
     assert task.termination_reason is not None

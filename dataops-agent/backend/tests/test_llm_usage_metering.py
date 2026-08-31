@@ -7,6 +7,7 @@ from database import AsyncSessionLocal
 from models.all_models import LlmUsageEvent
 from services.llm_service import _TimeoutFallbackChatModel
 import services.llm_service as llm_service_module
+from services.tenant_context import tenant_session
 
 
 class _FakeLLM:
@@ -106,7 +107,7 @@ async def test_log_llm_usage_persists_a_real_row(client):
         },
     )
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from sqlalchemy import select
         r = await db.execute(select(LlmUsageEvent).where(LlmUsageEvent.tenant_id == tenant_id))
         events = r.scalars().all()

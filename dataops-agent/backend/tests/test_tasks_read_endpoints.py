@@ -11,6 +11,7 @@ from sqlalchemy import select
 from database import AsyncSessionLocal
 from models.all_models import User
 from services.auth_service import issue_token_for_user
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="taskread"):
@@ -23,13 +24,13 @@ async def _register(client, prefix="taskread"):
     return body["access_token"], body["tenant_id"], body["user_id"]
 
 
-async def _token_for_role(user_id: str, role: str) -> str:
-    async with AsyncSessionLocal() as db:
+async def _token_for_role(tenant_id, user_id: str, role: str) -> str:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = role
         await db.commit()
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         return issue_token_for_user(user, "password")
@@ -85,7 +86,7 @@ async def test_another_users_task_is_403_without_manage_all(client, monkeypatch)
 
     # A second real user in the SAME tenant via direct DB insert (cheapest
     # way to get a second real member without the full invite flow).
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from services.auth_service import hash_password
         other = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=f"other-{uuid.uuid4().hex[:8]}@example.com",
@@ -104,7 +105,7 @@ async def test_another_users_task_is_403_without_manage_all(client, monkeypatch)
 async def test_owner_with_manage_all_can_view_another_members_task(client, monkeypatch):
     owner_token, tenant_id, owner_user_id = await _register(client, "taskownerB")
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from services.auth_service import hash_password
         member = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=f"member-{uuid.uuid4().hex[:8]}@example.com",
@@ -128,7 +129,7 @@ async def test_list_shows_only_own_tasks_for_a_non_manager_role(client, monkeypa
     owner_token, tenant_id, owner_user_id = await _register(client, "tasklistA")
     await _create_mocked_task(client, owner_token, monkeypatch, goal="owner's task")
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from services.auth_service import hash_password
         analyst = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=f"analyst-{uuid.uuid4().hex[:8]}@example.com",
@@ -152,7 +153,7 @@ async def test_list_shows_every_tenant_task_for_a_manage_all_role(client, monkey
     owner_token, tenant_id, owner_user_id = await _register(client, "tasklistB")
     await _create_mocked_task(client, owner_token, monkeypatch, goal="owner's task")
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from services.auth_service import hash_password
         analyst = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=f"analyst2-{uuid.uuid4().hex[:8]}@example.com",

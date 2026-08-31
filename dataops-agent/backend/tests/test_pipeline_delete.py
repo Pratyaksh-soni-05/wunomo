@@ -4,6 +4,7 @@ from sqlalchemy import select
 
 from database import AsyncSessionLocal
 from models.all_models import Incident, IncidentSeverity, IncidentStatus, PipelineRun, RunStatus
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="pipedelete"):
@@ -35,7 +36,7 @@ async def test_delete_pipeline_with_a_real_run_succeeds(client):
     r = await client.delete(f"/api/v1/pipelines/{pipeline_id}", headers=headers)
     assert r.status_code == 200
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         remaining = await db.execute(select(PipelineRun).where(PipelineRun.pipeline_id == pipeline_id))
         assert remaining.scalars().first() is None
 
@@ -68,7 +69,7 @@ async def test_delete_pipeline_preserves_incident_history_with_refs_cleared(clie
     pipe = await client.post("/api/v1/pipelines/", json={"name": "Incident Pipeline"}, headers=headers)
     pipeline_id = pipe.json()["id"]
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         run = PipelineRun(id=str(uuid.uuid4()), pipeline_id=pipeline_id, tenant_id=tenant_id, status=RunStatus.FAILED)
         db.add(run)
         await db.flush()
@@ -83,7 +84,7 @@ async def test_delete_pipeline_preserves_incident_history_with_refs_cleared(clie
     r = await client.delete(f"/api/v1/pipelines/{pipeline_id}", headers=headers)
     assert r.status_code == 200
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         result = await db.execute(select(Incident).where(Incident.id == incident_id))
         surviving = result.scalar_one_or_none()
         assert surviving is not None, "incident must survive pipeline deletion"

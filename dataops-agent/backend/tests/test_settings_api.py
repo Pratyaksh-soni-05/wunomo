@@ -5,6 +5,7 @@ from database import AsyncSessionLocal
 from models.all_models import User
 from sqlalchemy import select
 from services.auth_service import issue_token_for_user
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="settingsapi"):
@@ -36,7 +37,7 @@ async def test_owner_can_rename_workspace_and_it_persists_to_the_real_tenant_row
     assert r.status_code == 200
     assert r.json()["settings"]["name"] == "Renamed Workspace"
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from models.all_models import Tenant
         rr = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         assert rr.scalar_one().name == "Renamed Workspace"
@@ -101,7 +102,7 @@ async def test_patch_with_no_fields_returns_400(client):
 @pytest.mark.asyncio
 async def test_viewer_cannot_patch_settings(client):
     _, tenant_id, user_id = await _register(client)
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = "viewer"

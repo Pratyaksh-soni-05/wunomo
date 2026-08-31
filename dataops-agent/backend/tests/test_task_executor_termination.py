@@ -14,6 +14,23 @@ import modules.orchestration.task_executor as executor_module
 from database import AsyncSessionLocal
 from modules.orchestration.task_executor import cancel_task, execute_next_step
 from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus, User
+from services.tenant_context import tenant_session
+
+
+async def _as_tenant(tenant_id, fn, *args, **kwargs):
+    """Call an executor entrypoint the way a real request does.
+
+    In production `execute_next_step`/`resume_task`/`reject_task_step` run
+    inside an HTTP request, where TenantContextMiddleware has already put the
+    caller's tenant in the RLS context; they look their Task up by id with no
+    tenant argument, so without that context RLS hides the row and they return
+    "task_not_found". Tests call them directly, so they must establish the same
+    context rather than be handed a bypass.
+    """
+    from services.tenant_context import async_tenant_context
+    async with async_tenant_context(tenant_id):
+        return await fn(*args, **kwargs)
+
 
 
 async def _register(client, prefix="taskterm"):
@@ -29,7 +46,7 @@ async def _register(client, prefix="taskterm"):
 async def _seed_task(tenant_id, user_id, steps: list[dict], **task_overrides):
     defaults = {"status": TaskStatus.QUEUED, "step_budget_max": 20}
     defaults.update(task_overrides)
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -39,15 +56,15 @@ async def _seed_task(tenant_id, user_id, steps: list[dict], **task_overrides):
         await db.flush()
         step_ids = []
         for s in steps:
-            ts = TaskStep(id=str(uuid.uuid4()), task_id=task.id, **s)
+            ts = TaskStep(id=str(uuid.uuid4()), task_id=task.id, tenant_id=task.tenant_id, **s)
             db.add(ts)
             step_ids.append(ts.id)
         await db.commit()
         return task.id, step_ids
 
 
-async def _fresh(task_id, step_id=None):
-    async with AsyncSessionLocal() as db:
+async def _fresh(tenant_id, task_id, step_id=None):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         if step_id is None:
@@ -64,11 +81,11 @@ async def test_wall_clock_cap_terminates_with_a_specific_reason(client, monkeypa
         "tool_name": "get_system_health", "tool_args": {}, "status": TaskStepStatus.PENDING,
     }], status=TaskStatus.RUNNING, started_at=datetime.utcnow() - timedelta(hours=999))
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "terminated_wall_clock"
     assert "wall-clock" in outcome["reason"]
 
-    task = await _fresh(task_id)
+    task = await _fresh(tenant_id, task_id)
     assert task.status == TaskStatus.FAILED
     assert "wall-clock" in task.termination_reason
     assert "hour" in task.termination_reason
@@ -82,12 +99,12 @@ async def test_step_budget_cap_terminates_with_a_specific_reason(client):
         "tool_name": "get_system_health", "tool_args": {}, "status": TaskStepStatus.PENDING,
     }], status=TaskStatus.RUNNING, started_at=datetime.utcnow(), step_budget_max=5, step_budget_used=5)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "terminated_step_budget"
     assert "5-step budget" in outcome["reason"]
     assert "5/5" in outcome["reason"]
 
-    task = await _fresh(task_id)
+    task = await _fresh(tenant_id, task_id)
     assert task.status == TaskStatus.FAILED
     assert "step budget" in task.termination_reason
 
@@ -112,9 +129,9 @@ async def test_loop_detection_does_not_false_positive_on_a_normal_plan(client, m
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
 
     for _ in range(3):
-        outcome = await execute_next_step(task_id)
+        outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
         assert not outcome["outcome"].startswith("terminated_")
-    final = await execute_next_step(task_id)
+    final = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert final["outcome"] == "task_completed"
 
 
@@ -134,17 +151,17 @@ async def test_loop_detection_catches_a_real_repeated_no_progress_pattern(client
          "tool_name": "get_pipeline_run_history", "status": TaskStepStatus.PENDING, **identical},
     ], status=TaskStatus.RUNNING, started_at=datetime.utcnow())
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "terminated_loop_detected"
     assert "get_pipeline_run_history" in outcome["reason"]
     assert "3 times" in outcome["reason"]
 
-    task = await _fresh(task_id)
+    task = await _fresh(tenant_id, task_id)
     assert task.status == TaskStatus.FAILED
     assert "loop" in task.termination_reason.lower()
     # The step that was genuinely still pending never got a chance to
     # run -- the loop check fires before step selection.
-    _, unrun_step = await _fresh(task_id, step_ids[2])
+    _, unrun_step = await _fresh(tenant_id, task_id, step_ids[2])
     assert unrun_step.status == TaskStepStatus.PENDING
 
 
@@ -170,7 +187,7 @@ async def test_loop_detection_ignores_system_inserted_verify_steps(client):
          "tool_name": "run_pipeline", "tool_args": {}, "status": TaskStepStatus.SUCCEEDED, "depends_on_step_index": 4},
     ], status=TaskStatus.RUNNING, started_at=datetime.utcnow())
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "task_completed"
 
 
@@ -196,11 +213,11 @@ async def test_credit_exhaustion_pauses_not_fails(client, monkeypatch):
     monkeypatch.setattr(executor_module, "get_quota_status", _quota_exceeded)
     monkeypatch.setattr(executor_module, "_adapt_step_args", _fail_if_adapted)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "paused_quota_exceeded"
     assert outcome["attempt_count"] == 1
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert task.status == TaskStatus.PAUSED_QUOTA_EXCEEDED
     assert task.paused_at is not None
     assert step.status == TaskStepStatus.PENDING  # reset for a later pickup, not FAILED
@@ -225,9 +242,9 @@ async def test_resume_after_quota_pause_continues_the_same_attempt_budget_not_a_
     monkeypatch.setattr(executor_module, "_call_tool", _domain_error)
     monkeypatch.setattr(executor_module, "get_quota_status", _quota_exceeded)
 
-    first = await execute_next_step(task_id)
+    first = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert first["outcome"] == "paused_quota_exceeded"
-    task = await _fresh(task_id)
+    task = await _fresh(tenant_id, task_id)
     assert task.status == TaskStatus.PAUSED_QUOTA_EXCEEDED
 
     # Quota frees up; the step also happens to succeed on the next real attempt.
@@ -240,13 +257,13 @@ async def test_resume_after_quota_pause_continues_the_same_attempt_budget_not_a_
     monkeypatch.setattr(executor_module, "get_quota_status", _quota_ok)
     monkeypatch.setattr(executor_module, "_call_tool", _now_ok)
 
-    second = await execute_next_step(task_id)
+    second = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert second["outcome"] == "step_succeeded"
     # Continued from attempt 2 (attempt 1 already happened before the
     # pause), not reset to a fresh budget of 3.
     assert second["attempt_count"] == 2
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert task.status == TaskStatus.RUNNING
     assert step.status == TaskStepStatus.SUCCEEDED
     assert step.attempt_count == 2
@@ -260,18 +277,18 @@ async def test_cancel_marks_cancelled_and_a_second_cancel_is_rejected(client):
         "tool_name": "get_system_health", "tool_args": {}, "status": TaskStepStatus.PENDING,
     }], status=TaskStatus.RUNNING, started_at=datetime.utcnow())
 
-    result = await cancel_task(task_id, cancelled_by=user_id)
+    result = await _as_tenant(tenant_id, cancel_task, task_id, cancelled_by=user_id)
     assert result["outcome"] == "cancelled"
-    task = await _fresh(task_id)
+    task = await _fresh(tenant_id, task_id)
     assert task.status == TaskStatus.CANCELLED
     assert task.termination_reason is not None
     assert user_id in task.termination_reason
 
-    result2 = await cancel_task(task_id, cancelled_by=user_id)
+    result2 = await _as_tenant(tenant_id, cancel_task, task_id, cancelled_by=user_id)
     assert result2["outcome"] == "not_cancellable"
 
     # And execute_next_step correctly refuses to touch a cancelled task.
-    advance_attempt = await execute_next_step(task_id)
+    advance_attempt = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert advance_attempt["outcome"] == "not_runnable"
 
 
@@ -287,11 +304,11 @@ async def test_cancel_of_a_completed_task_is_not_cancellable(client, monkeypatch
         return {"status": "ok"}
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
-    await execute_next_step(task_id)
-    final = await execute_next_step(task_id)
+    await _as_tenant(tenant_id, execute_next_step, task_id)
+    final = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert final["outcome"] == "task_completed"
 
-    result = await cancel_task(task_id, cancelled_by=user_id)
+    result = await _as_tenant(tenant_id, cancel_task, task_id, cancelled_by=user_id)
     assert result["outcome"] == "not_cancellable"
     assert result["status"] == "completed"
 
@@ -323,15 +340,15 @@ async def test_step_in_flight_when_cancelled_still_records_its_real_outcome_but_
     # Start the step execution as a real concurrent task -- it will hit
     # the transient exception, then genuinely sleep for 1.5s before its
     # retry. While it's asleep (genuinely in flight), cancel the task.
-    step_task = asyncio.create_task(execute_next_step(task_id))
+    step_task = asyncio.create_task(_as_tenant(tenant_id, execute_next_step, task_id))
     await asyncio.sleep(0.3)  # let it reach the real backoff sleep
-    cancel_result = await cancel_task(task_id, cancelled_by=user_id)
+    cancel_result = await _as_tenant(tenant_id, cancel_task, task_id, cancelled_by=user_id)
     assert cancel_result["outcome"] == "cancelled"
 
     step_outcome = await step_task  # let the in-flight step finish for real
     assert step_outcome["outcome"] == "step_succeeded"  # it genuinely did succeed on retry
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert step.status == TaskStepStatus.SUCCEEDED  # true, factual outcome recorded
     assert task.status == TaskStatus.CANCELLED  # NOT stomped back to RUNNING by the step's own completion
     assert "cannot be interrupted mid-flight" in task.termination_reason

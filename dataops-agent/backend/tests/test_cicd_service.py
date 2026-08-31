@@ -4,13 +4,14 @@ import pytest
 from database import AsyncSessionLocal
 from models.all_models import Pipeline, PipelineStatus
 from services.cicd_service import get_pipeline_for_repo
+from services.tenant_context import tenant_session
 
 
 async def _make_pipeline(tenant_id: str, repo_url: str = None, status=PipelineStatus.ACTIVE) -> Pipeline:
     """Insert a real Pipeline row via the real model/columns — no mock,
     no hand-rolled schema — so this test would have caught the
     is_active/source_config column-name bug directly."""
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         pipeline = Pipeline(
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,
@@ -47,7 +48,7 @@ async def test_get_pipeline_for_repo_matches_real_schema(client):
     await _make_pipeline(tenant_id, repo_url="https://github.com/example/other-repo")
     await _make_pipeline(tenant_id, repo_url=repo_url, status=PipelineStatus.PAUSED)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         found = await get_pipeline_for_repo(db, tenant_id, repo_url)
 
     assert found is not None
@@ -65,7 +66,7 @@ async def test_get_pipeline_for_repo_returns_none_when_no_match(client):
     tenant_id = reg.json()["tenant_id"]
     await _make_pipeline(tenant_id, repo_url="https://github.com/example/unrelated")
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         found = await get_pipeline_for_repo(db, tenant_id, "https://github.com/example/no-such-repo")
 
     assert found is None

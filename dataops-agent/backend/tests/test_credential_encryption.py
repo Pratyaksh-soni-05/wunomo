@@ -15,6 +15,8 @@ from sqlalchemy import text
 
 from database import AsyncSessionLocal
 from models.all_models import DataSource, SourceType, Tenant
+from services.tenant_context import async_tenant_context
+from services.tenant_context import tenant_session
 from services.encryption_service import (
     encrypt_config, decrypt_config, is_encrypted, redact_config, REDACTED,
 )
@@ -31,8 +33,15 @@ SAMPLE_CONFIG = {
 }
 
 
-async def _make_tenant(db) -> str:
-    tenant_id = str(uuid.uuid4())
+async def _make_tenant(db, tenant_id: str) -> str:
+    """Create a tenant the same way production does — inside that tenant's own
+    RLS context, since `tenants` is policy-protected with
+    WITH CHECK (id = current_setting('app.current_tenant_id')). Callers must
+    already be inside `async_tenant_context(tenant_id)`; taking the id as an
+    argument rather than minting it here is what makes that possible, and keeps
+    this fixture on the same path as create_new_tenant_and_user() instead of a
+    test-only shortcut around the policy.
+    """
     db.add(Tenant(
         id=tenant_id,
         name=f"Encryption Test {tenant_id[:8]}",
@@ -67,8 +76,9 @@ async def test_raw_db_row_never_contains_the_plaintext_password():
     decrypting accessor — the whole point is to see what actually landed on
     disk.
     """
-    async with AsyncSessionLocal() as db:
-        tenant_id = await _make_tenant(db)
+    tenant_id = str(uuid.uuid4())
+    async with async_tenant_context(tenant_id), AsyncSessionLocal() as db:
+        await _make_tenant(db, tenant_id)
         source_id = await _make_source(db, tenant_id, dict(SAMPLE_CONFIG))
 
         raw = (await db.execute(
@@ -92,11 +102,13 @@ async def test_raw_db_row_never_contains_the_plaintext_password():
 @pytest.mark.asyncio
 async def test_orm_still_reads_back_the_original_dict():
     """Encryption must be invisible to every existing reader."""
-    async with AsyncSessionLocal() as db:
-        tenant_id = await _make_tenant(db)
+    tenant_id = str(uuid.uuid4())
+    async with async_tenant_context(tenant_id):
+      async with tenant_session(tenant_id) as db:
+        await _make_tenant(db, tenant_id)
         source_id = await _make_source(db, tenant_id, dict(SAMPLE_CONFIG))
 
-    async with AsyncSessionLocal() as db:
+      async with tenant_session(tenant_id) as db:
         source = await db.get(DataSource, source_id)
         assert source.connection_config == SAMPLE_CONFIG
         # The connectors index these directly — prove they still work.
@@ -113,8 +125,10 @@ async def test_legacy_plaintext_row_is_still_readable():
     run yet — without it, deploying encryption would take every existing
     source offline.
     """
-    async with AsyncSessionLocal() as db:
-        tenant_id = await _make_tenant(db)
+    tenant_id = str(uuid.uuid4())
+    async with async_tenant_context(tenant_id):
+      async with tenant_session(tenant_id) as db:
+        await _make_tenant(db, tenant_id)
         source_id = str(uuid.uuid4())
         # Write plaintext JSON directly, simulating a pre-encryption row.
         await db.execute(
@@ -126,23 +140,25 @@ async def test_legacy_plaintext_row_is_still_readable():
         )
         await db.commit()
 
-    async with AsyncSessionLocal() as db:
+      async with tenant_session(tenant_id) as db:
         source = await db.get(DataSource, source_id)
         assert source.connection_config == SAMPLE_CONFIG
 
 
 @pytest.mark.asyncio
 async def test_resaving_an_encrypted_row_does_not_double_encrypt():
-    async with AsyncSessionLocal() as db:
-        tenant_id = await _make_tenant(db)
+    tenant_id = str(uuid.uuid4())
+    async with async_tenant_context(tenant_id):
+      async with tenant_session(tenant_id) as db:
+        await _make_tenant(db, tenant_id)
         source_id = await _make_source(db, tenant_id, dict(SAMPLE_CONFIG))
 
-    async with AsyncSessionLocal() as db:
+      async with tenant_session(tenant_id) as db:
         source = await db.get(DataSource, source_id)
         source.name = "Renamed, config untouched"
         await db.commit()
 
-    async with AsyncSessionLocal() as db:
+      async with tenant_session(tenant_id) as db:
         source = await db.get(DataSource, source_id)
         assert source.connection_config == SAMPLE_CONFIG
 

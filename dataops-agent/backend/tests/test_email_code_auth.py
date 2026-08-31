@@ -3,6 +3,7 @@ import pytest
 
 import services.auth_service as auth_service
 from services.auth_service import create_new_tenant_and_user, hash_password
+from services.tenant_context import tenant_session
 
 
 @pytest.fixture
@@ -137,7 +138,7 @@ async def test_deactivated_user_cannot_log_back_in_via_email_code(client, captur
     from database import AsyncSessionLocal
     from models.all_models import User as UserModel
     from sqlalchemy import select
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant.id) as db:
         r = await db.execute(select(UserModel).where(UserModel.id == user.id))
         u = r.scalar_one()
         u.is_active = False
@@ -216,7 +217,7 @@ async def test_auto_link_sets_email_verified_on_existing_password_account(client
     assert verify.status_code == 200
     assert verify.json()["tenant_id"] == tenant.id
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant.id) as db:
         refreshed = await db.get(User, user.id)
     assert refreshed.email_verified is True
 
