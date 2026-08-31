@@ -8,8 +8,21 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     APP_SECRET_KEY: str = "dev-secret"
     APP_CORS_ORIGINS: str = "http://localhost:3000"
-    DATABASE_URL: str = "postgresql+asyncpg://dataops_user:changeme@127.0.0.1:5432/dataops"
-    SYNC_DATABASE_URL: str = "postgresql+psycopg2://dataops_user:changeme@127.0.0.1:5432/dataops"
+    # Runtime URLs — these must point at `dataops_app`, a NOSUPERUSER /
+    # NOBYPASSRLS role. Row-Level Security is silently and completely bypassed
+    # for superusers and BYPASSRLS roles (FORCE ROW LEVEL SECURITY closes only
+    # the table-*owner* bypass, not those two), so pointing these back at
+    # `dataops_user` would leave every RLS policy in place but inert.
+    DATABASE_URL: str = "postgresql+asyncpg://dataops_app:changeme@127.0.0.1:5432/dataops"
+    SYNC_DATABASE_URL: str = "postgresql+psycopg2://dataops_app:changeme@127.0.0.1:5432/dataops"
+    # Privileged URL — `dataops_user` (superuser/owner). Used ONLY by Alembic
+    # migrations, test_schema_drift.py (which needs CREATE DATABASE), and
+    # cross-tenant maintenance scripts. Never by a request-serving or Celery
+    # code path; there is a regression test asserting exactly that.
+    ADMIN_DATABASE_URL: str = "postgresql+psycopg2://dataops_user:changeme@127.0.0.1:5432/dataops"
+    # Password the migration provisions `dataops_app` with. Kept separate from
+    # the URLs so the role can be created before those URLs are usable.
+    APP_DB_PASSWORD: str = "changeme"
     REDIS_URL: str = "redis://localhost:6379/0"
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"

@@ -1,3 +1,12 @@
+# Database roles (see migration b7d419e3f2a8):
+#   backend / celery_worker / celery_beat connect as `dataops_app` via
+#   DATABASE_URL in .env — a NOSUPERUSER, NOBYPASSRLS role. This is load-bearing:
+#   Row-Level Security is silently and completely bypassed by superuser and
+#   BYPASSRLS roles, so pointing DATABASE_URL back at `dataops_user` would leave
+#   every RLS policy in place but enforcing nothing.
+#   `dataops_user` (the POSTGRES_USER below, superuser/owner) is reached only via
+#   ADMIN_DATABASE_URL, and only by migrations, test_schema_drift.py, and
+#   cross-tenant maintenance scripts.
 services:
   backend:
     build: ./backend

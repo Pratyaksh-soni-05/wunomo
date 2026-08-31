@@ -11,6 +11,7 @@ from sqlalchemy import text
 from config import settings
 from database import engine, Base
 from services.encryption_service import verify_encryption_key_configured
+from api.v1.tenant_middleware import TenantContextMiddleware
 from api.v1 import (
     auth, chat, sources, pipelines, runs,
     incidents, quality, governance, uploads,
@@ -63,6 +64,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Establishes the per-request tenant that Row-Level Security reads. Added after
+# CORS so it sits *inside* it — a CORS preflight carries no Authorization header
+# and needs no tenant. Grants nothing on its own; see the module docstring.
+app.add_middleware(TenantContextMiddleware)
 
 
 

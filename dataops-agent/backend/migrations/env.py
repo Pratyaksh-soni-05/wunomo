@@ -17,8 +17,13 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-# Read from environment variable and force sync psycopg2 driver
-_raw_url = os.getenv(
+# Migrations must run as the privileged role, NOT as the app's runtime role.
+# ADMIN_DATABASE_URL is `dataops_user` (superuser/owner); DATABASE_URL now
+# points at `dataops_app`, which is deliberately NOSUPERUSER/NOBYPASSRLS and
+# owns nothing — running migrations through it would fail on DDL, and any
+# data-touching migration would silently see zero rows under RLS.
+# Falls back to DATABASE_URL only for environments predating this split.
+_raw_url = os.getenv("ADMIN_DATABASE_URL") or os.getenv(
     "DATABASE_URL",
     "postgresql+psycopg2://dataops_user:changeme@postgres:5432/dataops"
 )

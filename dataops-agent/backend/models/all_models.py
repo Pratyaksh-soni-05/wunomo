@@ -563,6 +563,12 @@ class TaskStep(Base):
     __tablename__ = "task_steps"
     id = Column(String, primary_key=True, default=gen_uuid)
     task_id = Column(String, ForeignKey("tasks.id"), nullable=False, index=True)
+    # Denormalized from the parent task purely so Row-Level Security can express
+    # a simple row predicate here (migration b7d419e3f2a8). RLS policies can't
+    # follow the task_id FK cheaply, and a step carries real tenant data in
+    # tool_args/raw_result — leaving it unscoped would be a hole. Always set
+    # from the parent Task's tenant_id; never independently.
+    tenant_id = Column(String, nullable=False, index=True)
     step_index = Column(Integer, nullable=False)
     description = Column(Text, nullable=False)  # human-readable, shown in plan review + timeline UI
     source = Column(SAEnum(TaskStepSource), nullable=False)
