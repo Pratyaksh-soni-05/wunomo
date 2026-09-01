@@ -1078,14 +1078,14 @@ export interface QuotaStatus {
 }
 
 export interface UsageSummary {
-  ai_credits: QuotaStatus;
+  turns: QuotaStatus;
   pipeline_runs: QuotaStatus;
   data_sources: QuotaStatus;
   team_members: QuotaStatus;
 }
 
 export interface PlanLimits {
-  ai_credits_per_month: number;
+  turns_per_day_per_user: number;
   pipeline_runs_per_month: number;
   max_data_sources: number | null;
   max_team_members: number | null;

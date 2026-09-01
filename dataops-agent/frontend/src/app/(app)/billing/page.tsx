@@ -5,7 +5,7 @@ import { Card, Progress, Skeleton } from "@/components/ui";
 import { getToken, getUsage, getCurrentPlan, type QuotaStatus } from "@/lib/api";
 
 const RESOURCE_LABELS: Record<string, string> = {
-  ai_credits: "AI Credits",
+  turns: "AI Turns",
   pipeline_runs: "Pipeline Runs",
   data_sources: "Data Sources",
   team_members: "Team Members",
