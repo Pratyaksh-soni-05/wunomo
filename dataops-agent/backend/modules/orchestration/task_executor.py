@@ -319,7 +319,7 @@ async def _adapt_step_args(
     """One LLM call: shows the real failure to the model and asks for
     corrected arguments. Falls back to the original arguments (a no-op
     "adaptation") if the LLM's response isn't a usable JSON object, or if
-    the tenant is out of AI-credit quota -- adaptation is a nice-to-have
+    the tenant is out of turn quota -- adaptation is a nice-to-have
     recovery step, not something that should itself crash a task.
 
     Tier 2 fallback (2026-08): only reached when Tier 1's deterministic
@@ -330,7 +330,7 @@ async def _adapt_step_args(
     reads raw_result instead of guessing: an LLM correcting a wrong ID
     from the schema and an error message alone is guessing blind, with no
     way to know what the real ID actually is unless shown it."""
-    quota = await get_quota_status(tenant_id, "ai_credits")
+    quota = await get_quota_status(tenant_id, "turns")
     if quota["status"] == "exceeded":
         return tool_args
 
@@ -783,7 +783,7 @@ async def execute_next_step(task_id: str) -> dict:
                 # degrading to an unadapted retry (Q4) -- the only real
                 # LLM spend anywhere in step execution is this adapt call,
                 # so this is the one place quota needs to be checked.
-                quota = await get_quota_status(tenant_id, "ai_credits")
+                quota = await get_quota_status(tenant_id, "turns")
                 if quota["status"] == "exceeded":
                     quota_paused_attempt = attempt
                     break

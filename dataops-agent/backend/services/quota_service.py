@@ -9,7 +9,37 @@ query against data that already exists (LlmUsageEvent, PipelineRun,
 DataSource, User), not a separately-maintained counter that could drift
 from reality.
 
-AI credits formula: credits = input_tokens * 1 + output_tokens * 3. The
+QUOTA METRIC CHANGE (2026-08-31): the gated AI metric is now **turns**, not
+ai_credits. Old formula: a flat per-tenant monthly credit pool
+(input_tokens*1 + output_tokens*3, capped at 25k/100k/500k per tier). New
+formula:
+
+    monthly_turn_cap = turns_per_day_per_user * 30 * max(1, active_team_members)
+
+recalculated live on every check, so adding or removing a team member changes
+the effective cap immediately rather than at signup or plan-change time.
+
+Two reasons for the switch. First, "turns" is the unit actually sold to
+customers, so the gate now enforces the thing the pricing page promises rather
+than a derived proxy. Second, the flat pool did not scale with team size at
+all: a 1-person and a 10-person tenant on the same tier got the same budget.
+
+A turn is one unit of user-initiated agent work:
+    count(ChatMessage WHERE role='user') + count(TaskStep)
+both for the current calendar month, both tenant-scoped.
+
+**Do not count LlmUsageEvent rows as turns.** That was the obvious-looking
+implementation and it is wrong by a large, variable factor: one row is written
+per *LLM call*, and a single user turn costs one call per agent-graph iteration
+(agent -> tools -> agent, up to MAX_AGENT_ITERATIONS) plus a second row whenever
+the primary->fallback path fires. A tool-heavy turn can be 5-10 rows. Gating 25
+turns/day against that count would block a real customer after roughly three
+conversations.
+
+credits_for_event() is kept below, but is now an internal cost/overage
+calculation only — it no longer gates anything.
+
+Historical note on the old metric: credits = input_tokens * 1 + output_tokens * 3. The
 x3 weight on output tokens approximates real provider cost skew
 (completion tokens cost more than prompt tokens industry-wide across
 Gemini/Groq/every major provider). Gemini's "thinking"/reasoning tokens
@@ -46,38 +76,61 @@ from typing import Optional
 from sqlalchemy import select, func
 
 from database import AsyncSessionLocal
-from models.all_models import LlmUsageEvent, PipelineRun, Pipeline, DataSource, User, Tenant
+from models.all_models import (
+    ChatMessage, DataSource, LlmUsageEvent, Pipeline, PipelineRun, Task, TaskStep,
+    Tenant, User,
+)
 from services.tenant_context import with_tenant_context
 
 WARNING_THRESHOLD = 0.8
 
+# The turns/day rate is sold per user per day; the enforced pool is monthly.
+# A flat 30 rather than the real length of the current month, deliberately: the
+# cap should not silently shrink by ~10% in February, and a customer told "25
+# turns/day" reading a monthly number expects 750, not 700.
+DAYS_PER_BILLING_MONTH = 30
+
+# DB plan keys are unchanged (starter/growth/scale) — the customer-facing names
+# differ, but renaming these would be a data migration across every existing
+# tenant row for no functional gain.
 PLANS: dict[str, dict[str, Optional[int]]] = {
+    # Standard + Starter Plus share one enforcement tier; the higher of the two
+    # caps is used, so neither is under-served.
     "starter": {
-        "ai_credits_per_month": 25_000,
+        "turns_per_day_per_user": 25,
         "pipeline_runs_per_month": 100,
         "max_data_sources": 3,
-        "max_team_members": 3,
+        "max_team_members": 8,
     },
-    "growth": {
-        "ai_credits_per_month": 100_000,
+    "growth": {  # Premium
+        "turns_per_day_per_user": 30,
         "pipeline_runs_per_month": 1_000,
         "max_data_sources": 15,
-        "max_team_members": 10,
+        "max_team_members": 15,
     },
-    "scale": {
-        "ai_credits_per_month": 500_000,
+    "scale": {  # Enterprise
+        "turns_per_day_per_user": 35,
         "pipeline_runs_per_month": 10_000,
         "max_data_sources": None,  # unlimited
-        "max_team_members": 25,
+        # Unlimited on purpose. Enterprise scales *price* per seat beyond 25
+        # (the per-extra-seat rate), it does not hard-block on team size — the
+        # old cap of 25 directly contradicted that. Note the turn formula uses
+        # the ACTUAL active member count, never this cap, so "unlimited" here
+        # does not make the turn pool unbounded.
+        "max_team_members": None,
     },
 }
 
-_LIMIT_KEY = {
-    "ai_credits": "ai_credits_per_month",
+# Resources whose cap is a plain per-tier constant. `turns` is deliberately
+# absent: its cap is a function of live team size, so it is computed in
+# _resource_limit() rather than looked up here.
+_STATIC_LIMIT_KEY = {
     "pipeline_runs": "pipeline_runs_per_month",
     "data_sources": "max_data_sources",
     "team_members": "max_team_members",
 }
+
+QUOTA_RESOURCES = ("turns", "pipeline_runs", "data_sources", "team_members")
 
 
 def credits_for_event(input_tokens: Optional[int], output_tokens: Optional[int]) -> int:
@@ -90,14 +143,36 @@ def _month_start() -> datetime:
 
 
 async def _current_usage(db, tenant_id: str, resource: str) -> int:
-    if resource == "ai_credits":
-        r = await db.execute(
-            select(LlmUsageEvent.input_tokens, LlmUsageEvent.output_tokens).where(
-                LlmUsageEvent.tenant_id == tenant_id,
-                LlmUsageEvent.created_at >= _month_start(),
+    if resource == "turns":
+        # A turn is one unit of user-initiated agent work. Two sources, summed:
+        # a chat message the user actually sent, and a task step (tasks are the
+        # heaviest LLM consumer, so leaving them out would make them unmetered).
+        # Assistant/system chat rows are excluded — the user did not spend those.
+        month_start = _month_start()
+        chat_turns = (await db.execute(
+            select(func.count(ChatMessage.id)).where(
+                ChatMessage.tenant_id == tenant_id,
+                ChatMessage.role == "user",
+                ChatMessage.created_at >= month_start,
             )
-        )
-        return sum(credits_for_event(inp, out) for inp, out in r.all())
+        )).scalar() or 0
+        # NOTE: TaskStep has no created_at column — only nullable started_at /
+        # completed_at. So the step's age is taken from its parent Task, which
+        # is accurate because steps are written in the same transaction as the
+        # task that owns them (api/v1/tasks.py's create/edit paths). The one
+        # skew is a SYSTEM_INSERTED verify step appended mid-execution, which
+        # is attributed to the month the task started rather than the month the
+        # step appeared — immaterial except for a task spanning a month
+        # boundary, and it errs toward not double-charging.
+        task_turns = (await db.execute(
+            select(func.count(TaskStep.id))
+            .join(Task, TaskStep.task_id == Task.id)
+            .where(
+                TaskStep.tenant_id == tenant_id,
+                Task.created_at >= month_start,
+            )
+        )).scalar() or 0
+        return chat_turns + task_turns
 
     if resource == "pipeline_runs":
         r = await db.execute(
@@ -132,14 +207,45 @@ async def _plan_limits(db, tenant_id: str) -> dict:
     return PLANS.get(plan, PLANS["starter"])
 
 
+async def monthly_turn_cap(db, tenant_id: str) -> int:
+    """turns_per_day_per_user * 30 * max(1, active_team_members).
+
+    Computed live on every quota check rather than stored, which is the whole
+    point: inviting a team member raises the tenant's ceiling immediately, and
+    removing one lowers it immediately, with no plan change and nothing to
+    re-provision.
+
+    max(1, ...) is a real guard, not defensive noise. The member count is
+    `User WHERE is_active` — a tenant whose only user was soft-removed, or one
+    observed mid-signup before its first User row commits, counts 0. Without
+    the floor that yields a cap of 0, which reads as "exceeded" and hard-blocks
+    every AI action for a tenant that has done nothing wrong.
+
+    Note it uses the ACTUAL member count, never the tier's max_team_members —
+    so Enterprise's unlimited seat cap does not make its turn pool unbounded.
+    """
+    limits = await _plan_limits(db, tenant_id)
+    members = await _current_usage(db, tenant_id, "team_members")
+    return limits["turns_per_day_per_user"] * DAYS_PER_BILLING_MONTH * max(1, members)
+
+
+async def _resource_limit(db, tenant_id: str, resource: str) -> Optional[int]:
+    """The cap for one resource. None means unlimited."""
+    if resource == "turns":
+        return await monthly_turn_cap(db, tenant_id)
+    if resource not in _STATIC_LIMIT_KEY:
+        raise ValueError(f"Unknown quota resource '{resource}'")
+    limits = await _plan_limits(db, tenant_id)
+    return limits[_STATIC_LIMIT_KEY[resource]]
+
+
 @with_tenant_context
 async def get_quota_status(tenant_id: str, resource: str) -> dict:
     """Returns {resource, used, limit, percent, status}. status is
     "ok" | "warning" (>= 80%) | "exceeded" (>= 100%). limit is None for an
     unlimited tier (Scale's data_sources) - always "ok" in that case."""
     async with AsyncSessionLocal() as db:
-        limits = await _plan_limits(db, tenant_id)
-        limit = limits[_LIMIT_KEY[resource]]
+        limit = await _resource_limit(db, tenant_id, resource)
         used = await _current_usage(db, tenant_id, resource)
 
     if limit is None:
@@ -156,4 +262,4 @@ async def get_quota_status(tenant_id: str, resource: str) -> dict:
 
 
 async def get_all_quota_statuses(tenant_id: str) -> dict:
-    return {resource: await get_quota_status(tenant_id, resource) for resource in _LIMIT_KEY}
+    return {resource: await get_quota_status(tenant_id, resource) for resource in QUOTA_RESOURCES}

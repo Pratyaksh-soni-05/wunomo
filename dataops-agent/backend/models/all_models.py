@@ -492,7 +492,7 @@ class TaskStatus(str, enum.Enum):
     PAUSED_NEEDS_APPROVAL = "paused_needs_approval"  # a step hit a risk-gated tool call
     PAUSED_FAILED_STEP = "paused_failed_step"  # a step exhausted its attempt budget, or the initiating user was demoted/deactivated
     PAUSED_PLAN_INVALID = "paused_plan_invalid"  # a completed step's result shows the remaining plan won't reach the goal
-    PAUSED_QUOTA_EXCEEDED = "paused_quota_exceeded"  # tenant AI-credit quota exhausted mid-run; resumable once quota resets
+    PAUSED_QUOTA_EXCEEDED = "paused_quota_exceeded"  # tenant turn quota exhausted mid-run; resumable once quota resets
     COMPLETED = "completed"
     COMPLETED_WITH_UNCONFIRMED_STEPS = "completed_with_unconfirmed_steps"  # a dispatched step's verification never reached a terminal state within its window - honest, not clean, success (Q2)
     FAILED = "failed"
@@ -543,7 +543,7 @@ class Task(Base):
     step_budget_max = Column(Integer, nullable=False)
     step_budget_used = Column(Integer, default=0)
     # None = no separate task-level ceiling, draw against the tenant's
-    # plan-level AI-credit quota only (quota_service.py's existing formula).
+    # plan-level turn quota only (quota_service.py's team-size-scaled formula).
     credit_budget_max = Column(Integer, nullable=True)
     credit_budget_used = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
