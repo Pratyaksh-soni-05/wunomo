@@ -15,3 +15,17 @@ node_modules/
 # `git add -A` would have swept all three dumps in. Keep the backups themselves
 # somewhere durable outside git (external drive / cloud storage).
 backups/
+
+# Next.js build output for the marketing site. Deliberately narrow: only the
+# build artefacts, NOT marketing-site/ itself — that directory is a separate
+# product tracked on its own branch (origin/marketing-site, see CLAUDE.md), and
+# a .gitignore entry applies on whatever branch you're standing on, so ignoring
+# the whole directory here would hide it on the branch where it belongs.
+# .next/ is regenerated output that nobody wants committed on any branch;
+# `git add -A` on master currently stages 216 files (~6.4MB) of it.
+marketing-site/.next/
+
+# Claude Code's per-machine settings — local by definition (it's in the name),
+# not shared configuration. Untracked but unignored until now, so a broad add
+# would have swept it in.
+.claude/settings.local.json
