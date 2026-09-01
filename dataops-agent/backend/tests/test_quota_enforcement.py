@@ -3,9 +3,9 @@ from datetime import datetime, timezone
 import pytest
 
 from database import AsyncSessionLocal
-from models.all_models import DataSource, PipelineRun, LlmUsageEvent, SourceType, RunStatus, User
+from models.all_models import ChatMessage, DataSource, PipelineRun, LlmUsageEvent, SourceType, RunStatus, User
 from services.quota_service import credits_for_event, get_quota_status, PLANS
-from sqlalchemy import select
+from sqlalchemy import func, select
 from services.tenant_context import tenant_session
 
 
@@ -33,19 +33,33 @@ async def _seed_sources(tenant_id: str, count: int):
         await db.commit()
 
 
-async def _seed_llm_usage(tenant_id: str, credits: int):
-    """Seeds a single event whose credits_for_event() output equals the
-    requested amount exactly, via input_tokens only (1x weight, so no
-    rounding - output_tokens' 3x weight would need a division that could
-    undershoot the target on integer truncation)."""
+async def _seed_turns(tenant_id: str, turns: int, user_id: str = "seed-user"):
+    """Seeds `turns` user chat messages for the current month.
+
+    Turns are counted from real ChatMessage/TaskStep rows, not from
+    LlmUsageEvent -- see quota_service's module docstring for why counting LLM
+    calls would over-count a turn by a large, variable factor. role="user" is
+    load-bearing: assistant rows are written by the same endpoint and must not
+    count against the caller.
+    """
     async with tenant_session(tenant_id) as db:
-        db.add(LlmUsageEvent(
-            id=str(uuid.uuid4()), tenant_id=tenant_id, request_type="test",
-            provider="test", model="test", used_fallback=False,
-            input_tokens=credits, output_tokens=0, total_tokens=credits,
-            success=True, created_at=utcnow(),
-        ))
+        for _ in range(turns):
+            db.add(ChatMessage(
+                id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
+                session_id=str(uuid.uuid4()), role="user", content="seed turn",
+                created_at=utcnow(),
+            ))
         await db.commit()
+
+
+async def _expected_cap(tenant_id: str, plan: str = "starter") -> int:
+    """The formula under test, restated independently of the implementation."""
+    async with tenant_session(tenant_id) as db:
+        members = (await db.execute(
+            select(func.count(User.id)).where(
+                User.tenant_id == tenant_id, User.is_active.is_(True))
+        )).scalar() or 0
+    return PLANS[plan]["turns_per_day_per_user"] * 30 * max(1, members)
 
 
 def test_credits_formula_weights_output_tokens_three_x_input():
@@ -81,12 +95,13 @@ async def test_data_sources_quota_warning_band(client):
 
 
 @pytest.mark.asyncio
-async def test_ai_credits_quota_exceeded_blocks_chat_before_any_llm_call(client):
+async def test_turn_quota_exceeded_blocks_chat_before_any_llm_call(client):
     """Proves the block happens before spending money on a real LLM call -
     no LLM mocking needed since the dependency short-circuits first."""
     token, tenant_id = await _register(client)
-    limit = PLANS["starter"]["ai_credits_per_month"]  # 25,000
-    await _seed_llm_usage(tenant_id, limit)
+    # A fresh tenant has exactly 1 active member, so the cap is 25 * 30 * 1.
+    limit = await _expected_cap(tenant_id)
+    await _seed_turns(tenant_id, limit)
 
     r = await client.post(
         "/api/v1/chat/", json={"message": "hello"},
@@ -94,7 +109,7 @@ async def test_ai_credits_quota_exceeded_blocks_chat_before_any_llm_call(client)
     )
     assert r.status_code == 402
     assert r.json()["detail"]["error"] == "quota_exceeded"
-    assert r.json()["detail"]["resource"] == "ai_credits"
+    assert r.json()["detail"]["resource"] == "turns"
 
 
 @pytest.mark.asyncio
@@ -160,7 +175,7 @@ async def test_billing_usage_endpoint_returns_all_four_resources(client):
     r = await client.get("/api/v1/billing/usage", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     usage = r.json()["usage"]
-    assert set(usage.keys()) == {"ai_credits", "pipeline_runs", "data_sources", "team_members"}
+    assert set(usage.keys()) == {"turns", "pipeline_runs", "data_sources", "team_members"}
     assert usage["team_members"]["used"] == 1  # the owner themself
     assert usage["team_members"]["status"] == "ok"
 

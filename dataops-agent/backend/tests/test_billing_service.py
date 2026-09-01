@@ -23,7 +23,7 @@ async def _register(client, prefix="billing"):
 async def test_get_usage_returns_all_four_resources(client):
     _, tenant_id, _ = await _register(client)
     usage = await BillingService(tenant_id).get_usage()
-    assert set(usage.keys()) == {"ai_credits", "pipeline_runs", "data_sources", "team_members"}
+    assert set(usage.keys()) == {"turns", "pipeline_runs", "data_sources", "team_members"}
 
 
 @pytest.mark.asyncio
