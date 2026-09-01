@@ -3,3 +3,15 @@
 # sibling top-level dir (e.g. marketing-site/) that isn't under dataops-agent/,
 # whose own .gitignore only covers itself and below.
 node_modules/
+
+# Database dumps. These must never enter version control: they are multi-MB,
+# they hold real tenant data, and at least one of them
+# (dataops_backup_pre_encryption_20260830.sql) predates Item #1's credential
+# encryption migration, so it contains data-source passwords as PLAINTEXT JSON
+# — committing it would put those in git history permanently, where removing
+# them later means a history rewrite rather than a delete.
+#
+# Until now this directory was merely untracked, not ignored, so a single
+# `git add -A` would have swept all three dumps in. Keep the backups themselves
+# somewhere durable outside git (external drive / cloud storage).
+backups/
