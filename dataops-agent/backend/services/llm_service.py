@@ -56,14 +56,35 @@ async def _record_dropped_usage(tenant_id: str, total_tokens: Optional[int]) -> 
 # in a way that looks like an unrelated bug). Kept in this one place -
 # extend it only once a new model is actually proven working here, not
 # just because a provider released it.
-SUPPORTED_MODEL_OVERRIDES = ["gemini-3.5-flash", "llama-3.3-70b-versatile"]
+#
+# llama-3.3-70b-versatile removed 2026-09-03: Groq deprecated it (confirmed
+# live against the real /openai/v1/models endpoint - it's simply absent
+# from the response, not erroring transiently). Replaced with
+# openai/gpt-oss-120b, live-verified for real multi-turn tool-calling
+# before landing here. get_ai_model_override() re-validates against this
+# list on every READ, not just on write (see its own docstring) - removing
+# the dead literal here is what actually fixes the 265 real tenants who
+# had it as their explicit override: their next request now falls through
+# to the tenant-level default (None -> global PRIMARY_LLM_MODEL) instead
+# of continuing to hit a model that no longer exists. No DB migration
+# needed for that; this list IS the fix.
+SUPPORTED_MODEL_OVERRIDES = ["gemini-3.5-flash", "openai/gpt-oss-120b"]
 
 
 def _provider_for_model(model: str) -> str:
-    """Same routing rule _build_llm() uses, exposed for usage logging."""
-    if "llama" in model or "mixtral" in model or "gemma" in model:
-        return "groq"
-    return "gemini"
+    """Same routing rule _build_llm() uses, exposed for usage logging.
+
+    Checks for Gemini's own consistent "gemini-" naming (the only family
+    this app has ever configured for PRIMARY_LLM_MODEL/model overrides),
+    rather than enumerating known Groq model-family substrings (the
+    previous "llama"/"mixtral"/"gemma" check) -- that approach broke the
+    instant FALLBACK_LLM_MODEL was renamed to something outside that list
+    (llama-3.3-70b-versatile was deprecated by Groq; see GOTCHAS.md), and
+    Groq's own model catalog will keep changing shape in ways this app
+    has no control over and no way to predict. Inverting the check means
+    a future Groq model rename (to anything not literally starting with
+    "gemini") keeps routing correctly with zero code change here."""
+    return "gemini" if model.startswith("gemini") else "groq"
 
 
 def content_as_text(content) -> str:
@@ -157,18 +178,21 @@ GEMINI_THINKING_BUDGET = 0
 
 
 def _build_llm(model: str, temperature: float):
-    """Route to the right provider client based on the model name."""
-    if "llama" in model or "mixtral" in model or "gemma" in model:
-        return ChatGroq(
+    """Route to the right provider client based on the model name -- same
+    check as _provider_for_model(), see its docstring for why this keys
+    off Gemini's own naming rather than an enumerated list of Groq model
+    families."""
+    if model.startswith("gemini"):
+        return ChatGoogleGenerativeAI(
             model=model,
-            groq_api_key=settings.GROQ_API_KEY,
+            google_api_key=settings.GEMINI_API_KEY,
             temperature=temperature,
+            thinking_budget=GEMINI_THINKING_BUDGET,
         )
-    return ChatGoogleGenerativeAI(
+    return ChatGroq(
         model=model,
-        google_api_key=settings.GEMINI_API_KEY,
+        groq_api_key=settings.GROQ_API_KEY,
         temperature=temperature,
-        thinking_budget=GEMINI_THINKING_BUDGET,
     )
 
 

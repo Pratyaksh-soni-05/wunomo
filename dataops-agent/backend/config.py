@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     PRIMARY_LLM_PROVIDER: str = "gemini"
     PRIMARY_LLM_MODEL: str = "gemini-3.5-flash"
-    FALLBACK_LLM_MODEL: str = "llama-3.3-70b-versatile"
+    FALLBACK_LLM_MODEL: str = "openai/gpt-oss-120b"
     JWT_SECRET: str = "dev-jwt-secret"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60

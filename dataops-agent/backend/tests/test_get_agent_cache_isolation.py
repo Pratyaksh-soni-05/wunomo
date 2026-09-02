@@ -46,7 +46,7 @@ def test_get_agent_caches_separately_per_model_override_same_tenant():
     request's model choice was ignored)."""
     dataops_agent._cache.clear()
     a1 = get_agent("engineer", "assisted", tenant_id="tenant-a", primary_model="gemini-3.5-flash")
-    a2 = get_agent("engineer", "assisted", tenant_id="tenant-a", primary_model="llama-3.3-70b-versatile")
+    a2 = get_agent("engineer", "assisted", tenant_id="tenant-a", primary_model="openai/gpt-oss-120b")
     assert a1 is not a2
 
 
@@ -57,13 +57,13 @@ def test_get_agent_cross_tenant_isolation_with_different_model_overrides():
     model choice (or vice versa)."""
     dataops_agent._cache.clear()
     tenant_a_agent = get_agent("engineer", "assisted", tenant_id="tenant-a", primary_model="gemini-3.5-flash")
-    tenant_b_agent = get_agent("engineer", "assisted", tenant_id="tenant-b", primary_model="llama-3.3-70b-versatile")
+    tenant_b_agent = get_agent("engineer", "assisted", tenant_id="tenant-b", primary_model="openai/gpt-oss-120b")
     assert tenant_a_agent is not tenant_b_agent
 
     # Confirm repeat calls for each tenant hit their OWN cache entry, not
     # each other's.
     tenant_a_again = get_agent("engineer", "assisted", tenant_id="tenant-a", primary_model="gemini-3.5-flash")
-    tenant_b_again = get_agent("engineer", "assisted", tenant_id="tenant-b", primary_model="llama-3.3-70b-versatile")
+    tenant_b_again = get_agent("engineer", "assisted", tenant_id="tenant-b", primary_model="openai/gpt-oss-120b")
     assert tenant_a_again is tenant_a_agent
     assert tenant_b_again is tenant_b_agent
 
@@ -96,7 +96,7 @@ async def test_run_agent_threads_the_resolved_override_through_to_the_llm_layer(
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         tenant = r.scalar_one()
-        tenant.settings = {"ai_model_override": "llama-3.3-70b-versatile"}
+        tenant.settings = {"ai_model_override": "openai/gpt-oss-120b"}
         await db.commit()
 
     captured_calls = []
@@ -114,7 +114,7 @@ async def test_run_agent_threads_the_resolved_override_through_to_the_llm_layer(
         user_message="please echo hi", tenant_id=tenant_id, user_id="u1", session_id="s1", caller_role="owner",
     )
 
-    assert captured_calls == ["llama-3.3-70b-versatile"]
+    assert captured_calls == ["openai/gpt-oss-120b"]
 
 
 @pytest.mark.asyncio
@@ -132,7 +132,7 @@ async def test_run_agent_two_tenants_different_overrides_do_not_cross_contaminat
         ta.settings = {"ai_model_override": "gemini-3.5-flash"}
         rb = await db.execute(select(Tenant).where(Tenant.id == tenant_b))
         tb = rb.scalar_one()
-        tb.settings = {"ai_model_override": "llama-3.3-70b-versatile"}
+        tb.settings = {"ai_model_override": "openai/gpt-oss-120b"}
         await db.commit()
 
     captured_calls = []
@@ -149,7 +149,7 @@ async def test_run_agent_two_tenants_different_overrides_do_not_cross_contaminat
     await dataops_agent.run_agent(user_message="hi", tenant_id=tenant_a, user_id="ua", session_id="sa", caller_role="owner")
     await dataops_agent.run_agent(user_message="hi", tenant_id=tenant_b, user_id="ub", session_id="sb", caller_role="owner")
 
-    assert captured_calls == ["gemini-3.5-flash", "llama-3.3-70b-versatile"]
+    assert captured_calls == ["gemini-3.5-flash", "openai/gpt-oss-120b"]
 
 
 @pytest.mark.asyncio
@@ -158,10 +158,10 @@ async def test_get_ai_model_override_returns_valid_override(client):
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         tenant = r.scalar_one()
-        tenant.settings = {"ai_model_override": "llama-3.3-70b-versatile"}
+        tenant.settings = {"ai_model_override": "openai/gpt-oss-120b"}
         await db.commit()
 
-    assert await get_ai_model_override(tenant_id) == "llama-3.3-70b-versatile"
+    assert await get_ai_model_override(tenant_id) == "openai/gpt-oss-120b"
 
 
 async def _create_agent_instance(tenant_id, **overrides):
@@ -171,7 +171,7 @@ async def _create_agent_instance(tenant_id, **overrides):
             employee_type=AgentEmployeeType.DATAOPS,
             personality=overrides.get("personality", PersonalityMode.FOUNDER),
             operation_mode=overrides.get("operation_mode", OperationMode.ADVISORY),
-            model=overrides.get("model", "llama-3.3-70b-versatile"),
+            model=overrides.get("model", "openai/gpt-oss-120b"),
             status=AgentInstanceStatus.ACTIVE,
         )
         db.add(instance)
@@ -195,7 +195,7 @@ async def test_run_agent_with_agent_id_uses_the_agents_own_config_not_request_de
         tenant = r.scalar_one()
         tenant.settings = {"ai_model_override": "gemini-3.5-flash"}  # must be overridden by the agent's own model
         await db.commit()
-    instance = await _create_agent_instance(tenant_id, name="Nova", model="llama-3.3-70b-versatile")
+    instance = await _create_agent_instance(tenant_id, name="Nova", model="openai/gpt-oss-120b")
 
     captured = {}
 
@@ -213,7 +213,7 @@ async def test_run_agent_with_agent_id_uses_the_agents_own_config_not_request_de
         agent_id=instance.id,
     )
 
-    assert captured["primary_model"] == "llama-3.3-70b-versatile"
+    assert captured["primary_model"] == "openai/gpt-oss-120b"
     system_messages = [m for m in final["messages"] if hasattr(m, "content") and "Nova" in str(m.content)]
     # The system prompt itself isn't in final["messages"] (kept out of the
     # reducer-managed channel by design - see AgentState's own docstring),
@@ -237,7 +237,7 @@ async def test_run_agent_with_agent_id_logs_the_real_agent_id_on_the_usage_row(c
         from langchain_core.messages import AIMessage
         response = AIMessage(content="done")
         response.additional_kwargs["_llm_usage"] = {
-            "provider": "groq", "model": "llama-3.3-70b-versatile", "used_fallback": False,
+            "provider": "groq", "model": "openai/gpt-oss-120b", "used_fallback": False,
             "latency_ms": 5, "success": True,
             "usage_metadata": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
         }
@@ -281,7 +281,7 @@ async def test_editing_an_agent_row_invalidates_its_cache_entry_by_construction(
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(AgentInstance).where(AgentInstance.id == instance.id))
         row = r.scalar_one()
-        row.model = "llama-3.3-70b-versatile"
+        row.model = "openai/gpt-oss-120b"
         await db.commit()
         await db.refresh(row)
 

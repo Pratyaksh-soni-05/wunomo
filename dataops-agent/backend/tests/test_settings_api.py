@@ -73,12 +73,12 @@ async def test_owner_can_patch_ai_model_override(client):
     token, _, _ = await _register(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    r = await client.patch("/api/v1/settings/", json={"ai_model_override": "llama-3.3-70b-versatile"}, headers=headers)
+    r = await client.patch("/api/v1/settings/", json={"ai_model_override": "openai/gpt-oss-120b"}, headers=headers)
     assert r.status_code == 200
-    assert r.json()["settings"]["ai_model_override"] == "llama-3.3-70b-versatile"
+    assert r.json()["settings"]["ai_model_override"] == "openai/gpt-oss-120b"
 
     get_r = await client.get("/api/v1/settings/", headers=headers)
-    assert get_r.json()["settings"]["ai_model_override"] == "llama-3.3-70b-versatile"
+    assert get_r.json()["settings"]["ai_model_override"] == "openai/gpt-oss-120b"
 
 
 @pytest.mark.asyncio

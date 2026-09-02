@@ -111,6 +111,12 @@ async def test_get_llm_for_agent_wraps_even_when_primary_build_fails(monkeypatch
 
     monkeypatch.setattr(llm_service_module, "get_primary_llm", _boom_primary)
     monkeypatch.setattr(llm_service_module, "get_fallback_llm", lambda temperature=0.0: fake_fallback)
+    # Pinned explicitly rather than relying on whatever settings.FALLBACK_LLM_MODEL
+    # currently is - this test is about the wrap-on-build-failure behavior, not
+    # about which model happens to be configured (that drifts independently;
+    # see GOTCHAS.md's Groq-deprecation entry for why coupling to it directly
+    # made this exact assertion silently start failing once before).
+    monkeypatch.setattr(llm_service_module.settings, "FALLBACK_LLM_MODEL", "test-fallback-model")
 
     model = llm_service_module.get_llm_for_agent(temperature=0.0)
     assert isinstance(model, _TimeoutFallbackChatModel)
@@ -119,7 +125,7 @@ async def test_get_llm_for_agent_wraps_even_when_primary_build_fails(monkeypatch
     assert result.content == "from fallback"
     usage = result.additional_kwargs["_llm_usage"]
     assert usage["provider"] == "groq"
-    assert usage["model"] == "llama-3.3-70b-versatile"
+    assert usage["model"] == "test-fallback-model"
     assert usage["used_fallback"] is True
 
 
