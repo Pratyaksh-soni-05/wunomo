@@ -98,22 +98,39 @@ WARNING_THRESHOLD = 0.8
 # cap should not silently shrink by ~10% in February.
 DAYS_PER_BILLING_MONTH = 30
 
-#   ⚠️  credits_per_day_per_user IS A PLACEHOLDER. DO NOT TREAT AS CALIBRATED.
+#   ⚠️  credits_per_day_per_user IS STOPGAP-CALIBRATED (2026-09-02).
+#       NOT FINAL. Replace once dogfooding supplies the real multiplier.
 #
-# Every value below is simply the tier's OLD flat ai_credits_per_month divided
-# by 30 — a stand-in chosen so the migration is behaviour-preserving for a
-# single-seat tenant, not a number derived from anything real. See GOTCHAS.md's
-# "credits-per-turn conversion is two factors" entry: credits-per-LLM-call is
-# grounded in 120 real events, but calls-per-turn has a sample size of 3, so no
-# honest per-tier rate can be computed until dogfooding supplies the multiplier.
+# Derivation, so the numbers can be re-derived rather than guessed at:
 #
-# The consequence of the placeholder: a MULTI-seat tenant now gets a larger pool
-# than it did under the old flat cap (rate × 30 × seats rather than a fixed
-# total). That is the intended direction of the redesign, but its magnitude is
-# unvalidated — a 5-seat Standard tenant gets 5× what it had yesterday.
+#     credits_per_turn        = 5,108 x 4 = 20,432
+#                               |          |
+#                               |          +-- calls per turn: AN ESTIMATE,
+#                               |              n=3, the weak factor. This is
+#                               |              the number that must be replaced.
+#                               +------------- credits per real agent_chat LLM
+#                                              call: GROUNDED, n=76 measured
+#                                              events, continuous distribution.
+#
+#     credits_per_day_per_user = turns_per_day_per_user x 20,432
+#
+# turns_per_day_per_user comes from the pricing model (25 / 25 / 30 / 35). The
+# arithmetic is exact, not hand-rounded, and is self-consistent by construction:
+# a single-seat Standard tenant's monthly pool divided by credits_per_turn comes
+# back to exactly 750 turns, i.e. the 25/day it was sold.
+#
+# This REPLACES the previous placeholders (each tier's old flat
+# ai_credits_per_month / 30), which were wrong by 43-613x and left a Standard
+# tenant able to afford roughly ONE chat turn per month. See GOTCHAS.md.
+#
+#   What "stopgap" means concretely: the magnitude is now roughly right instead
+#   of roughly 1,000x wrong, but it rests on a 3-sample multiplier. Do not treat
+#   these as final, do not quote them to a customer, and do not derive anything
+#   else from them without re-reading the GOTCHAS entry first.
 PLANS: dict[str, dict[str, Optional[int]]] = {
     "standard": {
-        "credits_per_day_per_user": 833,      # TODO placeholder: 25,000 / 30
+        # stopgap 2026-09-02: 25 turns/day x 20,432 credits/turn. NOT FINAL.
+        "credits_per_day_per_user": 510_800,
         "pipeline_runs_per_month": 100,
         "max_data_sources": 3,
         "max_team_members": 8,
@@ -123,19 +140,24 @@ PLANS: dict[str, dict[str, Optional[int]]] = {
     # inventing an intermediate number; it is the tier most in need of a real
     # figure once dogfooding data exists.
     "starter_plus": {
-        "credits_per_day_per_user": 833,      # TODO placeholder: same as standard
+        # stopgap 2026-09-02: 25 turns/day x 20,432 credits/turn. NOT FINAL.
+        # Matches standard by design — the pricing model sells both at 25/day.
+        "credits_per_day_per_user": 510_800,
         "pipeline_runs_per_month": 100,
         "max_data_sources": 3,
         "max_team_members": 8,
     },
     "premium": {
-        "credits_per_day_per_user": 3_333,    # TODO placeholder: 100,000 / 30
+        # stopgap 2026-09-02: 30 turns/day x 20,432 credits/turn. NOT FINAL.
+        "credits_per_day_per_user": 612_960,
         "pipeline_runs_per_month": 1_000,
         "max_data_sources": 15,
         "max_team_members": 15,
     },
     "enterprise": {
-        "credits_per_day_per_user": 16_667,   # TODO placeholder: 500,000 / 30
+        # stopgap 2026-09-02: 35 turns/day x 20,432 credits/turn (base rate;
+        # per-seat scaling is unchanged and applies on top). NOT FINAL.
+        "credits_per_day_per_user": 715_120,
         "pipeline_runs_per_month": 10_000,
         "max_data_sources": None,  # unlimited
         # Unlimited on purpose. Enterprise scales *price* per seat beyond 25,
