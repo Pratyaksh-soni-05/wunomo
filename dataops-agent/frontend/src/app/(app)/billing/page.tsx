@@ -5,7 +5,7 @@ import { Card, Progress, Skeleton } from "@/components/ui";
 import { getToken, getUsage, getCurrentPlan, type QuotaStatus } from "@/lib/api";
 
 const RESOURCE_LABELS: Record<string, string> = {
-  turns: "AI Turns",
+  ai_credits: "AI Credits",
   pipeline_runs: "Pipeline Runs",
   data_sources: "Data Sources",
   team_members: "Team Members",
@@ -17,8 +17,16 @@ function progressVariant(status: QuotaStatus["status"]): "default" | "success" |
   return "success";
 }
 
+// Plan keys became standard / starter_plus / premium / enterprise on
+// 2026-09-01. Splitting on "_" matters: the previous
+// `charAt(0).toUpperCase() + slice(1)` would have rendered starter_plus as
+// "Starter_plus" — the only one of the four with an underscore, so it would
+// have looked fine in every test that used the other three.
 function planLabel(name: string) {
-  return name.charAt(0).toUpperCase() + name.slice(1);
+  return name
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 export default function BillingPage() {
