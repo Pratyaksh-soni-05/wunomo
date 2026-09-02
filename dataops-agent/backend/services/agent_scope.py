@@ -223,6 +223,7 @@ async def agent_scope_denial_reason(db, agent_id: str | None, tool_name: str, ar
         source_name = source.name if source else source_id
         return (
             f"'{agent_name}' isn't scoped to access '{source_name}' — this source hasn't "
-            f"been assigned to this agent, so '{tool_name}' can't run against it."
+            f"been assigned to this agent, so '{tool_name}' can't run against it. An Owner "
+            f"or Admin can grant it: POST /api/v1/agents/{agent_id}/sources/{source_id}."
         )
     return None

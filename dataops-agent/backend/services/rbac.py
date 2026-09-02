@@ -85,6 +85,12 @@ PERMISSIONS: dict[str, frozenset[Role]] = {
     "settings.manage": _MANAGERS,
     "api_keys.manage": _MANAGERS,
     "billing.manage": _MANAGERS,
+
+    # Wunomo Projects Phase 1: granting/revoking an agent's source scope
+    # is a permission-boundary edit, same tier as team.manage/settings.manage
+    # -- not something a Data Engineer or Analyst can do to their own or
+    # anyone else's agent, even though they can trigger sync_source itself.
+    "agents.manage": _MANAGERS,
 }
 
 

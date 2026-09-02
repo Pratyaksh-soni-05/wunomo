@@ -77,6 +77,7 @@ REPRESENTATIVE_ENDPOINTS = [
     ("api_keys.manage", "get", "/api/v1/api-keys/", None),
     ("billing.manage", "post", "/api/v1/billing/change-plan", {"plan": "growth"}),
     ("tasks.manage_all", "get", "/api/v1/tasks/all", None),
+    ("agents.manage", "post", "/api/v1/agents/nonexistent-id/sources/nonexistent-id", None),
 ]
 
 
