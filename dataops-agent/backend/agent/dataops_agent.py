@@ -413,3 +413,70 @@ async def run_agent(user_message, tenant_id, user_id, session_id, caller_role,
         "session_id": session_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# Context windowing (Wunomo Projects Phase 0, commit 6). The open finding
+# from 14 July (agent history ballooning 3 -> 15 -> 63 messages across
+# three turns) was the reducer-doubling bug, already fixed — see
+# AgentState's own comment above. What's still real and unaddressed
+# without this: every tool call adds at least two messages to a session's
+# history, nothing trims it, and every turn resends the ENTIRE prior
+# history as input. Cost per turn grows with conversation length, not
+# just with that turn's own content — at the measured ~4,480 tokens/turn
+# average, an unbounded T-turn conversation costs roughly
+# 4,480 * T*(T+1)/2 cumulative tokens (each turn repaying all the history
+# before it), not 4,480 * T. A project channel multiplying that by
+# participants and by project lifetime is exactly what turns this into
+# real money (see WUNOMO_PROJECTS_PROPOSAL_v2.md's own framing).
+#
+# Sliding window (last CONTEXT_WINDOW_SIZE raw messages, verbatim) plus an
+# incrementally-updated rolling summary of everything older, capped in
+# length. The summary is persisted by the caller (api/v1/chat.py) as a
+# real ChatMessage row with role="summary" — an ordinary value in an
+# already-unconstrained String column, not new schema — and is only ever
+# recomputed when the window has genuinely moved past what a prior
+# summary already covers, not on every turn: new_summary_text below is
+# None in the cheap, common case specifically so the caller knows exactly
+# when a new row actually needs persisting.
+CONTEXT_WINDOW_SIZE = 12
+_SUMMARY_REQUEST_TYPE = "chat_history_summary"
+_SUMMARY_WORD_CAP = 150
+
+
+async def window_and_summarize(
+    history: list[BaseMessage], *, tenant_id: str, session_id: str,
+    prior_summary: str | None = None,
+) -> tuple[list[BaseMessage], str | None]:
+    """Returns (history_to_use_for_this_turn, new_summary_text_or_None).
+
+    prior_summary is the caller's already-persisted summary text for
+    everything strictly older than what's in `history` — this function
+    trusts that `history` contains ONLY messages newer than what
+    prior_summary already covers (api/v1/chat.py's own loading query is
+    what guarantees this; this function doesn't re-derive it from message
+    content or timestamps)."""
+    if len(history) <= CONTEXT_WINDOW_SIZE:
+        if prior_summary:
+            return [SystemMessage(content=prior_summary)] + history, None
+        return history, None
+
+    windowed = history[-CONTEXT_WINDOW_SIZE:]
+    newly_evicted = history[:-CONTEXT_WINDOW_SIZE]
+
+    prompt = (
+        f"Update the running summary of this conversation to also cover the "
+        f"new messages below. Keep it under {_SUMMARY_WORD_CAP} words. Preserve "
+        "any specific IDs, names, sources, or numbers mentioned - a future turn "
+        "needs to still know what happened, not just the gist.\n\n"
+    )
+    if prior_summary:
+        prompt += f"Existing summary so far:\n{prior_summary}\n\nNew messages to fold in:\n"
+    else:
+        prompt += "Messages to summarize:\n"
+    prompt += "\n".join(f"{m.__class__.__name__}: {content_as_text(m.content)}" for m in newly_evicted)
+
+    new_summary = await invoke_llm(
+        [SystemMessage(content=prompt)],
+        tenant_id=tenant_id, session_id=session_id, request_type=_SUMMARY_REQUEST_TYPE,
+    )
+    return [SystemMessage(content=new_summary)] + windowed, new_summary

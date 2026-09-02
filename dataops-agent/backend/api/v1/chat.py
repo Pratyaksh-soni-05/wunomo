@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from .auth import get_current_user, enforce_quota
-from agent.dataops_agent import run_agent
+from agent.dataops_agent import run_agent, window_and_summarize
 from database import AsyncSessionLocal
 from models.all_models import ChatMessage
 from sqlalchemy import select, func, delete
@@ -11,7 +11,7 @@ import uuid
 from models.approval_model import ApprovalRequest, ApprovalStatus
 from schemas.chat_schema import ChatRequest
 from datetime import datetime
-from langchain_core.messages import AIMessage as LCAIMessage, ToolMessage as LCToolMessage
+from langchain_core.messages import AIMessage as LCAIMessage, ToolMessage as LCToolMessage, SystemMessage as LCSystemMessage
 
 router = APIRouter()
 
@@ -61,10 +61,26 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
     tenant_id = user["tenant_id"]
 
     async with AsyncSessionLocal() as db:
+        # Context windowing (Wunomo Projects Phase 0, commit 6): find the
+        # most recent already-persisted summary for this session, if any —
+        # everything at or before it is already compressed, so only real
+        # turns strictly after that point need to be loaded and re-passed
+        # to window_and_summarize(). The original raw rows are never
+        # deleted (a customer can still scroll back through real history
+        # in the UI); this only changes what gets replayed to the LLM.
         r = await db.execute(select(ChatMessage).where(
-            ChatMessage.session_id == session_id,
-            ChatMessage.tenant_id == tenant_id,
-        ).order_by(ChatMessage.created_at.asc()).limit(20))
+            ChatMessage.session_id == session_id, ChatMessage.tenant_id == tenant_id,
+            ChatMessage.role == "summary",
+        ).order_by(ChatMessage.created_at.desc()).limit(1))
+        summary_row = r.scalar_one_or_none()
+
+        query = select(ChatMessage).where(
+            ChatMessage.session_id == session_id, ChatMessage.tenant_id == tenant_id,
+            ChatMessage.role.in_(("user", "assistant")),
+        )
+        if summary_row is not None:
+            query = query.where(ChatMessage.created_at > summary_row.created_at)
+        r = await db.execute(query.order_by(ChatMessage.created_at.asc()).limit(200))
         history_msgs = r.scalars().all()
 
     from langchain_core.messages import HumanMessage, AIMessage
@@ -74,6 +90,11 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
             history.append(HumanMessage(content=m.content))
         elif m.role == "assistant":
             history.append(AIMessage(content=m.content))
+
+    history, new_summary = await window_and_summarize(
+        history, tenant_id=tenant_id, session_id=session_id,
+        prior_summary=summary_row.content if summary_row is not None else None,
+    )
 
     result = await run_agent(
         user_message=req.message, tenant_id=tenant_id, user_id=user["sub"],
@@ -102,6 +123,20 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
         # isolate just this turn's new AI/tool messages for the trace.
         new_messages = result["messages"][len(history):]
         tool_trace = _extract_tool_trace(new_messages, result["pending_approvals"], result.get("role_denied", []))
+
+        if new_summary is not None:
+            # Only ever written when window_and_summarize() actually moved
+            # the window this turn (see its own docstring) - not on every
+            # turn. role="summary" is a plain string in an already-
+            # unconstrained column, not new schema; the loading query
+            # above is what makes this row authoritative for future turns
+            # (everything at or before it is excluded from the next load).
+            db.add(ChatMessage(
+                id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user["sub"],
+                session_id=session_id, role="summary", content=new_summary,
+                personality_mode=req.personality_mode, operation_mode=req.operation_mode,
+                created_at=datetime.utcnow(),
+            ))
 
         for role, content, calls in [
             ("user", req.message, []),

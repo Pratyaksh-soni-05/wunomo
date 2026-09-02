@@ -1,8 +1,13 @@
 import uuid
+from unittest.mock import AsyncMock
+
 import pytest
 from langchain_core.messages import AIMessage
+from sqlalchemy import select
 
 import agent.dataops_agent as dataops_agent
+from database import AsyncSessionLocal
+from models.all_models import ChatMessage
 from langchain_core.tools import tool
 
 
@@ -190,3 +195,42 @@ async def test_session_history_includes_tool_calls(client, monkeypatch):
 
     user_msg = next(m for m in messages if m["role"] == "user")
     assert user_msg["tool_calls"] == []
+
+
+@pytest.mark.asyncio
+async def test_long_session_persists_a_rolling_summary_row(client, monkeypatch):
+    """Wunomo Projects Phase 0, commit 6: once a session's real history
+    exceeds CONTEXT_WINDOW_SIZE, the turn that crosses that line must
+    persist a real ChatMessage(role="summary") row - that's the only way
+    the compression round-trips to the next request instead of re-growing
+    unbounded token cost on every future turn."""
+    fake_llm = FakeToolCallLLM([AIMessage(content=f"reply {i}") for i in range(8)])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    fake_summarize = AsyncMock(return_value="Session summary text.")
+    monkeypatch.setattr(dataops_agent, "invoke_llm", fake_summarize)
+    dataops_agent._cache.clear()
+
+    token, tenant_id, _ = await _register(client, "longsession")
+    session_id = None
+    for i in range(8):
+        r = await client.post(
+            "/api/v1/chat/",
+            json={"message": f"turn {i}", "session_id": session_id},
+            headers=_auth(token),
+        )
+        assert r.status_code == 200
+        session_id = r.json()["session_id"]
+
+    fake_summarize.assert_called()
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(ChatMessage).where(
+            ChatMessage.session_id == session_id, ChatMessage.role == "summary",
+        ))
+        summary_rows = result.scalars().all()
+
+    assert len(summary_rows) == 1
+    assert summary_rows[0].content == "Session summary text."
