@@ -37,11 +37,24 @@ async def client():
 # every test starts with a guaranteed-clean rate-limit slate, so the
 # result no longer depends on what ran before it or how broad -k was.
 @pytest_asyncio.fixture(autouse=True)
-async def _reset_email_code_rate_limits():
+async def _reset_rate_limit_state():
+    """Clears BOTH Redis-backed limiters before every test.
+
+    `otp:*` is auth_service's email-code limiter (the original reason this
+    fixture exists). `rl:*` is services/rate_limit.py's per-minute burst
+    limiter, added 2026-09-01 — it has exactly the same problem and would
+    otherwise reintroduce the exact order-dependence this fixture was written
+    to remove: every test client shares one source "IP", so the per-IP buckets
+    accumulate across every test in the run, and a later test fails with 429
+    for reasons that have nothing to do with its own logic. Per-tenant buckets
+    are keyed by a fresh uuid per test and would not collide, but they are
+    cleared too rather than relying on that.
+    """
     import services.auth_service as auth_service
     redis = auth_service._redis()
-    async for key in redis.scan_iter(match="otp:*"):
-        await redis.delete(key)
+    for pattern in ("otp:*", "rl:*"):
+        async for key in redis.scan_iter(match=pattern):
+            await redis.delete(key)
     yield
 
 # ── RLS-aware test sessions ──────────────────────────────────────────────────
