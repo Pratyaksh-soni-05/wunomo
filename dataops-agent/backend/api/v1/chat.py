@@ -56,7 +56,7 @@ def _extract_tool_trace(new_messages, blocked_tool_calls, role_denied_calls) -> 
     return trace
 
 @router.post("/")
-async def chat(req: ChatRequest, user=Depends(enforce_quota("turns"))):
+async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
     session_id = req.session_id or str(uuid.uuid4())
     tenant_id = user["tenant_id"]
 

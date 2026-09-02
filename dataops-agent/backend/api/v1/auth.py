@@ -72,7 +72,7 @@ def require_permission(capability: str):
 
 
 def enforce_quota(resource: str):
-    """Dependency factory: Depends(enforce_quota("turns")) hard-blocks
+    """Dependency factory: Depends(enforce_quota("ai_credits")) hard-blocks
     a request once the tenant's current usage has reached its plan's limit
     for that resource (see services/quota_service.py for the resource
     list, the credit formula, and the tier-limit rationale). Soft-warning

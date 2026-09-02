@@ -28,7 +28,7 @@ async def seed():
             return
 
         db.add(Tenant(id=TENANT_ID, name="Acme Corp", slug="acme-corp",
-                      plan="growth", is_active=True, created_at=datetime.utcnow()))
+                      plan="premium", is_active=True, created_at=datetime.utcnow()))
 
         db.add(User(id=USER_ID, tenant_id=TENANT_ID, email="demo@acme.com",
                     hashed_password=pwd_ctx.hash("demo1234"), full_name="Demo User",

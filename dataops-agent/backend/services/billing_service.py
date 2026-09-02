@@ -27,7 +27,9 @@ from typing import Optional
 
 from database import AsyncSessionLocal
 from models.all_models import Tenant
-from services.quota_service import PLANS, get_all_quota_statuses, get_quota_status
+from services.quota_service import (
+    PLANS, UnknownPlanError, get_all_quota_statuses, get_quota_status,
+)
 from sqlalchemy import select
 from services.tenant_context import tenant_scoped
 
@@ -46,10 +48,25 @@ class BillingService:
         return await get_quota_status(self.tenant_id, resource)
 
     async def get_plan(self) -> dict:
+        """Reports the tenant's real plan, or fails loudly if it is unknown.
+
+        Previously `r.scalar() or "starter"` with a `PLANS.get(plan,
+        PLANS["starter"])` fallback — the same silent-downgrade bug fixed in
+        quota_service._plan_limits(). After the 2026-09 tier rename that
+        default would have shown an unmigrated Enterprise tenant its own plan
+        name alongside Standard's limits, which is worse than an error because
+        it looks correct.
+        """
         async with AsyncSessionLocal() as db:
             r = await db.execute(select(Tenant.plan).where(Tenant.id == self.tenant_id))
-            plan = r.scalar() or "starter"
-        return {"plan": plan, "limits": PLANS.get(plan, PLANS["starter"])}
+            plan = r.scalar()
+        if plan not in PLANS:
+            raise UnknownPlanError(
+                f"Tenant {self.tenant_id} has plan {plan!r}, which is not a known "
+                f"tier ({sorted(PLANS)}). If this is a pre-2026-09 key, run "
+                f"migration c4e91a7d2f38."
+            )
+        return {"plan": plan, "limits": PLANS[plan]}
 
     async def change_plan(self, new_plan: str) -> dict:
         """Real today, but see the module docstring: this should become

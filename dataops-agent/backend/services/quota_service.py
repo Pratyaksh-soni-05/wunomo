@@ -9,37 +9,46 @@ query against data that already exists (LlmUsageEvent, PipelineRun,
 DataSource, User), not a separately-maintained counter that could drift
 from reality.
 
-QUOTA METRIC CHANGE (2026-08-31): the gated AI metric is now **turns**, not
-ai_credits. Old formula: a flat per-tenant monthly credit pool
-(input_tokens*1 + output_tokens*3, capped at 25k/100k/500k per tier). New
-formula:
+QUOTA MODEL (current, as of 2026-09-01)
 
-    monthly_turn_cap = turns_per_day_per_user * 30 * max(1, active_team_members)
+The enforced metric is **ai_credits**, scaled by team size:
+
+    monthly_credit_cap = credits_per_day_per_user * 30 * max(1, active_team_members)
 
 recalculated live on every check, so adding or removing a team member changes
-the effective cap immediately rather than at signup or plan-change time.
+the effective cap immediately rather than at signup or plan-change time. The
+team-size scaling is the durable part of the 2026-08-31 redesign; what changed
+back is only *which unit* is counted.
 
-Two reasons for the switch. First, "turns" is the unit actually sold to
-customers, so the gate now enforces the thing the pricing page promises rather
-than a derived proxy. Second, the flat pool did not scale with team size at
-all: a 1-person and a 10-person tenant on the same tier got the same budget.
+    HISTORY, because the git log alone will read as thrashing:
+    2026-08-31 switched the gate from ai_credits to **turns**, on the reasoning
+    that turns are what customers are sold. 2026-09-01 reversed that: turns are
+    now a customer-facing DISPLAY value derived from credits, and credits are
+    the enforcement metric again. The reversal was not a change of mind about
+    the pricing model — it is that deriving one from the other requires a
+    credits-per-turn multiplier, and that multiplier cannot currently be
+    measured (real sample size: 3 turns). Credits are directly measurable from
+    LlmUsageEvent today; turns are not convertible to a cost without the
+    missing factor. See GOTCHAS.md's "credits-per-turn conversion is two
+    factors" entry for the full data.
 
-A turn is one unit of user-initiated agent work:
-    count(ChatMessage WHERE role='user') + count(TaskStep)
-both for the current calendar month, both tenant-scoped.
+    Consequence worth knowing: the customer-facing turns display is NOT
+    implemented, because it needs the same missing multiplier. Shipping a
+    turns number derived from an invented factor would look grounded while
+    being fabricated.
 
-**Do not count LlmUsageEvent rows as turns.** That was the obvious-looking
-implementation and it is wrong by a large, variable factor: one row is written
-per *LLM call*, and a single user turn costs one call per agent-graph iteration
+**Do not count LlmUsageEvent rows as turns.** This still holds and is the
+reason the display cannot be faked from existing data: one row is written per
+*LLM call*, and a single user turn costs one call per agent-graph iteration
 (agent -> tools -> agent, up to MAX_AGENT_ITERATIONS) plus a second row whenever
-the primary->fallback path fires. A tool-heavy turn can be 5-10 rows. Gating 25
-turns/day against that count would block a real customer after roughly three
-conversations.
+the primary->fallback path fires. Measured on real traffic, a chat turn averaged
+4 LLM calls, but across only 3 turns.
 
-credits_for_event() is kept below, but is now an internal cost/overage
-calculation only — it no longer gates anything.
+The `turns` resource remains queryable via get_quota_status("turns") for
+reporting, and _current_usage() still counts it correctly — it simply does not
+gate anything.
 
-Historical note on the old metric: credits = input_tokens * 1 + output_tokens * 3. The
+The credit formula: credits = input_tokens * 1 + output_tokens * 3. The
 x3 weight on output tokens approximates real provider cost skew
 (completion tokens cost more than prompt tokens industry-wide across
 Gemini/Groq/every major provider). Gemini's "thinking"/reasoning tokens
@@ -84,53 +93,79 @@ from services.tenant_context import with_tenant_context
 
 WARNING_THRESHOLD = 0.8
 
-# The turns/day rate is sold per user per day; the enforced pool is monthly.
+# The per-user daily rate is what gets sold; the enforced pool is monthly.
 # A flat 30 rather than the real length of the current month, deliberately: the
-# cap should not silently shrink by ~10% in February, and a customer told "25
-# turns/day" reading a monthly number expects 750, not 700.
+# cap should not silently shrink by ~10% in February.
 DAYS_PER_BILLING_MONTH = 30
 
-# DB plan keys are unchanged (starter/growth/scale) — the customer-facing names
-# differ, but renaming these would be a data migration across every existing
-# tenant row for no functional gain.
+#   ⚠️  credits_per_day_per_user IS A PLACEHOLDER. DO NOT TREAT AS CALIBRATED.
+#
+# Every value below is simply the tier's OLD flat ai_credits_per_month divided
+# by 30 — a stand-in chosen so the migration is behaviour-preserving for a
+# single-seat tenant, not a number derived from anything real. See GOTCHAS.md's
+# "credits-per-turn conversion is two factors" entry: credits-per-LLM-call is
+# grounded in 120 real events, but calls-per-turn has a sample size of 3, so no
+# honest per-tier rate can be computed until dogfooding supplies the multiplier.
+#
+# The consequence of the placeholder: a MULTI-seat tenant now gets a larger pool
+# than it did under the old flat cap (rate × 30 × seats rather than a fixed
+# total). That is the intended direction of the redesign, but its magnitude is
+# unvalidated — a 5-seat Standard tenant gets 5× what it had yesterday.
 PLANS: dict[str, dict[str, Optional[int]]] = {
-    # Standard + Starter Plus share one enforcement tier; the higher of the two
-    # caps is used, so neither is under-served.
-    "starter": {
-        "turns_per_day_per_user": 25,
+    "standard": {
+        "credits_per_day_per_user": 833,      # TODO placeholder: 25,000 / 30
         "pipeline_runs_per_month": 100,
         "max_data_sources": 3,
         "max_team_members": 8,
     },
-    "growth": {  # Premium
-        "turns_per_day_per_user": 30,
+    # New sign-up-only tier: no existing tenant migrates into it (verified live —
+    # 0 rows). Its rate deliberately matches `standard` for now rather than
+    # inventing an intermediate number; it is the tier most in need of a real
+    # figure once dogfooding data exists.
+    "starter_plus": {
+        "credits_per_day_per_user": 833,      # TODO placeholder: same as standard
+        "pipeline_runs_per_month": 100,
+        "max_data_sources": 3,
+        "max_team_members": 8,
+    },
+    "premium": {
+        "credits_per_day_per_user": 3_333,    # TODO placeholder: 100,000 / 30
         "pipeline_runs_per_month": 1_000,
         "max_data_sources": 15,
         "max_team_members": 15,
     },
-    "scale": {  # Enterprise
-        "turns_per_day_per_user": 35,
+    "enterprise": {
+        "credits_per_day_per_user": 16_667,   # TODO placeholder: 500,000 / 30
         "pipeline_runs_per_month": 10_000,
         "max_data_sources": None,  # unlimited
-        # Unlimited on purpose. Enterprise scales *price* per seat beyond 25
-        # (the per-extra-seat rate), it does not hard-block on team size — the
-        # old cap of 25 directly contradicted that. Note the turn formula uses
-        # the ACTUAL active member count, never this cap, so "unlimited" here
-        # does not make the turn pool unbounded.
+        # Unlimited on purpose. Enterprise scales *price* per seat beyond 25,
+        # it does not hard-block on team size. The credit formula uses the
+        # ACTUAL active member count, never this cap, so "unlimited" here does
+        # not make the credit pool unbounded.
         "max_team_members": None,
     },
 }
 
-# Resources whose cap is a plain per-tier constant. `turns` is deliberately
-# absent: its cap is a function of live team size, so it is computed in
-# _resource_limit() rather than looked up here.
+# Maps every pre-2026-09 plan key to its replacement. Kept in code, not only in
+# the migration, because `Tenant.plan` is a free-text VARCHAR with no FK or
+# CHECK constraint — a row can still arrive carrying an old value (a restored
+# backup, a manually-provisioned tenant, an unmigrated replica), and
+# `_plan_limits` uses this to say so precisely instead of guessing.
+LEGACY_PLAN_KEYS = {
+    "starter": "standard",
+    "growth": "premium",
+    "scale": "enterprise",
+}
+
+# Resources whose cap is a plain per-tier constant. `ai_credits` is deliberately
+# absent: its cap is a function of live team size, computed in _resource_limit().
 _STATIC_LIMIT_KEY = {
     "pipeline_runs": "pipeline_runs_per_month",
     "data_sources": "max_data_sources",
     "team_members": "max_team_members",
 }
 
-QUOTA_RESOURCES = ("turns", "pipeline_runs", "data_sources", "team_members")
+QUOTA_RESOURCES = ("ai_credits", "pipeline_runs", "data_sources", "team_members")
 
 
 def credits_for_event(input_tokens: Optional[int], output_tokens: Optional[int]) -> int:
@@ -143,6 +178,15 @@ def _month_start() -> datetime:
 
 
 async def _current_usage(db, tenant_id: str, resource: str) -> int:
+    if resource == "ai_credits":
+        r = await db.execute(
+            select(LlmUsageEvent.input_tokens, LlmUsageEvent.output_tokens).where(
+                LlmUsageEvent.tenant_id == tenant_id,
+                LlmUsageEvent.created_at >= _month_start(),
+            )
+        )
+        return sum(credits_for_event(inp, out) for inp, out in r.all())
+
     if resource == "turns":
         # A turn is one unit of user-initiated agent work. Two sources, summed:
         # a chat message the user actually sent, and a task step (tasks are the
@@ -201,14 +245,42 @@ async def _current_usage(db, tenant_id: str, resource: str) -> int:
     raise ValueError(f"Unknown quota resource '{resource}'")
 
 
+class UnknownPlanError(RuntimeError):
+    """A tenant carries a plan key this service has no limits for."""
+
+
 async def _plan_limits(db, tenant_id: str) -> dict:
+    """Fails loudly on an unrecognised plan rather than silently applying the
+    cheapest tier's limits.
+
+    This used to be `PLANS.get(plan, PLANS["starter"])` with an `or "starter"`
+    fallback. After the 2026-09 rename (starter/growth/scale ->
+    standard/starter_plus/premium/enterprise) that default became actively
+    dangerous: an Enterprise tenant whose row had not been migrated would have
+    been silently downgraded to Standard's limits and started getting 402s,
+    with nothing anywhere saying why. `Tenant.plan` is free-text VARCHAR with no
+    FK or CHECK, so an unmigrated value is a real possibility (restored backup,
+    manual provisioning, a replica that missed the migration) — it must surface
+    as an error naming the tenant, not as a quiet cap change.
+    """
     r = await db.execute(select(Tenant.plan).where(Tenant.id == tenant_id))
-    plan = r.scalar() or "starter"
-    return PLANS.get(plan, PLANS["starter"])
+    plan = r.scalar()
+    if plan in PLANS:
+        return PLANS[plan]
+    if plan in LEGACY_PLAN_KEYS:
+        raise UnknownPlanError(
+            f"Tenant {tenant_id} still has the pre-2026-09 plan key {plan!r}; "
+            f"it should have been migrated to {LEGACY_PLAN_KEYS[plan]!r}. Run "
+            f"the tier-rename migration (c4e91a7d2f38) against this database."
+        )
+    raise UnknownPlanError(
+        f"Tenant {tenant_id} has unknown plan {plan!r}. Known plans: "
+        f"{sorted(PLANS)}. Refusing to guess a quota tier."
+    )
 
 
-async def monthly_turn_cap(db, tenant_id: str) -> int:
-    """turns_per_day_per_user * 30 * max(1, active_team_members).
+async def monthly_credit_cap(db, tenant_id: str) -> int:
+    """credits_per_day_per_user * 30 * max(1, active_team_members).
 
     Computed live on every quota check rather than stored, which is the whole
     point: inviting a team member raises the tenant's ceiling immediately, and
@@ -222,17 +294,27 @@ async def monthly_turn_cap(db, tenant_id: str) -> int:
     every AI action for a tenant that has done nothing wrong.
 
     Note it uses the ACTUAL member count, never the tier's max_team_members —
-    so Enterprise's unlimited seat cap does not make its turn pool unbounded.
+    so Enterprise's unlimited seat cap does not make its credit pool unbounded.
+
+    The per-day rate is a documented placeholder (see PLANS above); the
+    *shape* of this formula is the calibrated part, the magnitude is not.
     """
     limits = await _plan_limits(db, tenant_id)
     members = await _current_usage(db, tenant_id, "team_members")
-    return limits["turns_per_day_per_user"] * DAYS_PER_BILLING_MONTH * max(1, members)
+    return limits["credits_per_day_per_user"] * DAYS_PER_BILLING_MONTH * max(1, members)
 
 
 async def _resource_limit(db, tenant_id: str, resource: str) -> Optional[int]:
     """The cap for one resource. None means unlimited."""
+    if resource == "ai_credits":
+        return await monthly_credit_cap(db, tenant_id)
     if resource == "turns":
-        return await monthly_turn_cap(db, tenant_id)
+        # Informational only: None means "no limit", so status is always "ok"
+        # and `used` carries the real turn count. Turns are not gated — see the
+        # module docstring — but the count stays queryable so the eventual
+        # customer-facing display has a real number to render, and so the
+        # turn-counting logic keeps its test coverage rather than rotting.
+        return None
     if resource not in _STATIC_LIMIT_KEY:
         raise ValueError(f"Unknown quota resource '{resource}'")
     limits = await _plan_limits(db, tenant_id)

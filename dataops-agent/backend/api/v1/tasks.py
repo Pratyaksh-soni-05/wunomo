@@ -134,7 +134,7 @@ def _expiry_reason(task: Task) -> str | None:
 
 
 def _quota_paused_reason(task: Task, steps: list[TaskStep]) -> str | None:
-    """Q4: turn-quota exhaustion pauses (resumable) rather than fails -- names
+    """Q4: credit exhaustion pauses (resumable) rather than fails -- names
     the step waiting on quota, distinct from every other pause reason."""
     if task.status != TaskStatus.PAUSED_QUOTA_EXCEEDED:
         return None
@@ -143,10 +143,10 @@ def _quota_paused_reason(task: Task, steps: list[TaskStep]) -> str | None:
         None,
     )
     if blocked is None:
-        return "Paused: tenant turn quota exhausted. Resumable once quota is available again."
+        return "Paused: tenant AI-credit quota exhausted. Resumable once quota is available again."
     return (
         f'Step {blocked.step_index} ("{blocked.description}") is paused after attempt {blocked.attempt_count} '
-        f'because the tenant\'s turn quota is exhausted. Resumable once quota is available again.'
+        f'because the tenant\'s AI-credit quota is exhausted. Resumable once quota is available again.'
     )
 
 
@@ -286,7 +286,7 @@ async def get_task(task_id: str, current_user: dict = Depends(get_current_user))
 
 
 @router.post("/")
-async def create_task(body: CreateTaskRequest, current_user: dict = Depends(enforce_quota("turns"))):
+async def create_task(body: CreateTaskRequest, current_user: dict = Depends(enforce_quota("ai_credits"))):
     """Generates and persists a real plan. Quota is checked (via the
     dependency above) before the LLM call ever runs, same order as chat.
     On any generation/validation failure, nothing is persisted -- a clean
