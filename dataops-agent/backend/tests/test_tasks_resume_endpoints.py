@@ -41,7 +41,7 @@ async def _member(tenant_id, role):
 async def _create_task_with_blocked_step(client, owner_token, monkeypatch, goal="approval api test"):
     """A real approved sync_profile_quality plan whose sole step
     (sync_source) is medium-risk and blocks on real approval."""
-    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None):
+    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None, agent_id=None):
         return [{
             "description": "sync a source", "tool_name": "sync_source",
             "tool_args": {"source_id": "src-1"}, "depends_on_step_index": None,
@@ -130,7 +130,7 @@ async def test_resume_a_nonexistent_task_is_404(client):
 
 @pytest.mark.asyncio
 async def test_resume_a_task_not_awaiting_approval_is_409(client, monkeypatch):
-    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None):
+    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None, agent_id=None):
         return [{"description": "x", "tool_name": "get_system_health", "tool_args": {}, "depends_on_step_index": None}]
 
     monkeypatch.setattr(tasks_module, "generate_plan", _fake_plan)

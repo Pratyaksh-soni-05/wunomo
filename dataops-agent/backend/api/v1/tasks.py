@@ -20,7 +20,7 @@ from sqlalchemy import select
 from database import AsyncSessionLocal
 from models.all_models import AgentInstance, AgentInstanceStatus, Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus
 from modules.orchestration.task_planner import (
-    PlanGenerationError, PlanValidationError, generate_plan, validate_step_plan,
+    PlanGenerationError, PlanValidationError, generate_plan, validate_step_plan, validate_step_plan_scope,
 )
 from services.rbac import has_permission
 
@@ -317,30 +317,36 @@ async def create_task(body: CreateTaskRequest, current_user: dict = Depends(enfo
     # is expected (see generate_plan()'s docstring), not a bug.
     task_id = str(uuid.uuid4())
 
+    # Wunomo Projects Phase 1: resolve the tenant's real agent BEFORE
+    # planning, not after -- generate_plan() uses it to list only the
+    # agent's in-scope sources in the prompt and to reject a plan that
+    # already names an out-of-scope source (both a cost optimisation
+    # only, per CLAUDE.md's rule; see validate_step_plan_scope's own
+    # docstring). task_executor's real enforcement (_caller_still_
+    # authorized, the pre-_call_tool() check) is also keyed off this
+    # same agent_id on the persisted Task row below -- without either,
+    # every task keeps agent_id=None and both stay permanently inert.
+    # Same "oldest ACTIVE agent for the tenant" convention chat.py's own
+    # resolution uses, for the same reason: exactly one agent exists per
+    # tenant until Phase 1's hiring ships.
+    async with AsyncSessionLocal() as agent_db:
+        r = await agent_db.execute(select(AgentInstance).where(
+            AgentInstance.tenant_id == tenant_id, AgentInstance.status == AgentInstanceStatus.ACTIVE,
+        ).order_by(AgentInstance.created_at.asc()).limit(1))
+        agent_row = r.scalar_one_or_none()
+    agent_id = agent_row.id if agent_row is not None else None
+
     try:
-        steps = await generate_plan(tenant_id, user_id, body.goal, task_shape, task_id=task_id)
+        steps = await generate_plan(tenant_id, user_id, body.goal, task_shape, task_id=task_id, agent_id=agent_id)
     except (PlanGenerationError, PlanValidationError) as exc:
         raise HTTPException(status_code=422, detail=f"Could not generate a valid plan: {exc}")
 
     async with AsyncSessionLocal() as db:
-        # Wunomo Projects Phase 1: resolve the tenant's real agent so
-        # task_executor's scope enforcement (_caller_still_authorized,
-        # the pre-_call_tool() check) has a real agent_id to check
-        # against -- without this every task keeps agent_id=None and
-        # that enforcement stays a permanent no-op, same reasoning as
-        # api/v1/chat.py's own agent_id resolution. Same "oldest ACTIVE
-        # agent for the tenant" convention, for the same reason: exactly
-        # one agent exists per tenant until Phase 1's hiring ships.
-        r = await db.execute(select(AgentInstance).where(
-            AgentInstance.tenant_id == tenant_id, AgentInstance.status == AgentInstanceStatus.ACTIVE,
-        ).order_by(AgentInstance.created_at.asc()).limit(1))
-        agent_row = r.scalar_one_or_none()
-
         task = Task(
             id=task_id,
             tenant_id=tenant_id,
             user_id=user_id,
-            agent_id=agent_row.id if agent_row is not None else None,
+            agent_id=agent_id,
             goal=body.goal,
             task_shape=task_shape,
             status=TaskStatus.DRAFT_PLAN,
@@ -411,6 +417,13 @@ async def edit_task_steps(task_id: str, body: EditStepsRequest, current_user: di
 
         try:
             validate_step_plan(task.task_shape, incoming_steps)
+            if task.agent_id is not None:
+                # Cost optimisation only, same as plan generation's own
+                # use of this check (see validate_step_plan_scope's
+                # docstring) -- a human editing in a source the agent
+                # isn't scoped to is just as much "a plan that cannot
+                # succeed" as the planner proposing one.
+                await validate_step_plan_scope(db, task.agent_id, incoming_steps)
         except PlanValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 

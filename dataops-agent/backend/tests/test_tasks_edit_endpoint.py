@@ -35,7 +35,7 @@ def _real_plan():
 
 
 async def _create_task(client, token, monkeypatch, goal="edit test goal"):
-    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None):
+    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None, agent_id=None):
         return _real_plan()
 
     monkeypatch.setattr(tasks_module, "generate_plan", _fake_plan)

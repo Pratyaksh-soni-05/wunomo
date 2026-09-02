@@ -26,7 +26,7 @@ async def _register(client, prefix="taskadvance"):
 
 
 async def _create_and_approve_task(client, token, monkeypatch, goal="advance test goal"):
-    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None):
+    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None, agent_id=None):
         return [{
             "description": "check health", "tool_name": "get_system_health",
             "tool_args": {}, "depends_on_step_index": None,
@@ -64,7 +64,7 @@ async def test_advance_resolves_one_step_and_returns_the_outcome(client, monkeyp
 
 @pytest.mark.asyncio
 async def test_advance_on_a_task_still_in_draft_plan_is_409(client, monkeypatch):
-    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None):
+    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None, agent_id=None):
         return [{"description": "x", "tool_name": "get_system_health", "tool_args": {}, "depends_on_step_index": None}]
 
     monkeypatch.setattr(tasks_module, "generate_plan", _fake_plan)

@@ -28,7 +28,7 @@ async def _register(client, prefix="taskapprove"):
 
 
 async def _create_task(client, token, monkeypatch, goal="approve test goal"):
-    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None):
+    async def _fake_plan(tenant_id, user_id, goal, task_shape, task_id=None, agent_id=None):
         return [{
             "description": "check health", "tool_name": "get_system_health",
             "tool_args": {}, "depends_on_step_index": None,

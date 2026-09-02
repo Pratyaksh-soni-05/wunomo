@@ -12,13 +12,31 @@ api/v1/tasks.py's PATCH /tasks/{id}/steps calls on a human-edited plan --
 one function, not two independently-maintained copies that could drift,
 so a human editing a plan is held to exactly the rules the planner itself
 is bound by.
+
+validate_step_plan_scope() (Wunomo Projects Phase 1) is a SEPARATE
+function, not folded into validate_step_plan() above, deliberately: it
+needs a real DB read (an agent's current agent_sources) that the
+existing, widely-unit-tested pure validate_step_plan() never has and
+must not be forced to acquire. Per CLAUDE.md's explicit rule, this is a
+COST OPTIMISATION ONLY, never the security boundary -- a step's
+tool_args are frequently still an unresolved placeholder at plan time
+(the real value often isn't known until an earlier discovery step
+actually runs, at execution time), so this can only ever catch the
+narrower case where a real, resolvable id was already written into the
+plan. The actual guarantee lives entirely post-resolution, at
+_caller_still_authorized/the pre-_call_tool() check in
+task_executor.py -- never treat a plan that passed this check as proof
+of anything about what the agent is authorized to touch.
 """
 import json
 
 from agent.tools import ALL_TOOLS
+from database import AsyncSessionLocal
 from langchain_core.messages import SystemMessage, HumanMessage
-from models.all_models import TaskShape
+from models.all_models import AgentSource, DataSource, TaskShape
+from services.agent_scope import agent_scope_denial_reason
 from services.llm_service import invoke_llm
+from sqlalchemy import select
 
 # tenant_id/user_id/session_id/task_id are always force-injected server-side
 # at execution time (agent_node's existing convention in dataops_agent.py,
@@ -128,17 +146,90 @@ def validate_step_plan(task_shape: TaskShape, steps: list) -> None:
             raise PlanValidationError(f"Step {i}: missing a human-readable description.")
 
 
-def _build_prompt(goal: str, task_shape: TaskShape) -> str:
+async def validate_step_plan_scope(db, agent_id: str | None, steps: list) -> None:
+    """Cost-optimisation-only companion to validate_step_plan() (see
+    module docstring's caveat -- this is NOT the security boundary).
+    Rejects a step that already names a real, resolved id outside the
+    calling agent's scope, using the exact same resolution table
+    task_executor.py's real enforcement checks use
+    (services/agent_scope.py), so a plan that's rejected here would also
+    have been denied for real at execution time -- never a stricter or
+    looser notion of scope than the one that actually matters.
+
+    agent_id=None is a no-op, matching every other scope-check call
+    site's convention: no agent context means nothing to check. Most
+    steps have nothing concrete to check either way -- a step's
+    tool_args are frequently still a placeholder at plan time, and
+    agent_scope_denial_reason() correctly treats that as nothing to
+    check yet, not as allowed forever."""
+    if agent_id is None:
+        return
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        reason = await agent_scope_denial_reason(db, agent_id, step.get("tool_name"), step.get("tool_args") or {})
+        if reason is not None:
+            raise PlanValidationError(f"Step {i}: {reason} This plan cannot succeed as written.")
+
+
+async def _in_scope_sources_for_prompt(agent_id: str | None) -> list[dict] | None:
+    """Real (id, name) pairs currently in `agent_id`'s scope, for
+    _build_prompt() to list -- COST OPTIMISATION ONLY (see module
+    docstring): telling the planner what it can actually touch makes it
+    less likely to write a step that can never pass the real,
+    post-resolution scope check, but nothing here is a security promise,
+    and nothing stops a plan naming a source outside this list from
+    still being *attempted* (validate_step_plan_scope is what catches
+    that, when it can). Returns None (not an empty list) when agent_id
+    is absent, so _build_prompt can tell "no agent context" apart from
+    "a real agent with zero sources assigned" and word the prompt
+    accordingly."""
+    if agent_id is None:
+        return None
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(DataSource.id, DataSource.name)
+            .join(AgentSource, AgentSource.source_id == DataSource.id)
+            .where(AgentSource.agent_id == agent_id)
+        )
+        return [{"id": rid, "name": name} for rid, name in r.all()]
+
+
+def _build_prompt(goal: str, task_shape: TaskShape, in_scope_sources: list[dict] | None = None) -> str:
     allowed_tools = TASK_SHAPE_ALLOWED_TOOLS[task_shape]
     tool_lines = []
     for name in allowed_tools:
         tool_obj = tool_by_name(name)
         schema = tool_schema_for_prompt(name)
         tool_lines.append(f"- {name}: {tool_obj.description}\n  arguments (JSON schema): {json.dumps(schema)}")
+
+    # Wunomo Projects Phase 1 -- cost optimisation only (see module
+    # docstring): in_scope_sources is None when there's no agent context
+    # (say nothing, exactly pre-Phase-1 behavior); an empty list means a
+    # real agent with zero sources assigned, worth saying explicitly so
+    # the planner doesn't waste steps assuming it can reach something it
+    # can't; a non-empty list names what it can actually reach.
+    scope_section = ""
+    if in_scope_sources is not None:
+        if in_scope_sources:
+            names = ", ".join(f'"{s["name"]}"' for s in in_scope_sources)
+            scope_section = (
+                f"\n\nThis agent's assigned data sources are: {names}. Prefer these "
+                "when the goal doesn't name a specific source, and don't plan a step "
+                "that can only succeed against a source outside this list."
+            )
+        else:
+            scope_section = (
+                "\n\nThis agent has NO data sources assigned to it yet. Any step that "
+                "needs a specific source cannot succeed -- only plan steps that don't "
+                "require one (discovery/listing tools), or that the goal cannot avoid."
+            )
+
     return (
         f"Goal: {goal}\n\n"
         f'This task is scoped to the "{task_shape.value}" shape. You may ONLY use these tools:\n'
         + "\n".join(tool_lines)
+        + scope_section
         + "\n\nProduce a JSON array of steps, in execution order, to achieve the goal. "
         'Each step is an object: {"description": "<one sentence, human-readable>", '
         '"tool_name": "<one of the tools above>", "tool_args": {<only the arguments '
@@ -152,6 +243,7 @@ def _build_prompt(goal: str, task_shape: TaskShape) -> str:
 
 async def generate_plan(
     tenant_id: str, user_id: str, goal: str, task_shape: TaskShape, task_id: str | None = None,
+    agent_id: str | None = None,
 ) -> list:
     """Real LLM call -- the caller (api/v1/tasks.py) is responsible for
     checking quota before calling this. One automatic corrective retry on
@@ -170,12 +262,18 @@ async def generate_plan(
     written will carry a task_id whose Task was never persisted -- see
     api/v1/tasks.py's create_task(), which discards the plan entirely on
     that path. That's expected, not a bug: the spend was real even though
-    the task never was."""
+    the task never was.
+
+    agent_id is optional (Wunomo Projects Phase 1) and, same as task_id,
+    purely a cost optimisation here -- see validate_step_plan_scope's own
+    docstring for why this can never be the security boundary. Omitted,
+    this behaves exactly as before Phase 1."""
     system_prompt = (
         "You are AXIOM's task planner. You output ONLY a JSON array matching "
         "the requested schema -- no prose, no markdown fences, no explanation."
     )
-    user_message = _build_prompt(goal, task_shape)
+    in_scope_sources = await _in_scope_sources_for_prompt(agent_id)
+    user_message = _build_prompt(goal, task_shape, in_scope_sources=in_scope_sources)
     last_error = None
 
     for attempt in range(_MAX_GENERATION_ATTEMPTS):
@@ -207,6 +305,9 @@ async def generate_plan(
 
         try:
             validate_step_plan(task_shape, steps)
+            if agent_id is not None:
+                async with AsyncSessionLocal() as db:
+                    await validate_step_plan_scope(db, agent_id, steps)
         except PlanValidationError as exc:
             last_error = str(exc)
             continue
