@@ -149,9 +149,14 @@ async def _resolve_source_id(db, kind: str, value: str) -> str | None:
     source (e.g. an incident with pipeline_id=NULL, or a pipeline with
     source_id=NULL -- both real, nullable columns) -- either way there is
     nothing to check scope against, which agent_scope_denial_reason
-    treats as "allowed," not "denied.\""""
+    treats as "allowed," not "denied." A nonexistent id is deliberately
+    NOT a scope denial for any kind, "source" included: a bogus/already-
+    deleted id is a domain error the tool itself will surface (e.g.
+    "Source not found"), not something the scope gate should intercept
+    and mislabel as a permission problem."""
     if kind == "source":
-        return value
+        source = await db.get(DataSource, value)
+        return source.id if source else None
     if kind == "pipeline":
         pipeline = await db.get(Pipeline, value)
         return pipeline.source_id if pipeline else None

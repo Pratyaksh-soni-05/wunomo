@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from database import AsyncSessionLocal
-from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus
+from models.all_models import AgentInstance, AgentInstanceStatus, Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus
 from modules.orchestration.task_planner import (
     PlanGenerationError, PlanValidationError, generate_plan, validate_step_plan,
 )
@@ -323,10 +323,24 @@ async def create_task(body: CreateTaskRequest, current_user: dict = Depends(enfo
         raise HTTPException(status_code=422, detail=f"Could not generate a valid plan: {exc}")
 
     async with AsyncSessionLocal() as db:
+        # Wunomo Projects Phase 1: resolve the tenant's real agent so
+        # task_executor's scope enforcement (_caller_still_authorized,
+        # the pre-_call_tool() check) has a real agent_id to check
+        # against -- without this every task keeps agent_id=None and
+        # that enforcement stays a permanent no-op, same reasoning as
+        # api/v1/chat.py's own agent_id resolution. Same "oldest ACTIVE
+        # agent for the tenant" convention, for the same reason: exactly
+        # one agent exists per tenant until Phase 1's hiring ships.
+        r = await db.execute(select(AgentInstance).where(
+            AgentInstance.tenant_id == tenant_id, AgentInstance.status == AgentInstanceStatus.ACTIVE,
+        ).order_by(AgentInstance.created_at.asc()).limit(1))
+        agent_row = r.scalar_one_or_none()
+
         task = Task(
             id=task_id,
             tenant_id=tenant_id,
             user_id=user_id,
+            agent_id=agent_row.id if agent_row is not None else None,
             goal=body.goal,
             task_shape=task_shape,
             status=TaskStatus.DRAFT_PLAN,

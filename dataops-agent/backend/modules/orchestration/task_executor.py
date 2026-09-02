@@ -71,6 +71,7 @@ from models.all_models import (
     ApprovalRequest, ApprovalStatus, RunStatus, Task, TaskStatus, TaskStep,
     TaskStepSource, TaskStepStatus, User,
 )
+from services.agent_scope import agent_scope_denial_reason
 from services.llm_service import invoke_llm
 from services.quota_service import get_quota_status
 from services.rbac import TOOL_CAPABILITIES, has_permission
@@ -102,12 +103,28 @@ _VERIFIABLE_TOOLS = {"run_pipeline"}
 log = structlog.get_logger()
 
 
-async def _caller_still_authorized(db, task: Task, tool_name: str) -> tuple[bool, str | None]:
+async def _caller_still_authorized(db, task: Task, tool_name: str, tool_args: dict) -> tuple[bool, str | None]:
     """Fresh, per-step re-read of the task's initiating user's
-    is_active/role -- never trusts anything cached on Task (there is
+    is_active/role, AND (Wunomo Projects Phase 1) the calling agent's
+    current scope -- never trusts anything cached on Task (there is
     nothing to trust; Task carries no role column by design, see
     amendment 3). Mirrors get_current_user()'s own per-request re-read
-    for REST, applied here at the step-execution boundary instead."""
+    for REST, applied here at the step-execution boundary instead. An
+    agent can be re-scoped mid-task exactly as a user can be demoted;
+    this re-checks both, the same way, at the same call site.
+
+    The scope half only ever has something real to check when tool_args
+    already holds a resolved value, not a planner/human-edit placeholder
+    -- agent_scope_denial_reason() treats an unresolved/absent value as
+    nothing to check yet, not as allowed forever. That's correct here:
+    the unconditional backstop that always sees fully-resolved args is
+    the separate scope check immediately before _call_tool() in
+    execute_next_step()'s attempt loop below -- "this is where the
+    guarantee lives" per CLAUDE.md's plan-time-vs-enforcement split, not
+    this function. This function's own scope check earns its keep on a
+    RESUME (a step whose args were already resolved on an earlier call,
+    e.g. while waiting on approval) where the agent's scope may have
+    changed since resolution happened."""
     r = await db.execute(select(User.is_active, User.role).where(User.id == task.user_id))
     row = r.first()
     if row is None or not row.is_active:
@@ -115,6 +132,9 @@ async def _caller_still_authorized(db, task: Task, tool_name: str) -> tuple[bool
     capability = TOOL_CAPABILITIES.get(tool_name)
     if capability is None or not has_permission(row.role, capability):
         return False, f"the initiating user's role ('{row.role}') no longer has permission to use '{tool_name}'"
+    scope_denial = await agent_scope_denial_reason(db, task.agent_id, tool_name, tool_args)
+    if scope_denial is not None:
+        return False, scope_denial
     return True, None
 
 
@@ -796,7 +816,7 @@ async def execute_next_step(task_id: str) -> dict:
             )
             return {"outcome": "task_completed"}
 
-        authorized, denial_reason = await _caller_still_authorized(db, task, step.tool_name)
+        authorized, denial_reason = await _caller_still_authorized(db, task, step.tool_name, step.tool_args or {})
         if not authorized:
             step.attempt_count += 1
             step.status = TaskStepStatus.FAILED
@@ -889,7 +909,7 @@ async def execute_next_step(task_id: str) -> dict:
 
         step.status = TaskStepStatus.RUNNING
         step.started_at = step.started_at or datetime.utcnow()
-        tenant_id, task_user_id = task.tenant_id, task.user_id
+        tenant_id, task_user_id, agent_id = task.tenant_id, task.user_id, task.agent_id
         tool_name, tool_args, step_id = step.tool_name, dict(step.tool_args or {}), step.id
         description = step.description
         # Resuming after a credit-exhaustion pause continues the SAME
@@ -917,6 +937,37 @@ async def execute_next_step(task_id: str) -> dict:
     quota_paused_attempt = None
     current_args = tool_args
     for attempt in range(starting_attempt, MAX_ATTEMPTS_PER_STEP + 1):
+        # Scope re-check (Wunomo Projects Phase 1), immediately before the
+        # real tool call -- this is THE enforcement point, not a cost
+        # optimisation (see CLAUDE.md's plan-time-vs-enforcement split):
+        # current_args is always fully resolved by the time execution
+        # reaches here, whichever tier resolved it (Tier 1 discovery-pool
+        # match, Tier 2 LLM-adapt, or HUMAN_EDITED). Re-checked on every
+        # attempt, not just the first, because Tier 2 adaptation can
+        # redirect current_args at a different, out-of-scope entity
+        # between attempts -- a real, current id always exists here, so
+        # there's no "placeholder, nothing to check yet" case to worry
+        # about the way _caller_still_authorized's own scope check does.
+        async with AsyncSessionLocal() as scope_db:
+            scope_denial = await agent_scope_denial_reason(scope_db, agent_id, tool_name, current_args)
+        if scope_denial is not None:
+            async with AsyncSessionLocal() as db:
+                r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
+                step = r.scalar_one()
+                step.attempt_count = attempt
+                step.status = TaskStepStatus.FAILED
+                step.error_message = f"Blocked: {scope_denial}"
+                step.completed_at = datetime.utcnow()
+
+                r = await db.execute(select(Task).where(Task.id == task_id))
+                task = r.scalar_one()
+                _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
+                await db.commit()
+            return {
+                "outcome": "blocked_permission", "step_id": step_id,
+                "attempt_count": attempt, "reason": scope_denial,
+            }
+
         try:
             result = await _call_tool(tenant_id, tool_name, current_args, user_id=task_user_id, task_id=task_id)
         except Exception as exc:
