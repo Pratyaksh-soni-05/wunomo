@@ -39,16 +39,27 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     from database import AsyncSessionLocal
-    from models.all_models import User
+    from models.all_models import Tenant, User
     from sqlalchemy import select
     async with AsyncSessionLocal() as db:
-        r = await db.execute(select(User.is_active, User.role).where(User.id == payload.get("sub")))
+        # `plan` is joined onto the query that already runs here rather than
+        # fetched separately: this read happens once per request regardless, so
+        # carrying the tenant's tier costs a join instead of a second round
+        # trip. It is not in the JWT deliberately — a plan change would then
+        # not take effect until the token expired, the same staleness class as
+        # the role gap this function exists to close.
+        r = await db.execute(
+            select(User.is_active, User.role, Tenant.plan)
+            .join(Tenant, User.tenant_id == Tenant.id)
+            .where(User.id == payload.get("sub"))
+        )
         row = r.first()
 
     if row is None or not row.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     payload["role"] = row.role
+    payload["plan"] = row.plan
     return payload
 
 
