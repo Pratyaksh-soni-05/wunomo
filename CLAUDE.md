@@ -94,6 +94,15 @@ npm run build                              # production build — also catches E
   same service-layer function (`modules/*`, `services/*.py`) the REST endpoint itself calls,
   in-process.
 - **One fix or feature per commit**, with the reasoning in the message body, not just the diff.
+- **Plan-time scope checking (Wunomo Projects) is a cost optimisation, not a security
+  boundary.** `validate_step_plan`/planner-side checks against an agent's `agent_sources`
+  scope exist only to reject a plan that can't succeed before it burns tokens or reaches a
+  human for approval. The actual guarantee — that an agent can only ever touch a source it's
+  scoped to, intersected with the caller's role permission — lives entirely post-resolution,
+  at `_call_tool` and `_caller_still_authorized` in `task_executor.py`, because a step's
+  `source_id` is frequently still a placeholder (e.g. `"<discovered>"`) at plan-validation
+  time and only becomes a real value at execution. Never treat a plan that passed
+  `validate_step_plan` as proof an agent is authorized for the sources it references.
 
 ## Hard rules — do not regress these
 
