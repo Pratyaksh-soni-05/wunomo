@@ -288,12 +288,38 @@ async def test_adding_a_member_can_lift_a_tenant_back_out_of_exceeded():
 @pytest.mark.asyncio
 async def test_downgrade_does_not_delete_usage_it_only_blocks_new_usage():
     """Grandfathering: dropping to a smaller tier must not erase or retroactively
-    invalidate existing usage — it only means the next action is refused."""
-    tenant_id = await _make_tenant("enterprise", members=2)
-    await _seed_credits(tenant_id, 400_000)
+    invalidate existing usage — it only means the next action is refused.
+
+    Every amount here is derived from the tiers' own caps rather than written as
+    a literal. An earlier version seeded fixed numbers (400k / 700k) picked to
+    straddle the then-current caps; when those caps were recalibrated on
+    2026-09-02 the same literals landed at ~1% of the new Standard cap and the
+    test asserted "exceeded" against a tenant that was comfortably inside it.
+    Deriving from PLANS means a future recalibration cannot invalidate the
+    scenario — only the formula is pinned, never the magnitude.
+    """
+    seats = 2
+    tenant_id = await _make_tenant("enterprise", members=seats)
+
+    enterprise_cap = PLANS["enterprise"]["credits_per_day_per_user"] * DAYS_PER_BILLING_MONTH * seats
+    standard_cap = PLANS["standard"]["credits_per_day_per_user"] * DAYS_PER_BILLING_MONTH * seats
+    assert standard_cap < enterprise_cap, "precondition: standard must be the smaller tier"
+
+    # Just past Standard, so the downgrade genuinely puts the tenant over —
+    # while still low enough against Enterprise to read "ok" before it.
+    # Not the midpoint of the two caps: that lands at ~86% of Enterprise, which
+    # is a "warning", and the pre-downgrade assertion below wants a clean "ok".
+    seeded = standard_cap + 1
+    assert seeded < enterprise_cap * WARNING_THRESHOLD, (
+        "the tiers have moved close enough together that 'just over Standard' "
+        "is already a warning on Enterprise — this scenario needs re-picking "
+        "rather than silently testing something else"
+    )
+    await _seed_credits(tenant_id, seeded)
 
     before = await get_quota_status(tenant_id, "ai_credits")
-    assert before["status"] == "ok"          # 400k of 16,667*30*2 = 1,000,020 -> 40%
+    assert before["limit"] == enterprise_cap
+    assert before["status"] == "ok"
 
     async with tenant_session(tenant_id) as db:
         tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one()
@@ -301,17 +327,18 @@ async def test_downgrade_does_not_delete_usage_it_only_blocks_new_usage():
         await db.commit()
 
     after = await get_quota_status(tenant_id, "ai_credits")
-    assert after["used"] == 400_000, "existing usage must survive a downgrade untouched"
-    assert after["limit"] == PLANS["standard"]["credits_per_day_per_user"] * DAYS_PER_BILLING_MONTH * 2
+    assert after["used"] == seeded, "existing usage must survive a downgrade untouched"
+    assert after["limit"] == standard_cap
     assert after["status"] == "exceeded", (
-        "400k credits against Standard's ~50k cap is genuinely over. The point "
+        "usage that sat inside Enterprise is genuinely over Standard. The point "
         "of this test is that the usage record survives the downgrade intact, "
         "not that the tenant stays under the smaller cap."
     )
 
-    # And a genuinely over-limit downgrade blocks new usage without destroying
-    # the record of what was already spent.
-    await _seed_credits(tenant_id, 700_000)  # now 1,100,000
+    # And further usage still accrues on the record rather than being discarded
+    # because the tenant is already over.
+    extra = standard_cap // 10
+    await _seed_credits(tenant_id, extra)
     over = await get_quota_status(tenant_id, "ai_credits")
-    assert over["used"] == 1_100_000
+    assert over["used"] == seeded + extra
     assert over["status"] == "exceeded"
