@@ -54,7 +54,9 @@ clean COMPLETED that silently ignores it.
 """
 import asyncio
 import json
+import re
 import uuid
+from collections import Counter
 from datetime import datetime
 
 import structlog
@@ -129,11 +131,99 @@ async def _caller_still_authorized(db, task: Task, tool_name: str) -> tuple[bool
 # id key "id", name key "name"; list_open_incidents returns a bare list
 # (cap_tool_result only wraps empty results), id key "incident_id", name
 # key "title" — not "id"/"name" like the other two.
+#
+# generic_terms (2026-09): words inherent to this entity type that must
+# never carry matching signal, regardless of pool size — see
+# _score_candidates' own docstring for why pool-relative IDF alone isn't
+# enough (it degrades to a no-op at pool size 1, exactly the case
+# test_honest_failure_message_when_neither_tier_resolves guards against:
+# a description sharing only the word "pipeline" with the one discovered
+# pipeline must never count as a real match).
 _ARG_RESOLUTION_SOURCES = {
-    "source_id": {"discovery_tool": "list_data_sources", "list_key": "sources", "id_key": "id", "name_key": "name"},
-    "pipeline_id": {"discovery_tool": "list_pipelines", "list_key": "pipelines", "id_key": "id", "name_key": "name"},
-    "incident_id": {"discovery_tool": "list_open_incidents", "list_key": None, "id_key": "incident_id", "name_key": "title"},
+    "source_id": {
+        "discovery_tool": "list_data_sources", "list_key": "sources", "id_key": "id", "name_key": "name",
+        "generic_terms": frozenset({"source", "sources", "data"}),
+    },
+    "pipeline_id": {
+        "discovery_tool": "list_pipelines", "list_key": "pipelines", "id_key": "id", "name_key": "name",
+        "generic_terms": frozenset({"pipeline", "pipelines"}),
+    },
+    "incident_id": {
+        "discovery_tool": "list_open_incidents", "list_key": None, "id_key": "incident_id", "name_key": "title",
+        "generic_terms": frozenset({"incident", "incidents", "data", "stale", "overdue"}),
+    },
 }
+
+# Tuned against two real failures from the 2026-09-02 measurement session,
+# not from first principles — see docs/context/GOTCHAS.md for the full
+# worked numbers this was tuned against:
+#   Case 1 (should resolve): "the sales pipeline" vs {Sales Ingestion
+#   Pipeline, HR Sync Pipeline} scored 0.500 vs 0.000 (HR Sync Pipeline's
+#   own tokens never appear in the description at all) — an infinite
+#   margin, floor cleared by a wide margin too.
+#   Case 2 (should refuse): "the stale sales data incident" vs 20 near-
+#   identical "Stale data: <X> (Nh overdue)" incidents scored 0.025 tied
+#   across all 10 same-source candidates — a 1.0x margin (no margin at
+#   all), and 0.025 sits well below the floor independently.
+_TIER1_MATCH_FLOOR = 0.1     # case 2's top score (0.025) sits well below this
+_TIER1_MATCH_MARGIN = 1.5    # case 1's real margin clears this; case 2's 1.0x doesn't
+
+# General-purpose English function words — deliberately small, tuned
+# against the real descriptions seen so far, not an exhaustive list.
+_STOPWORDS = frozenset({
+    "the", "a", "an", "to", "of", "for", "on", "in", "is", "and", "its",
+    "that", "this", "with", "it", "why", "was", "be",
+})
+
+
+def _tokenize(text: str, generic_terms: frozenset = frozenset()) -> set:
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return {t for t in tokens if t not in _STOPWORDS and t not in generic_terms}
+
+
+def _score_candidates(description: str, records: list[dict], generic_terms: frozenset) -> list[tuple]:
+    """Tokenized, pool-relative overlap scoring — replaces plain substring
+    containment (2026-09; see docs/context/GOTCHAS.md for why: "sales
+    pipeline" is not a substring of "Sales Ingestion Pipeline" in either
+    direction, so a real, unambiguous match used to refuse and cost an
+    extra real LLM call every time).
+
+    Each candidate's score is the sum of its own name-tokens found in the
+    description, weighted inversely by how many OTHER candidates in this
+    same pool share that token, normalized by the candidate's own token
+    count — a word every candidate's name has in common carries near-zero
+    discriminating weight; a word only one candidate has carries most of
+    the score. Deliberately cheap (pool sizes here are single digits to a
+    few dozen) — no LLM call, matching Tier 1's existing design rationale.
+
+    Pool-relative weighting alone isn't sufficient at small pool sizes: a
+    pool of one candidate makes every one of its own tokens trivially
+    "unique" (df=1) even if the word is a generic type-name like
+    "pipeline" that carries zero real signal. generic_terms (per arg_key,
+    see _ARG_RESOLUTION_SOURCES) is stripped from both sides before
+    scoring specifically to close that gap, rather than relying on IDF to
+    catch something IDF structurally cannot catch at pool size 1.
+
+    Returns a list of (id, name, score) sorted by score descending —
+    never mutates, never picks a winner itself; the caller applies the
+    floor/margin decision."""
+    desc_tokens = _tokenize(description, generic_terms)
+    name_tokens = {rec["id"]: _tokenize(str(rec["name"]), generic_terms) for rec in records}
+    df = Counter()
+    for toks in name_tokens.values():
+        for t in toks:
+            df[t] += 1
+    scored = []
+    for rec in records:
+        toks = name_tokens[rec["id"]]
+        if not toks:
+            scored.append((rec["id"], rec["name"], 0.0))
+            continue
+        matched = toks & desc_tokens
+        score = sum(1.0 / df[t] for t in matched) / len(toks)
+        scored.append((rec["id"], rec["name"], score))
+    scored.sort(key=lambda x: x[2], reverse=True)
+    return scored
 
 
 async def _discovered_records_for_arg(db, task_id: str, arg_key: str) -> list[dict]:
@@ -178,10 +268,45 @@ async def _candidate_ids_for_arg(db, task_id: str, step: TaskStep, arg_key: str)
     so both "resolve it" and "explain why it's still wrong" read the
     identical evidence — a message that says "no source matched" must be
     checking the same thing resolution itself checked, not a second,
-    possibly-inconsistent notion of a match."""
-    description = (step.description or "").lower()
+    possibly-inconsistent notion of a match.
+
+    Every real decision this function makes — matched or refused — is
+    logged with the top two candidates' scores (2026-09), so a resolution
+    misfire in front of a customer is diagnosable from logs alone, without
+    needing to reproduce the exact discovered pool and description that
+    produced it. Always returns a set of size 0 or 1, never more — an
+    ambiguous pool is reported as a refusal (with both leading scores in
+    the log line), not as a multi-candidate set; callers only ever
+    branched on "exactly one" vs "not exactly one" anyway."""
     records = await _discovered_records_for_arg(db, task_id, arg_key)
-    return {rec["id"] for rec in records if str(rec["name"]).lower() in description}
+    if not records:
+        log.info(
+            "tier1_match_refused", task_id=task_id, step_id=step.id, arg_key=arg_key,
+            reason="no_candidates_discovered",
+        )
+        return set()
+
+    generic_terms = _ARG_RESOLUTION_SOURCES[arg_key].get("generic_terms", frozenset())
+    scored = _score_candidates(step.description or "", records, generic_terms)
+    top_id, top_name, top_score = scored[0]
+    second_name, second_score = (scored[1][1], scored[1][2]) if len(scored) > 1 else (None, 0.0)
+    margin = (top_score / second_score) if second_score > 0 else float("inf")
+
+    if top_score >= _TIER1_MATCH_FLOOR and margin >= _TIER1_MATCH_MARGIN:
+        log.info(
+            "tier1_match_resolved", task_id=task_id, step_id=step.id, arg_key=arg_key,
+            matched_id=top_id, matched_name=top_name,
+            top_score=round(top_score, 4), second_name=second_name, second_score=round(second_score, 4),
+        )
+        return {top_id}
+
+    reason = "below_floor" if top_score < _TIER1_MATCH_FLOOR else "no_clear_margin"
+    log.info(
+        "tier1_match_refused", task_id=task_id, step_id=step.id, arg_key=arg_key, reason=reason,
+        top_name=top_name, top_score=round(top_score, 4),
+        second_name=second_name, second_score=round(second_score, 4),
+    )
+    return set()
 
 
 async def _all_discovered_ids_for_arg(db, task_id: str, arg_key: str) -> set:

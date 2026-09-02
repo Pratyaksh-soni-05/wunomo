@@ -251,3 +251,113 @@ async def test_honest_failure_message_when_neither_tier_resolves(client, monkeyp
     assert "Could not determine the real value for 'pipeline_id'" in step.error_message
     assert "no match" in step.error_message
     assert "Pipeline not found" in step.error_message  # the real underlying error is still present, not replaced
+
+
+@pytest.mark.asyncio
+async def test_tier1_resolves_a_real_paraphrase_via_token_overlap(client, monkeypatch):
+    """2026-09: Tier 1 used to require an exact substring match, so "the
+    sales pipeline" never resolved against the real "Sales Ingestion
+    Pipeline" (no substring relation in either direction) — a real, live
+    failure that cost an extra real LLM call every time it happened (see
+    docs/context/GOTCHAS.md for the full incident). Token-overlap scoring
+    (_score_candidates) must resolve this exact case, with a clear margin:
+    real numbers from that live failure are top=0.5 (Sales Ingestion
+    Pipeline) vs 0.0 (HR Sync Pipeline shares no non-generic token with
+    the description at all)."""
+    tenant_id, user_id = await _register(client, "resolveparaphrase")
+    task_id, step_id = await _seed_task_with_discovery(
+        tenant_id, user_id,
+        discovery_raw_result={
+            "pipelines": [
+                {"id": "pl-sales", "name": "Sales Ingestion Pipeline"},
+                {"id": "pl-hr", "name": "HR Sync Pipeline"},
+            ],
+            "count": 2,
+        },
+        discovery_tool_name="list_pipelines",
+        step_tool_name="get_pipeline_run_history",
+        step_tool_args={"pipeline_id": "sales_pipeline"},
+        step_description="Get the run history of the sales pipeline to diagnose why it is lagging.",
+    )
+
+    seen_args = []
+
+    async def _capture(tenant_id, tool_name, tool_args, **kwargs):
+        seen_args.append(dict(tool_args))
+        return {"pipeline_id": tool_args.get("pipeline_id"), "runs": []}
+
+    monkeypatch.setattr(executor_module, "_call_tool", _capture)
+
+    outcome = await execute_next_step(task_id)
+    assert outcome["outcome"] == "step_succeeded"
+    assert seen_args == [{"pipeline_id": "pl-sales"}]
+
+
+@pytest.mark.asyncio
+async def test_tier1_refuses_a_tied_pool_instead_of_guessing(client):
+    """2026-09: token-overlap scoring must still refuse — not just plain
+    substring matching — when multiple discovered candidates score
+    identically against a vague description. Real repro (2026-09-02): 20+
+    near-identical "Stale data: <source> (Nh overdue)" incidents on the
+    same real tenant, all sharing "stale"/"data"/"overdue" (correctly
+    stripped as generic terms) and the discriminating "sales"/"orders"
+    tokens equally across every Sales Orders variant — see
+    docs/context/GOTCHAS.md for the full real numbers (0.025 tied across
+    all 10 Sales Orders incidents, a 1.0x margin). Reproduced here with 2
+    of them, enough to prove the tie-refusal without seeding all 20."""
+    tenant_id, user_id = await _register(client, "resolvetiedpool")
+    task_id, step_id = await _seed_task_with_discovery(
+        tenant_id, user_id,
+        discovery_raw_result=[
+            {"incident_id": "inc-1", "title": "Stale data: Sales Orders (195.5h overdue)"},
+            {"incident_id": "inc-2", "title": "Stale data: Sales Orders (196.0h overdue)"},
+        ],
+        discovery_tool_name="list_open_incidents",
+        step_tool_name="triage_incident",
+        step_tool_args={"incident_id": "sales_orders_stale_incident"},
+        step_description="Perform root cause analysis on the identified stale sales data incident.",
+    )
+
+    outcome = await execute_next_step(task_id)
+    assert outcome["outcome"] == "blocked_needs_approval"  # triage_incident is medium-risk
+
+    step = await _fresh_step(step_id)
+    # Tier 1 refused (tied pool, 1.0x margin) — the unresolved placeholder
+    # reaches the approval card exactly as-is, never a guessed id.
+    assert step.tool_args["incident_id"] == "sales_orders_stale_incident"
+
+
+@pytest.mark.asyncio
+async def test_tier1_refuses_when_the_discovered_pool_is_empty(client, monkeypatch):
+    """A discovery step that ran and succeeded but genuinely found nothing
+    (empty pool) must refuse the same as a tied or below-floor pool —
+    there's no candidate to even score. Distinct from
+    test_honest_failure_message_when_neither_tier_resolves (candidates
+    exist but none match this description) and from the tied-pool case
+    above (candidates exist and match equally) — this is the third,
+    simplest refusal path: nothing was ever discovered at all."""
+    tenant_id, user_id = await _register(client, "resolveemptypool")
+    task_id, step_id = await _seed_task_with_discovery(
+        tenant_id, user_id,
+        discovery_raw_result={"pipelines": [], "count": 0},
+        discovery_tool_name="list_pipelines",
+        step_tool_name="get_pipeline_run_history",
+        step_tool_args={"pipeline_id": "sales_pipeline"},
+        step_description="Get the run history of the sales pipeline to diagnose why it is lagging.",
+    )
+
+    async def _always_not_found(tenant_id, tool_name, tool_args, **kwargs):
+        return {"error": "Pipeline not found"}
+
+    async def _cant_improve(tenant_id, user_id, description, tool_name, tool_args, error_message, prior_results=None, task_id=None):
+        return tool_args  # Tier 2 also has nothing to go on
+
+    monkeypatch.setattr(executor_module, "_call_tool", _always_not_found)
+    monkeypatch.setattr(executor_module, "_adapt_step_args", _cant_improve)
+
+    outcome = await execute_next_step(task_id)
+    assert outcome["outcome"] == "step_failed"
+
+    step = await _fresh_step(step_id)
+    assert step.status == TaskStepStatus.FAILED
+    assert "no match" in step.error_message
