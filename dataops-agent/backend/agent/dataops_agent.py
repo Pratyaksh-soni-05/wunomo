@@ -9,9 +9,9 @@ from langgraph.prebuilt import ToolNode
 
 from agent.personality import build_system_prompt, requires_approval, get_risk_level
 from agent.tools import ALL_TOOLS
-from services.llm_service import get_llm_for_agent, log_llm_usage, content_as_text
+from services.llm_service import get_llm_for_agent, invoke_llm, log_llm_usage, content_as_text
 from services.rbac import has_permission, TOOL_CAPABILITIES
-from models.all_models import PersonalityMode, OperationMode
+from models.all_models import PersonalityMode, OperationMode, AgentEmployeeType
 import structlog
 
 log = structlog.get_logger()
@@ -21,12 +21,50 @@ log = structlog.get_logger()
 # denied for every role forever — better to crash the process at boot than
 # let a newly-added tool go unmapped and undiscovered. This is the mechanism
 # that makes "gating was opt-in" (the root cause of the original bypass)
-# structurally impossible to repeat.
+# structurally impossible to repeat. This checks the UNION (every tool that
+# exists anywhere is mapped) and stays exactly this shape under Wunomo
+# Projects Phase 0 — it was never a "one agent" assumption to begin with.
 _unmapped_tools = sorted(set(t.name for t in ALL_TOOLS) - set(TOOL_CAPABILITIES))
 assert not _unmapped_tools, (
     f"Tool(s) missing a TOOL_CAPABILITIES entry in services/rbac.py: {_unmapped_tools} "
     "— every registered AXIOM tool must be mapped or it's unreachable for every role."
 )
+
+# Per-instance tool SUBSETS (Wunomo Projects Phase 0, commit 5) are keyed by
+# employee_type, not stored per agent row — there is exactly one employee
+# type today (DATAOPS) and its subset is the full registry, since that's
+# what "a DataOps agent" has always meant here. This is deliberately a
+# static, code-level mapping (mirroring task_planner.py's
+# TASK_SHAPE_ALLOWED_TOOLS) rather than new per-instance schema — no
+# agent_sources-equivalent "which tools" table was approved this pass.
+# Extend this dict, not build_agent()'s own logic, the day a second
+# employee type ships with a genuinely different toolset.
+EMPLOYEE_TYPE_TOOLS: dict[AgentEmployeeType, list] = {
+    AgentEmployeeType.DATAOPS: ALL_TOOLS,
+}
+
+
+def _validate_employee_type_tools_at_import_time() -> None:
+    """Same fail-closed-at-boot shape as the union assertion above and as
+    task_planner.py's _validate_allowlist_at_import_time() — every tool
+    named in any employee type's subset must be a real, registered tool
+    with a real TOOL_CAPABILITIES entry. Close to tautological for
+    DATAOPS today (its subset literally *is* ALL_TOOLS), but this is the
+    check that keeps mattering once a second employee type gets a
+    hand-curated, non-full subset."""
+    real_tool_names = {t.name for t in ALL_TOOLS}
+    for employee_type, tools in EMPLOYEE_TYPE_TOOLS.items():
+        names = {t.name for t in tools}
+        unknown = names - real_tool_names
+        assert not unknown, f"EMPLOYEE_TYPE_TOOLS['{employee_type.value}'] references non-existent tool(s): {unknown}"
+        unmapped = names - set(TOOL_CAPABILITIES)
+        assert not unmapped, (
+            f"EMPLOYEE_TYPE_TOOLS['{employee_type.value}'] references tool(s) with no "
+            f"TOOL_CAPABILITIES entry: {unmapped}"
+        )
+
+
+_validate_employee_type_tools_at_import_time()
 
 
 def role_denied_tool_calls(caller_role: str, tool_calls: list[dict]) -> list[dict]:
@@ -119,15 +157,24 @@ class AgentState(TypedDict):
     iteration_count: int
     context: dict
     system_prompt: str
+    agent_id: str | None
 
 
-def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.ASSISTED, primary_model=None):
+def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.ASSISTED, primary_model=None,
+                 agent_name="AXIOM", allowed_tools=None):
+    """agent_name/allowed_tools default to the exact pre-Phase-0 behavior
+    (the literal "AXIOM" identity, the full ALL_TOOLS registry) so every
+    existing caller — including every test that builds an agent without
+    passing these — keeps behaving identically. Real callers thread a
+    specific agent's own name and EMPLOYEE_TYPE_TOOLS subset through via
+    run_agent()."""
+    allowed_tools = ALL_TOOLS if allowed_tools is None else allowed_tools
     # Only pass primary_model when actually set, preserving the exact
     # get_llm_for_agent(temperature=0.0) call shape every existing
     # monkeypatched test fixture (test_agent_graph.py) already expects -
     # avoids touching ~8 unrelated test fixtures for a kwarg they never use.
     llm = get_llm_for_agent(temperature=0.0, primary_model=primary_model) if primary_model else get_llm_for_agent(temperature=0.0)
-    llm_with_tools = llm.bind_tools(ALL_TOOLS)
+    llm_with_tools = llm.bind_tools(allowed_tools)
 
     # `messages` uses the `operator.add` reducer, so LangGraph automatically
     # appends whatever a node returns onto the existing accumulated value.
@@ -144,6 +191,7 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
         sys_prompt = build_system_prompt(
             PersonalityMode(state["personality_mode"]),
             OperationMode(state["operation_mode"]),
+            agent_name=agent_name,
         )
         # Tell the LLM its real, server-derived tenant_id explicitly — tool schemas
         # require tenant_id as an argument the LLM itself must supply, and without
@@ -167,6 +215,7 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
             response.additional_kwargs["llm_provider"] = usage["provider"]
             await log_llm_usage(
                 tenant_id=state["tenant_id"], user_id=state["user_id"], session_id=state["session_id"],
+                agent_id=state.get("agent_id"),
                 request_type="agent_chat", provider=usage["provider"], model=usage["model"],
                 used_fallback=usage["used_fallback"], latency_ms=usage["latency_ms"],
                 success=usage["success"], usage_metadata=usage.get("usage_metadata"),
@@ -238,7 +287,7 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
     graph.add_node("inject_system", inject_system_prompt)
     graph.add_node("agent", agent_node)
     graph.add_node("approval_gate", approval_gate_node)
-    graph.add_node("tools", ToolNode(ALL_TOOLS))
+    graph.add_node("tools", ToolNode(allowed_tools))
     graph.set_entry_point("inject_system")
     graph.add_edge("inject_system", "agent")
     graph.add_edge("agent", "approval_gate")
@@ -249,7 +298,8 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
 
 _cache: dict = {}
 
-def get_agent(personality="engineer", operation="assisted", tenant_id=None, primary_model=None):
+def get_agent(personality="engineer", operation="assisted", tenant_id=None, primary_model=None,
+              agent_id=None, agent_name="AXIOM", allowed_tools=None, config_version=None):
     """Cache key MUST include tenant_id and the resolved primary_model, not
     just personality/operation - see CLAUDE.md's get_agent() Gotcha
     (Phase 0's approved pushback #2). The cached value is a fully-built
@@ -257,21 +307,69 @@ def get_agent(personality="engineer", operation="assisted", tenant_id=None, prim
     model overrides sharing a cache key would leak one tenant's model
     choice into another tenant's requests. tenant_id is required (not
     defaulted) so this can never silently regress back to the old
-    personality:operation-only key by a caller forgetting to pass it."""
+    personality:operation-only key by a caller forgetting to pass it.
+
+    Wunomo Projects Phase 0 (commit 5) folds agent_id and config_version
+    into the key too. config_version is a real agent row's updated_at
+    (isoformat), not a separately-maintained counter - editing any field
+    on that row bumps updated_at automatically (see AgentInstance's own
+    docstring), which changes this key, which means a stale cached agent
+    object can never be served after an edit. Invalidation by
+    construction, not by a call site remembering to bust the cache.
+    Every existing caller that doesn't pass these four new kwargs gets the
+    exact pre-Phase-0 key shape and behavior, unchanged."""
     if tenant_id is None:
         raise ValueError("get_agent() requires tenant_id - see the cache re-keying Gotcha in CLAUDE.md")
-    key = f"{tenant_id}:{personality}:{operation}:{primary_model or 'default'}"
+    key = f"{tenant_id}:{agent_id or 'default'}:{personality}:{operation}:{primary_model or 'default'}:{config_version or ''}"
     if key not in _cache:
-        _cache[key] = build_agent(PersonalityMode(personality), OperationMode(operation), primary_model=primary_model)
+        _cache[key] = build_agent(
+            PersonalityMode(personality), OperationMode(operation), primary_model=primary_model,
+            agent_name=agent_name, allowed_tools=allowed_tools,
+        )
     return _cache[key]
 
 
 async def run_agent(user_message, tenant_id, user_id, session_id, caller_role,
                     personality_mode="engineer", operation_mode="assisted",
-                    history=None, context=None) -> dict:
+                    history=None, context=None, agent_id=None) -> dict:
+    """agent_id is optional (Wunomo Projects Phase 0, commit 5) - omitted,
+    every existing caller (api/v1/chat.py doesn't know about agent_id yet)
+    gets the exact pre-Phase-0 behavior: request-body personality/
+    operation_mode, the tenant's model override, "AXIOM" identity, the
+    full ALL_TOOLS registry. Passed, the agent row is authoritative over
+    all of that - the confirmed decision that agent config wins over both
+    the request body and the tenant-level override once a real agent is
+    named."""
     from services.settings_service import get_ai_model_override
-    primary_model = await get_ai_model_override(tenant_id)
-    agent = get_agent(personality_mode, operation_mode, tenant_id=tenant_id, primary_model=primary_model)
+
+    agent_name = "AXIOM"
+    allowed_tools = None
+    config_version = None
+    if agent_id is not None:
+        from sqlalchemy import select
+        from database import AsyncSessionLocal
+        from models.all_models import AgentInstance
+
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(select(AgentInstance).where(
+                AgentInstance.id == agent_id, AgentInstance.tenant_id == tenant_id,
+            ))
+            instance = r.scalar_one_or_none()
+        if instance is None:
+            raise ValueError(f"Agent {agent_id} not found for tenant {tenant_id}")
+        personality_mode = instance.personality.value
+        operation_mode = instance.operation_mode.value
+        primary_model = instance.model
+        agent_name = instance.name
+        allowed_tools = EMPLOYEE_TYPE_TOOLS[instance.employee_type]
+        config_version = instance.updated_at.isoformat()
+    else:
+        primary_model = await get_ai_model_override(tenant_id)
+
+    agent = get_agent(
+        personality_mode, operation_mode, tenant_id=tenant_id, primary_model=primary_model,
+        agent_id=agent_id, agent_name=agent_name, allowed_tools=allowed_tools, config_version=config_version,
+    )
     messages = list(history or []) + [HumanMessage(content=user_message)]
     # tenant_id/user_id/session_id are trusted values the caller derives from the
     # authenticated JWT (see api/v1/auth.py get_current_user, via api/v1/chat.py).
@@ -288,6 +386,7 @@ async def run_agent(user_message, tenant_id, user_id, session_id, caller_role,
         "personality_mode": personality_mode,
         "operation_mode": operation_mode, "pending_approvals": [], "role_denied": [],
         "iteration_count": 0, "context": safe_context, "system_prompt": "",
+        "agent_id": agent_id,
     }, config={"recursion_limit": AGENT_RECURSION_LIMIT})
     last_ai = next((m for m in reversed(final["messages"]) if isinstance(m, AIMessage)), None)
     last_llm_call = next(
