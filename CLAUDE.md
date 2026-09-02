@@ -95,14 +95,19 @@ npm run build                              # production build — also catches E
   in-process.
 - **One fix or feature per commit**, with the reasoning in the message body, not just the diff.
 - **Plan-time scope checking (Wunomo Projects) is a cost optimisation, not a security
-  boundary.** `validate_step_plan`/planner-side checks against an agent's `agent_sources`
-  scope exist only to reject a plan that can't succeed before it burns tokens or reaches a
-  human for approval. The actual guarantee — that an agent can only ever touch a source it's
-  scoped to, intersected with the caller's role permission — lives entirely post-resolution,
-  at `_call_tool` and `_caller_still_authorized` in `task_executor.py`, because a step's
-  `source_id` is frequently still a placeholder (e.g. `"<discovered>"`) at plan-validation
-  time and only becomes a real value at execution. Never treat a plan that passed
-  `validate_step_plan` as proof an agent is authorized for the sources it references.
+  boundary.** `validate_step_plan_scope()` (`task_planner.py`, Phase 1 — deliberately a
+  separate function from the pure, widely unit-tested `validate_step_plan()`, which never
+  touches the DB) rejects a plan step that already names a real, resolved source outside an
+  agent's `agent_sources` scope, before it burns tokens or reaches a human for approval. The
+  actual guarantee — that an agent can only ever touch a source it's scoped to, intersected
+  with the caller's role permission — lives entirely post-resolution: `agent_scope_denied_
+  tool_calls()` in `agent_node` for chat, and `_caller_still_authorized()` plus the check
+  immediately before `_call_tool()` in `task_executor.py` for tasks (both consult the shared
+  `services/agent_scope.py`). A step's args are frequently still an unresolved placeholder at
+  plan-validation time (the real value often isn't known until an earlier discovery step
+  actually runs) and only become real at execution — `validate_step_plan_scope()` correctly
+  treats an unresolved placeholder as nothing to check, not as allowed forever. Never treat a
+  plan that passed validation as proof an agent is authorized for the sources it references.
 
 ## Hard rules — do not regress these
 
