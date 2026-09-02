@@ -16,7 +16,10 @@ from sqlalchemy import select
 
 from config import settings
 from database import AsyncSessionLocal
-from models.all_models import EmailLoginCode, Tenant, User, UserWorkspacePreference
+from models.all_models import (
+    AgentEmployeeType, AgentInstance, AgentInstanceStatus, EmailLoginCode,
+    OperationMode, PersonalityMode, Tenant, User, UserWorkspacePreference,
+)
 
 log = structlog.get_logger()
 
@@ -165,6 +168,28 @@ async def create_new_tenant_and_user(
             role="owner", created_at=utcnow(),
         )
         db.add(user)
+        # Wunomo Projects Phase 0 promised "AXIOM becomes row one per
+        # tenant" — true for every tenant that existed when that phase's
+        # backfill migration ran, but never wired for tenants created
+        # AFTER it, until now. Without this, every tenant signing up
+        # since Phase 0 shipped has zero agent_instances rows, which
+        # makes Phase 1's scope enforcement (agent_scope_denied_tool_calls,
+        # task_executor's per-step scope check) silently inert for them —
+        # not a regression (nothing enforced scope before either), but it
+        # means the new fail-closed boundary doesn't actually apply to any
+        # new signup. No agent_sources rows are created here — a brand
+        # new tenant has no data sources yet either, so there is nothing
+        # to grant; scope starts genuinely empty and fills in as the
+        # tenant connects real sources (see services/agent_scope.py's own
+        # docstring on why new sources aren't auto-granted).
+        from services.llm_service import SUPPORTED_MODEL_OVERRIDES
+        agent = AgentInstance(
+            id=str(uuid.uuid4()), tenant_id=tenant.id, name="AXIOM",
+            employee_type=AgentEmployeeType.DATAOPS, personality=PersonalityMode.ENGINEER,
+            operation_mode=OperationMode.ASSISTED, model=SUPPORTED_MODEL_OVERRIDES[0],
+            status=AgentInstanceStatus.ACTIVE, created_at=utcnow(), updated_at=utcnow(),
+        )
+        db.add(agent)
         await db.commit()
         await db.refresh(tenant)
         await db.refresh(user)

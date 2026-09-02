@@ -1,9 +1,9 @@
 import uuid
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from database import AsyncSessionLocal
-from models.all_models import DataSource, Incident, Pipeline, PipelineRun, User, UserWorkspacePreference, Tenant, SourceType, PipelineStatus, RunStatus
+from models.all_models import AgentInstance, AgentSource, DataSource, Incident, Pipeline, PipelineRun, User, UserWorkspacePreference, Tenant, SourceType, PipelineStatus, RunStatus
 from modules.orchestration.dag_manager import DAGManager
 from services.tasks import _execute_run
 
@@ -19,12 +19,25 @@ async def _delete_tenant_cascade(tenant_id: str):
     _check_freshness() flags as stale 24h later, so a leftover, un-torn-down
     tenant here silently starts accumulating real staleness incidents.
     Deletes in FK-safe order: PipelineRun/Incident reference pipelines and
-    data_sources, which reference tenants, which users also reference."""
+    data_sources, which reference tenants, which users also reference.
+
+    AgentInstance/AgentSource (Wunomo Projects Phase 0/1): every tenant
+    registered via /auth/register gets a real AgentInstance row now
+    (create_new_tenant_and_user() creates one), so deleting Tenant without
+    deleting its agent_instances rows first hits agent_instances_tenant_id_fkey
+    - didn't exist before Phase 1 wired that creation up, real regression
+    found via this file's own tenant-delete failing loudly, not silently."""
     async with AsyncSessionLocal() as db:
         await db.execute(delete(PipelineRun).where(PipelineRun.tenant_id == tenant_id))
         await db.execute(delete(Incident).where(Incident.tenant_id == tenant_id))
         await db.execute(delete(Pipeline).where(Pipeline.tenant_id == tenant_id))
         await db.execute(delete(DataSource).where(DataSource.tenant_id == tenant_id))
+        agent_ids = (await db.execute(
+            select(AgentInstance.id).where(AgentInstance.tenant_id == tenant_id)
+        )).scalars().all()
+        if agent_ids:
+            await db.execute(delete(AgentSource).where(AgentSource.agent_id.in_(agent_ids)))
+        await db.execute(delete(AgentInstance).where(AgentInstance.tenant_id == tenant_id))
         # issue_token_and_remember() (item 1's "log into last workspace
         # used" fix) writes one of these on every register/login - keyed by
         # email, FK to tenant_id, so it must go before the Tenant delete too.

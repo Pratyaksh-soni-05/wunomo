@@ -37,11 +37,24 @@ assert not _unmapped_tools, (
 # static, code-level mapping (mirroring task_planner.py's
 # TASK_SHAPE_ALLOWED_TOOLS) rather than new per-instance schema — no
 # agent_sources-equivalent "which tools" table was approved this pass.
-# Extend this dict, not build_agent()'s own logic, the day a second
-# employee type ships with a genuinely different toolset.
-EMPLOYEE_TYPE_TOOLS: dict[AgentEmployeeType, list] = {
-    AgentEmployeeType.DATAOPS: ALL_TOOLS,
-}
+# Extend _employee_type_tools(), not build_agent()'s own logic, the day a
+# second employee type ships with a genuinely different toolset.
+#
+# A FUNCTION, not a plain module-level dict — deliberately re-evaluated on
+# every call rather than built once at import time. A bare
+# `{AgentEmployeeType.DATAOPS: ALL_TOOLS}` dict literal captures whatever
+# object ALL_TOOLS pointed to at import time by reference; every test in
+# this suite that does `monkeypatch.setattr(dataops_agent, "ALL_TOOLS",
+# [fake_tool])` — the established pattern for testing tool-dispatch
+# without a real LLM/tool registry — would then silently have NO effect
+# once agent_id flows through run_agent(), because the captured reference
+# never changes. This bug existed from the moment commit 5 shipped but
+# was invisible until Phase 1 made api/v1/chat.py actually resolve and
+# pass a real agent_id on every request — no real caller exercised the
+# `agent_id is not None` branch before that, so nothing ever hit it. See
+# GOTCHAS.md.
+def _employee_type_tools() -> dict[AgentEmployeeType, list]:
+    return {AgentEmployeeType.DATAOPS: ALL_TOOLS}
 
 
 def _validate_employee_type_tools_at_import_time() -> None:
@@ -53,7 +66,7 @@ def _validate_employee_type_tools_at_import_time() -> None:
     check that keeps mattering once a second employee type gets a
     hand-curated, non-full subset."""
     real_tool_names = {t.name for t in ALL_TOOLS}
-    for employee_type, tools in EMPLOYEE_TYPE_TOOLS.items():
+    for employee_type, tools in _employee_type_tools().items():
         names = {t.name for t in tools}
         unknown = names - real_tool_names
         assert not unknown, f"EMPLOYEE_TYPE_TOOLS['{employee_type.value}'] references non-existent tool(s): {unknown}"
@@ -92,6 +105,46 @@ def role_denied_tool_calls(caller_role: str, tool_calls: list[dict]) -> list[dic
             })
         else:
             kept.append(call)
+    tool_calls[:] = kept
+    return denied
+
+
+async def agent_scope_denied_tool_calls(agent_id: str | None, tool_calls: list[dict]) -> list[dict]:
+    """The scope half of the unified permission gate (Wunomo Projects
+    Phase 1) — runs ALONGSIDE role_denied_tool_calls(), never instead of
+    it: effective permission = has_permission(role, capability) AND
+    resolved entity in agent_sources, both required (see CLAUDE.md's
+    intersection-permission rule). Same mutate-in-place-and-return-
+    denied-list shape as role_denied_tool_calls(), extended to be async
+    because a real scope check needs a DB read (agent_sources, plus
+    resolving a pipeline/incident/contract id back to the source it
+    ultimately touches — see services/agent_scope.py) that a pure
+    in-memory role lookup never did.
+
+    agent_id=None is a transitional no-op: every real chat caller
+    resolves the tenant's real agent_id before reaching here (see
+    run_agent()), but nothing here requires it — an absent agent_id
+    means there's no agent context to intersect against, so this gate
+    simply doesn't apply and role alone keeps governing, unchanged.
+    Deliberately a standalone function, not embedded in agent_node's
+    closure, matching role_denied_tool_calls' own reasoning — directly
+    unit-testable with a synthetic agent_id and a plain list of
+    tool-call dicts."""
+    from database import AsyncSessionLocal
+    from services.agent_scope import agent_scope_denial_reason
+
+    if agent_id is None:
+        return []
+
+    denied = []
+    kept = []
+    async with AsyncSessionLocal() as db:
+        for call in tool_calls:
+            reason = await agent_scope_denial_reason(db, agent_id, call["name"], call.get("args", {}))
+            if reason is not None:
+                denied.append({**call, "reason": reason})
+            else:
+                kept.append(call)
     tool_calls[:] = kept
     return denied
 
@@ -154,6 +207,7 @@ class AgentState(TypedDict):
     operation_mode: str
     pending_approvals: list
     role_denied: list
+    scope_denied: list
     iteration_count: int
     context: dict
     system_prompt: str
@@ -252,11 +306,17 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
         # because the caller's role was never allowed to request it in the
         # first place. See role_denied_tool_calls' own docstring.
         denied = role_denied_tool_calls(state["caller_role"], response.tool_calls or [])
+        # Scope gate (Wunomo Projects Phase 1) — runs alongside the role
+        # gate above, on whatever survives it, not instead of it: both
+        # must pass (see agent_scope_denied_tool_calls' own docstring).
+        # Mutates the same already-filtered response.tool_calls list.
+        scope_denied = await agent_scope_denied_tool_calls(state.get("agent_id"), response.tool_calls or [])
 
         return {
             "messages": [response],
             "iteration_count": state.get("iteration_count", 0) + 1,
             "role_denied": state.get("role_denied", []) + denied,
+            "scope_denied": state.get("scope_denied", []) + scope_denied,
         }
 
     def approval_gate_node(state):
@@ -361,7 +421,7 @@ async def run_agent(user_message, tenant_id, user_id, session_id, caller_role,
         operation_mode = instance.operation_mode.value
         primary_model = instance.model
         agent_name = instance.name
-        allowed_tools = EMPLOYEE_TYPE_TOOLS[instance.employee_type]
+        allowed_tools = _employee_type_tools()[instance.employee_type]
         config_version = instance.updated_at.isoformat()
     else:
         primary_model = await get_ai_model_override(tenant_id)
@@ -385,6 +445,7 @@ async def run_agent(user_message, tenant_id, user_id, session_id, caller_role,
         "session_id": session_id, "caller_role": caller_role,
         "personality_mode": personality_mode,
         "operation_mode": operation_mode, "pending_approvals": [], "role_denied": [],
+        "scope_denied": [],
         "iteration_count": 0, "context": safe_context, "system_prompt": "",
         "agent_id": agent_id,
     }, config={"recursion_limit": AGENT_RECURSION_LIMIT})
@@ -395,6 +456,7 @@ async def run_agent(user_message, tenant_id, user_id, session_id, caller_role,
         None,
     )
     role_denied = final.get("role_denied", [])
+    scope_denied = final.get("scope_denied", [])
     response_text = content_as_text(last_ai.content) if last_ai else "No response."
     if role_denied and not response_text.strip():
         # The LLM's own text is typically blank/minimal when it was mainly
@@ -404,11 +466,20 @@ async def run_agent(user_message, tenant_id, user_id, session_id, caller_role,
         response_text = "I don't have permission to do that with your current role: " + ", ".join(
             f"`{c['name']}`" for c in role_denied
         )
+    elif scope_denied and not response_text.strip():
+        # Same reasoning as the role_denied fallback above, but scope
+        # denials already carry their own specific, legible reason (see
+        # agent_scope_denial_reason) — surface those verbatim rather than
+        # a generic "not scoped" line, per the explicit requirement that
+        # a fail-closed scope denial must never read like an unexplained
+        # permission error.
+        response_text = " ".join(c["reason"] for c in scope_denied)
     return {
         "response": response_text,
         "provider": last_llm_call.additional_kwargs["llm_provider"] if last_llm_call else None,
         "pending_approvals": final.get("pending_approvals", []),
         "role_denied": role_denied,
+        "scope_denied": scope_denied,
         "messages": final["messages"],
         "session_id": session_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),

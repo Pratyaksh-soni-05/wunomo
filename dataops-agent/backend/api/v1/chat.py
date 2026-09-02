@@ -16,7 +16,7 @@ from langchain_core.messages import AIMessage as LCAIMessage, ToolMessage as LCT
 router = APIRouter()
 
 
-def _extract_tool_trace(new_messages, blocked_tool_calls, role_denied_calls) -> list[dict]:
+def _extract_tool_trace(new_messages, blocked_tool_calls, role_denied_calls, scope_denied_calls=None) -> list[dict]:
     """Build a tool-call trace for this turn from the graph's own new messages:
     every AIMessage.tool_calls paired with its ToolMessage result (matched by
     tool_call_id), plus any tool calls approval_gate_node blocked before they
@@ -25,9 +25,14 @@ def _extract_tool_trace(new_messages, blocked_tool_calls, role_denied_calls) -> 
     these are a distinct status from "blocked_pending_approval": a role
     denial can never later become approved, unlike a risk-blocked call, so
     the frontend must not offer the same "review on the Approvals screen"
-    affordance for it). Tool outputs are already capped by cap_tool_result()
-    before they enter this list (see agent/tools/_utils.py) — no re-truncation
-    needed here."""
+    affordance for it), plus any tool calls the agent-scope gate stripped
+    (scope_denied_calls, Wunomo Projects Phase 1 — a distinct status from
+    role denial: the caller's role was fine, the calling agent just isn't
+    scoped to the resolved source, and each entry already carries its own
+    specific, legible reason naming the agent and source — see
+    agent_scope_denial_reason — never a generic "permission denied").
+    Tool outputs are already capped by cap_tool_result() before they enter
+    this list (see agent/tools/_utils.py) — no re-truncation needed here."""
     results_by_id = {
         m.tool_call_id: m.content for m in new_messages if isinstance(m, LCToolMessage)
     }
@@ -52,6 +57,11 @@ def _extract_tool_trace(new_messages, blocked_tool_calls, role_denied_calls) -> 
         trace.append({
             "tool": call["name"], "args": call.get("args", {}),
             "result": None, "status": "denied_insufficient_role",
+        })
+    for call in (scope_denied_calls or []):
+        trace.append({
+            "tool": call["name"], "args": call.get("args", {}),
+            "result": None, "status": "denied_out_of_scope", "reason": call.get("reason"),
         })
     return trace
 
@@ -83,6 +93,26 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
         r = await db.execute(query.order_by(ChatMessage.created_at.asc()).limit(200))
         history_msgs = r.scalars().all()
 
+        # Wunomo Projects Phase 1: resolve the tenant's real agent so the
+        # scope gate (agent_scope_denied_tool_calls, see agent_node) has an
+        # actual agent_id to check against — without this, run_agent()
+        # falls back to its exact pre-Phase-0 behavior and the scope gate
+        # is a permanent no-op. Every tenant has exactly one agent today
+        # (AXIOM, created either by the Phase 0 backfill migration or by
+        # create_new_tenant_and_user() for anyone who's signed up since);
+        # take the oldest ACTIVE one deterministically rather than assume
+        # "the only one" holds forever — hiring (Phase 1's own next part)
+        # is what makes that assumption stop being true. A tenant with
+        # zero agent rows (shouldn't happen post-backfill, but not
+        # impossible for a row created by some other, older path) falls
+        # back to agent_id=None, the same transitional no-op as before.
+        from models.all_models import AgentInstance, AgentInstanceStatus
+        r = await db.execute(select(AgentInstance).where(
+            AgentInstance.tenant_id == tenant_id, AgentInstance.status == AgentInstanceStatus.ACTIVE,
+        ).order_by(AgentInstance.created_at.asc()).limit(1))
+        agent_row = r.scalar_one_or_none()
+        agent_id = agent_row.id if agent_row is not None else None
+
     from langchain_core.messages import HumanMessage, AIMessage
     history = []
     for m in history_msgs:
@@ -100,6 +130,7 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
         user_message=req.message, tenant_id=tenant_id, user_id=user["sub"],
         session_id=session_id, caller_role=user["role"], personality_mode=req.personality_mode,
         operation_mode=req.operation_mode, history=history, context=req.context,
+        agent_id=agent_id,
     )
 
     async with AsyncSessionLocal() as db:
@@ -122,7 +153,10 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
         # reducer) — slice off the history prefix chat.py itself passed in to
         # isolate just this turn's new AI/tool messages for the trace.
         new_messages = result["messages"][len(history):]
-        tool_trace = _extract_tool_trace(new_messages, result["pending_approvals"], result.get("role_denied", []))
+        tool_trace = _extract_tool_trace(
+            new_messages, result["pending_approvals"], result.get("role_denied", []),
+            result.get("scope_denied", []),
+        )
 
         if new_summary is not None:
             # Only ever written when window_and_summarize() actually moved

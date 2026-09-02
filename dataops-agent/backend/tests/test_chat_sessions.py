@@ -55,7 +55,7 @@ async def test_chat_response_includes_tool_trace(client, monkeypatch):
         ]),
         AIMessage(content="Found widgets."),
     ])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
@@ -86,7 +86,7 @@ async def test_blocked_tool_call_shows_up_in_trace(client, monkeypatch):
             {"name": "fake_lookup_tool", "args": {"x": "risky"}, "id": "call_1"},
         ]),
     ])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: True)
@@ -110,7 +110,7 @@ async def test_chat_sessions_list_is_scoped_to_the_requesting_user(client, monke
     coincidence (they're always different tenants here, but the query must
     filter on user_id too, not just tenant_id, for defense in depth)."""
     fake_llm = FakeToolCallLLM([AIMessage(content="hi there")])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
@@ -121,7 +121,7 @@ async def test_chat_sessions_list_is_scoped_to_the_requesting_user(client, monke
     session_a = r.json()["session_id"]
 
     fake_llm2 = FakeToolCallLLM([AIMessage(content="hi there")])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm2)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm2)
     dataops_agent._cache.clear()
     token_b, _, _ = await _register(client, "sessionsb")
     r = await client.post("/api/v1/chat/", json={"message": "hello from B"}, headers=_auth(token_b))
@@ -145,7 +145,7 @@ async def test_chat_sessions_list_shape_and_title(client, monkeypatch):
     user message, real started_at/last_activity timestamps, and an accurate
     message_count (user + assistant messages both counted)."""
     fake_llm = FakeToolCallLLM([AIMessage(content="Paris is the capital.")])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
@@ -177,7 +177,7 @@ async def test_session_history_includes_tool_calls(client, monkeypatch):
         ]),
         AIMessage(content="Found gadgets."),
     ])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
@@ -205,7 +205,7 @@ async def test_long_session_persists_a_rolling_summary_row(client, monkeypatch):
     the compression round-trips to the next request instead of re-growing
     unbounded token cost on every future turn."""
     fake_llm = FakeToolCallLLM([AIMessage(content=f"reply {i}") for i in range(8)])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
