@@ -76,7 +76,7 @@ REPRESENTATIVE_ENDPOINTS = [
     ("team.manage", "get", "/api/v1/team/invites", None),
     ("settings.manage", "patch", "/api/v1/settings/", {"name": "New Name"}),
     ("api_keys.manage", "get", "/api/v1/api-keys/", None),
-    ("billing.manage", "post", "/api/v1/billing/change-plan", {"plan": "growth"}),
+    ("billing.manage", "post", "/api/v1/billing/change-plan", {"plan": "premium"}),
     ("tasks.manage_all", "get", "/api/v1/tasks/all", None),
 ]
 

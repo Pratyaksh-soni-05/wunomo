@@ -23,29 +23,29 @@ async def _register(client, prefix="billing"):
 async def test_get_usage_returns_all_four_resources(client):
     _, tenant_id, _ = await _register(client)
     usage = await BillingService(tenant_id).get_usage()
-    assert set(usage.keys()) == {"turns", "pipeline_runs", "data_sources", "team_members"}
+    assert set(usage.keys()) == {"ai_credits", "pipeline_runs", "data_sources", "team_members"}
 
 
 @pytest.mark.asyncio
 async def test_get_plan_defaults_to_starter(client):
     _, tenant_id, _ = await _register(client)
     plan = await BillingService(tenant_id).get_plan()
-    assert plan["plan"] == "starter"
+    assert plan["plan"] == "standard"
     assert plan["limits"]["max_data_sources"] == 3
 
 
 @pytest.mark.asyncio
 async def test_change_plan_updates_tenant_and_is_reflected_in_get_plan(client):
     _, tenant_id, _ = await _register(client)
-    result = await BillingService(tenant_id).change_plan("growth")
-    assert result["plan"] == "growth"
+    result = await BillingService(tenant_id).change_plan("premium")
+    assert result["plan"] == "premium"
 
     async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Tenant.plan).where(Tenant.id == tenant_id))
-        assert r.scalar() == "growth"
+        assert r.scalar() == "premium"
 
     plan = await BillingService(tenant_id).get_plan()
-    assert plan["plan"] == "growth"
+    assert plan["plan"] == "premium"
     assert plan["limits"]["max_data_sources"] == 15
 
 
@@ -67,12 +67,12 @@ async def test_change_plan_endpoint_is_an_honest_stub_for_an_owner(client):
     token, tenant_id, _ = await _register(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    r = await client.post("/api/v1/billing/change-plan", json={"plan": "scale"}, headers=headers)
+    r = await client.post("/api/v1/billing/change-plan", json={"plan": "enterprise"}, headers=headers)
     assert r.status_code == 501
 
     # Confirm it's a true no-op, not a silent partial success.
     plan_check = await client.get("/api/v1/billing/plan", headers=headers)
-    assert plan_check.json()["plan"] == "starter"
+    assert plan_check.json()["plan"] == "standard"
 
 
 @pytest.mark.asyncio
@@ -89,7 +89,7 @@ async def test_viewer_cannot_change_plan(client):
         viewer_token = issue_token_for_user(user, "password")
 
     r = await client.post(
-        "/api/v1/billing/change-plan", json={"plan": "growth"},
+        "/api/v1/billing/change-plan", json={"plan": "premium"},
         headers={"Authorization": f"Bearer {viewer_token}"},
     )
     assert r.status_code == 403
@@ -123,7 +123,7 @@ async def test_billing_service_stubs_raise_not_implemented(client):
     _, tenant_id, _ = await _register(client)
     svc = BillingService(tenant_id)
     with pytest.raises(NotImplementedError):
-        await svc.create_checkout_session("growth")
+        await svc.create_checkout_session("premium")
     with pytest.raises(NotImplementedError):
         await svc.get_subscription_status()
     with pytest.raises(NotImplementedError):

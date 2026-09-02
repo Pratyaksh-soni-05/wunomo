@@ -14,7 +14,7 @@ from sqlalchemy import select
 
 import modules.orchestration.task_planner as task_planner_module
 from database import AsyncSessionLocal
-from models.all_models import ChatMessage, Task
+from models.all_models import ChatMessage, LlmUsageEvent, Task
 from services.quota_service import PLANS
 from services.tenant_context import tenant_session
 
@@ -33,17 +33,15 @@ async def _register(client, prefix="taskapi"):
     return body["access_token"], body["tenant_id"], body["user_id"]
 
 
-async def _seed_turns(tenant_id: str, turns: int):
-    """Seeds `turns` user chat messages for the current month. Turns come from
-    real ChatMessage/TaskStep rows, not LlmUsageEvent -- see quota_service's
-    module docstring."""
+async def _seed_credits(tenant_id: str, credits: int):
+    """One LlmUsageEvent worth exactly `credits` — the gate is ai_credits."""
     async with tenant_session(tenant_id) as db:
-        for _ in range(turns):
-            db.add(ChatMessage(
-                id=str(uuid.uuid4()), tenant_id=tenant_id, user_id="seed-user",
-                session_id=str(uuid.uuid4()), role="user", content="seed turn",
-                created_at=utcnow(),
-            ))
+        db.add(LlmUsageEvent(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, request_type="test",
+            provider="test", model="test", used_fallback=False,
+            input_tokens=credits, output_tokens=0, total_tokens=credits,
+            success=True, created_at=utcnow(),
+        ))
         await db.commit()
 
 
@@ -81,8 +79,8 @@ async def test_quota_exceeded_blocks_before_any_plan_generation_attempt(client, 
     runs as a FastAPI dependency before the route handler body, so
     generate_plan() must never even be called once quota is exhausted."""
     token, tenant_id, _ = await _register(client, "taskquota")
-    # Fresh tenant = 1 active member, so cap = 25 * 30 * 1. Seed one past it.
-    await _seed_turns(tenant_id, PLANS["starter"]["turns_per_day_per_user"] * 30 + 1)
+    # Fresh tenant = 1 active member, so cap = rate * 30 * 1. Seed one past it.
+    await _seed_credits(tenant_id, PLANS["standard"]["credits_per_day_per_user"] * 30 + 1)
 
     called = False
 

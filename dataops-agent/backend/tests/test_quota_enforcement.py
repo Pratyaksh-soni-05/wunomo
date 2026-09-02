@@ -33,6 +33,19 @@ async def _seed_sources(tenant_id: str, count: int):
         await db.commit()
 
 
+async def _seed_credits(tenant_id: str, credits: int):
+    """One LlmUsageEvent worth exactly `credits` (input_tokens carry a 1x
+    weight, so the target is hit exactly with no truncation)."""
+    async with tenant_session(tenant_id) as db:
+        db.add(LlmUsageEvent(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, request_type="test",
+            provider="test", model="test", used_fallback=False,
+            input_tokens=credits, output_tokens=0, total_tokens=credits,
+            success=True, created_at=utcnow(),
+        ))
+        await db.commit()
+
+
 async def _seed_turns(tenant_id: str, turns: int, user_id: str = "seed-user"):
     """Seeds `turns` user chat messages for the current month.
 
@@ -52,14 +65,14 @@ async def _seed_turns(tenant_id: str, turns: int, user_id: str = "seed-user"):
         await db.commit()
 
 
-async def _expected_cap(tenant_id: str, plan: str = "starter") -> int:
+async def _expected_cap(tenant_id: str, plan: str = "standard") -> int:
     """The formula under test, restated independently of the implementation."""
     async with tenant_session(tenant_id) as db:
         members = (await db.execute(
             select(func.count(User.id)).where(
                 User.tenant_id == tenant_id, User.is_active.is_(True))
         )).scalar() or 0
-    return PLANS[plan]["turns_per_day_per_user"] * 30 * max(1, members)
+    return PLANS[plan]["credits_per_day_per_user"] * 30 * max(1, members)
 
 
 def test_credits_formula_weights_output_tokens_three_x_input():
@@ -70,7 +83,7 @@ def test_credits_formula_weights_output_tokens_three_x_input():
 @pytest.mark.asyncio
 async def test_data_sources_quota_ok_then_exceeded(client):
     _, tenant_id = await _register(client)
-    limit = PLANS["starter"]["max_data_sources"]  # 3
+    limit = PLANS["standard"]["max_data_sources"]  # 3
 
     ok = await get_quota_status(tenant_id, "data_sources")
     assert ok["used"] == 0 and ok["status"] == "ok"
@@ -95,13 +108,13 @@ async def test_data_sources_quota_warning_band(client):
 
 
 @pytest.mark.asyncio
-async def test_turn_quota_exceeded_blocks_chat_before_any_llm_call(client):
+async def test_credit_quota_exceeded_blocks_chat_before_any_llm_call(client):
     """Proves the block happens before spending money on a real LLM call -
     no LLM mocking needed since the dependency short-circuits first."""
     token, tenant_id = await _register(client)
-    # A fresh tenant has exactly 1 active member, so the cap is 25 * 30 * 1.
+    # A fresh tenant has exactly 1 active member, so the cap is rate * 30 * 1.
     limit = await _expected_cap(tenant_id)
-    await _seed_turns(tenant_id, limit)
+    await _seed_credits(tenant_id, limit)
 
     r = await client.post(
         "/api/v1/chat/", json={"message": "hello"},
@@ -109,7 +122,7 @@ async def test_turn_quota_exceeded_blocks_chat_before_any_llm_call(client):
     )
     assert r.status_code == 402
     assert r.json()["detail"]["error"] == "quota_exceeded"
-    assert r.json()["detail"]["resource"] == "turns"
+    assert r.json()["detail"]["resource"] == "ai_credits"
 
 
 @pytest.mark.asyncio
@@ -119,7 +132,7 @@ async def test_pipeline_runs_quota_exceeded_blocks_trigger(client):
     pipe = await client.post("/api/v1/pipelines/", json={"name": "Quota Pipeline"}, headers=headers)
     pipeline_id = pipe.json()["id"]
 
-    limit = PLANS["starter"]["pipeline_runs_per_month"]  # 100
+    limit = PLANS["standard"]["pipeline_runs_per_month"]  # 100
     async with tenant_session(tenant_id) as db:
         for _ in range(limit):
             db.add(PipelineRun(
@@ -136,7 +149,7 @@ async def test_pipeline_runs_quota_exceeded_blocks_trigger(client):
 @pytest.mark.asyncio
 async def test_data_sources_quota_exceeded_blocks_create(client):
     token, tenant_id = await _register(client)
-    await _seed_sources(tenant_id, PLANS["starter"]["max_data_sources"])
+    await _seed_sources(tenant_id, PLANS["standard"]["max_data_sources"])
 
     r = await client.post(
         "/api/v1/sources/", json={"name": "one too many", "source_type": "csv", "connection_config": {}},
@@ -150,7 +163,7 @@ async def test_data_sources_quota_exceeded_blocks_create(client):
 async def test_team_members_quota_exceeded_blocks_invite(client):
     from services.auth_service import hash_password
     token, tenant_id = await _register(client)
-    limit = PLANS["starter"]["max_team_members"]  # 3, owner counts as 1
+    limit = PLANS["standard"]["max_team_members"]  # 3, owner counts as 1
 
     async with tenant_session(tenant_id) as db:
         for _ in range(limit - 1):
@@ -175,7 +188,7 @@ async def test_billing_usage_endpoint_returns_all_four_resources(client):
     r = await client.get("/api/v1/billing/usage", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
     usage = r.json()["usage"]
-    assert set(usage.keys()) == {"turns", "pipeline_runs", "data_sources", "team_members"}
+    assert set(usage.keys()) == {"ai_credits", "pipeline_runs", "data_sources", "team_members"}
     assert usage["team_members"]["used"] == 1  # the owner themself
     assert usage["team_members"]["status"] == "ok"
 
@@ -184,20 +197,20 @@ async def test_billing_usage_endpoint_returns_all_four_resources(client):
 async def test_billing_plans_endpoint_is_public(client):
     r = await client.get("/api/v1/billing/plans")
     assert r.status_code == 200
-    assert set(r.json()["plans"].keys()) == {"starter", "growth", "scale"}
+    assert set(r.json()["plans"].keys()) == {"standard", "starter_plus", "premium", "enterprise"}
 
 
 @pytest.mark.asyncio
-async def test_scale_tier_has_unlimited_data_sources(client):
+async def test_enterprise_tier_has_unlimited_data_sources(client):
     token, tenant_id = await _register(client)
     async with tenant_session(tenant_id) as db:
         from models.all_models import Tenant
         r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         tenant = r.scalar_one()
-        tenant.plan = "scale"
+        tenant.plan = "enterprise"
         await db.commit()
 
-    await _seed_sources(tenant_id, 50)  # way past starter's limit
+    await _seed_sources(tenant_id, 50)  # way past standard's limit
     status = await get_quota_status(tenant_id, "data_sources")
     assert status["limit"] is None
     assert status["status"] == "ok"
