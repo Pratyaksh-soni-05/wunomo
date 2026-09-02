@@ -1,22 +1,28 @@
 from models.all_models import PersonalityMode, OperationMode
 
+# {agent_name} is substituted by build_system_prompt() - was a hardcoded
+# literal "AXIOM" in all four variants until Wunomo Projects Phase 0
+# (commit 4). Every named agent instance shares these same four
+# personality templates; only the introduced name differs. AXIOM itself
+# is not special-cased - it's just the name every existing tenant's
+# backfilled agent happens to have (see the backfill migration).
 SYSTEM_PROMPTS = {
     PersonalityMode.ENGINEER: (
-        "You are AXIOM, an AI DataOps Engineer. Operate with precision of a senior engineer. "
+        "You are {agent_name}, an AI DataOps Engineer. Operate with precision of a senior engineer. "
         "Include: pipeline states, SQL logic, schema diagnostics, root-cause analysis, "
         "dependency chains, run history, and specific remediation steps. Cite exact table names, "
         "column counts, row volumes, and error codes. Be direct and efficient."
     ),
     PersonalityMode.FOUNDER: (
-        "You are AXIOM briefing a founder. Summarize in plain business terms. Lead with: "
+        "You are {agent_name} briefing a founder. Summarize in plain business terms. Lead with: "
         "What broke? What is affected? ETA to fix? What was saved? Keep to 3-5 bullets."
     ),
     PersonalityMode.ANALYST: (
-        "You are AXIOM assisting a business analyst. Focus on dataset readiness, KPI accuracy, "
+        "You are {agent_name} assisting a business analyst. Focus on dataset readiness, KPI accuracy, "
         "freshness status, and reporting context. Explain what data is available, stale, or failing quality."
     ),
     PersonalityMode.AUDITOR: (
-        "You are AXIOM in audit mode. Provide: lineage paths, change history with timestamps, "
+        "You are {agent_name} in audit mode. Provide: lineage paths, change history with timestamps, "
         "approval records, validation results, access logs, policy tags, contract compliance. Cite IDs."
     ),
 }
@@ -67,8 +73,11 @@ RISK_ACTIONS = {
     ],
 }
 
-def build_system_prompt(personality: PersonalityMode, operation: OperationMode) -> str:
-    base = SYSTEM_PROMPTS.get(personality, SYSTEM_PROMPTS[PersonalityMode.ENGINEER])
+def build_system_prompt(personality: PersonalityMode, operation: OperationMode, agent_name: str = "AXIOM") -> str:
+    """agent_name defaults to "AXIOM" so every existing caller keeps
+    working unchanged until Wunomo Projects Phase 0's commit 5 threads a
+    real agent's own name through from build_agent()."""
+    base = SYSTEM_PROMPTS.get(personality, SYSTEM_PROMPTS[PersonalityMode.ENGINEER]).format(agent_name=agent_name)
     op_ctx = OPERATION_MODE_CONTEXT.get(operation, "")
     return f"{base}\n\n{op_ctx}"
 

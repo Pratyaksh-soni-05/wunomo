@@ -6,8 +6,9 @@ rerun_pipeline/modify_business_rule/update_contract/publish_output/
 run_quality_check/list_sources/generate_report went unnoticed -- see
 CLAUDE.md's "Phantom high-risk tools" Known-broken row.
 """
-from agent.personality import RISK_ACTIONS, get_risk_level
+from agent.personality import RISK_ACTIONS, get_risk_level, build_system_prompt, SYSTEM_PROMPTS
 from agent.tools import ALL_TOOLS
+from models.all_models import PersonalityMode, OperationMode
 
 REAL_TOOL_NAMES = {t.name for t in ALL_TOOLS}
 
@@ -24,6 +25,30 @@ def test_no_tool_name_appears_in_more_than_one_tier():
         for name in names:
             assert name not in seen, f"'{name}' appears in both '{seen.get(name)}' and '{tier}'"
             seen[name] = tier
+
+
+def test_system_prompt_defaults_to_axiom_for_backward_compatibility():
+    """Wunomo Projects Phase 0 (commit 4): every SYSTEM_PROMPTS variant
+    used to hardcode the literal string "AXIOM" - now a {agent_name}
+    template. No real call site passes agent_name yet (that's commit 5),
+    so the default must reproduce the exact old behavior."""
+    prompt = build_system_prompt(PersonalityMode.ENGINEER, OperationMode.ASSISTED)
+    assert "You are AXIOM, an AI DataOps Engineer." in prompt
+
+
+def test_system_prompt_substitutes_a_real_agent_name():
+    prompt = build_system_prompt(PersonalityMode.FOUNDER, OperationMode.ADVISORY, agent_name="Nova")
+    assert "You are Nova briefing a founder." in prompt
+    assert "AXIOM" not in prompt
+
+
+def test_every_personality_variant_has_exactly_one_name_placeholder():
+    """A future edit to SYSTEM_PROMPTS that reintroduces a hardcoded name
+    literal (instead of {agent_name}) would silently make that one
+    variant immune to renaming - catch it here, not live."""
+    for mode, template in SYSTEM_PROMPTS.items():
+        assert "{agent_name}" in template, f"{mode} has no {{agent_name}} placeholder"
+        assert "AXIOM" not in template, f"{mode} still hardcodes a literal AXIOM"
 
 
 def test_get_risk_level_defaults_low_for_an_unlisted_real_tool():
