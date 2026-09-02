@@ -205,6 +205,11 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
     id = Column(String, primary_key=True, default=gen_uuid)
     tenant_id = Column(String, nullable=False)
+    # Nullable, no FK - matches this table's own tenant_id (also no FK):
+    # an audit log must never fail to record an action over a referential-
+    # integrity check. History predates agents-as-records, backfills to
+    # AXIOM's row-one agent per tenant.
+    agent_id = Column(String, nullable=True)
     actor = Column(String(255))
     action = Column(String(255), nullable=False)
     resource_type = Column(String(100))
@@ -238,6 +243,10 @@ class ChatMessage(Base):
     tenant_id = Column(String, nullable=False)
     user_id = Column(String, nullable=False)
     session_id = Column(String, nullable=False)
+    # Nullable: history predates agents-as-records, backfills to AXIOM's
+    # new row-one agent. No FK - matches this table's own existing
+    # convention (tenant_id/user_id above are plain columns too, not FKs).
+    agent_id = Column(String, nullable=True)
     role = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
     personality_mode = Column(String(50))
@@ -299,6 +308,12 @@ class LlmUsageEvent(Base):
     # nothing and lets a rollup query LEFT JOIN and treat "no matching Task
     # row" as its own honest bucket instead of failing the insert.
     task_id = Column(String, nullable=True, index=True)
+    # Nullable, no FK - same reasoning as task_id above, and matches this
+    # table's own tenant_id (also no FK): this table is a metering log
+    # that must never fail an insert over a referential-integrity check.
+    # History predates agents-as-records, backfills to AXIOM's row-one
+    # agent per tenant.
+    agent_id = Column(String, nullable=True, index=True)
     request_type = Column(String(50), nullable=False)
     provider = Column(String(50), nullable=False)
     model = Column(String(100), nullable=False)
@@ -431,6 +446,82 @@ class ApiKey(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class AgentEmployeeType(str, enum.Enum):
+    """Which product line this agent instance is (Wunomo Projects Phase 0
+    - see docs/context/WUNOMO_PROJECTS_PROPOSAL_v2.md). Deliberately only
+    the one real, backed employee type for now - LEDGER/PULSE/etc. have no
+    tools or modules built yet, and adding placeholder values here before
+    they exist risks the same "never imply a locked employee is
+    available" mistake the proposal explicitly holds the *frontend* hire
+    screen to. Extend this the day a second employee type actually ships,
+    not before - a new enum value is a trivial, non-breaking migration
+    later."""
+    DATAOPS = "dataops"
+
+
+class AgentInstanceStatus(str, enum.Enum):
+    ACTIVE = "active"
+    OFFBOARDED = "offboarded"
+
+
+class AgentInstance(Base):
+    """A named, tenant-owned agent (Wunomo Projects Phase 0). AXIOM
+    becomes row one per tenant, backfilled by the next migration - not a
+    special case; every agent, including AXIOM, is a real row here from
+    this point forward.
+
+    model is authoritative per-agent, not a live reference to
+    Tenant.settings.ai_model_override - the tenant override is only the
+    seed value copied in when an agent is created (application-level, not
+    a DB default), so editing the tenant setting later never silently
+    moves an already-created agent's model out from under it.
+
+    updated_at (not a separate version counter, and not a new pattern -
+    DataSource already does exactly this) is what get_agent()'s cache key
+    incorporates going forward: editing any field on this row bumps
+    updated_at automatically (onupdate=datetime.utcnow), which changes
+    the cache key, which means a stale cached agent object can never be
+    served after an edit - invalidation by construction, not by a call
+    site remembering to bust the cache."""
+    __tablename__ = "agent_instances"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_agent_instances_tenant_name"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    employee_type = Column(SAEnum(AgentEmployeeType), nullable=False, default=AgentEmployeeType.DATAOPS)
+    personality = Column(SAEnum(PersonalityMode), nullable=False, default=PersonalityMode.ENGINEER)
+    operation_mode = Column(SAEnum(OperationMode), nullable=False, default=OperationMode.ASSISTED)
+    model = Column(String, nullable=False)
+    standing_instructions = Column(Text, nullable=True)
+    # None = no agent-level ceiling, draw against the tenant's plan-level
+    # AI-credit quota only. Schema only this pass (Wunomo Projects Phase
+    # 0) - the two-gate enforcement code path (tenant plan limit AND
+    # agent budget, both must pass) lands with Phase 1, not here.
+    monthly_token_budget = Column(Integer, nullable=True)
+    status = Column(SAEnum(AgentInstanceStatus), nullable=False, default=AgentInstanceStatus.ACTIVE)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class AgentSource(Base):
+    """Scope join table (Wunomo Projects Phase 0) - deliberately a real,
+    queryable table, not a JSON column on AgentInstance, so "can this
+    agent touch this source" is enforceable in SQL and joinable, not just
+    checked in Python after the fact. Every permission system that began
+    as JSON in a column in this codebase got rewritten; this one starts
+    right. Intersection-permission enforcement itself (has_permission(...)
+    AND source in agent_scope) is Phase 1, not Phase 0 - this table only
+    exists so Phase 1 has something real to query."""
+    __tablename__ = "agent_sources"
+    __table_args__ = (UniqueConstraint("agent_id", "source_id", name="uq_agent_sources_agent_source"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=False, index=True)
+    source_id = Column(String, ForeignKey("data_sources.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class TaskShape(str, enum.Enum):
     """Deliberately narrow for v1 (see CLAUDE.md's item-6 design decisions)
     - a fixed, pre-vetted set of goal->plan-shape pairings, not open-ended
@@ -488,6 +579,11 @@ class Task(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
     tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)  # initiator - see class docstring re: role
+    # Nullable: history predates agents-as-records (Wunomo Projects Phase
+    # 0) and backfills to AXIOM's new row-one agent in the next migration;
+    # a real FK because Task already uses FKs on its other identity
+    # columns above, matching this table's own established convention.
+    agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=True)
     originating_session_id = Column(String, nullable=True)  # the chat session this task was spawned from, if any
     goal = Column(Text, nullable=False)
     task_shape = Column(SAEnum(TaskShape), nullable=False)
