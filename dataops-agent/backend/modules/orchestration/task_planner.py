@@ -43,6 +43,7 @@ TASK_SHAPE_ALLOWED_TOOLS: dict[TaskShape, list[str]] = {
     ],
     TaskShape.SYNC_PROFILE_QUALITY: [
         "list_data_sources", "sync_source", "profile_schema", "run_quality_checks", "get_quality_report",
+        "list_pipelines",
     ],
 }
 
