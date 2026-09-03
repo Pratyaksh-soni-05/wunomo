@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import uuid
 from models.approval_model import ApprovalRequest, ApprovalStatus
 from schemas.chat_schema import ChatRequest
-from services.channel_routing import channel_agent_members, resolve_mentioned_agent
+from services.channel_routing import channel_agent_members, load_agent_channel_context, resolve_mentioned_agent
 from services.mentions import parse_mention
 from langchain_core.messages import AIMessage as LCAIMessage, ToolMessage as LCToolMessage, SystemMessage as LCSystemMessage
 
@@ -129,14 +129,13 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
                         session_id, f"{who} in this channel — please @mention who you're talking to.",
                     )
 
-            # Interim context for channel messages (Wunomo Projects Phase
-            # 2 -- real filtered context, item 4 of the phase's build
-            # order, lands in the next commit): every channel turn starts
-            # fresh for now, deliberately, rather than build a throwaway
-            # "unfiltered full channel history" query the next commit
-            # would just replace. Never treat this as finished behavior.
-            history = []
-            summary_row = None
+            # Context filtering, reading (a) (Wunomo Projects Phase 2):
+            # an agent sees only messages it authored or was mentioned
+            # in, within this channel -- enforced by this query, never
+            # by a prompt instruction. See load_agent_channel_context's
+            # own docstring for reading (b)'s known limitation
+            # (content-aware redaction is not implemented).
+            history_msgs, summary_row = await load_agent_channel_context(db, channel.id, tenant_id, agent_id)
         else:
             # Ownership check: a session_id may only be continued by the
             # user who started it. GET /sessions and GET /sessions/{id}/
@@ -176,14 +175,6 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
             r = await db.execute(query.order_by(ChatMessage.created_at.asc()).limit(200))
             history_msgs = r.scalars().all()
 
-            from langchain_core.messages import HumanMessage, AIMessage
-            history = []
-            for m in history_msgs:
-                if m.role == "user":
-                    history.append(HumanMessage(content=m.content))
-                elif m.role == "assistant":
-                    history.append(AIMessage(content=m.content))
-
             # Wunomo Projects Phase 1: resolve the tenant's real agent so
             # the scope gate (agent_scope_denied_tool_calls, see
             # agent_node) has an actual agent_id to check against —
@@ -207,13 +198,24 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
     # (summarization included) happens for this turn.
     await enforce_agent_budget(agent_id)
 
-    if channel is None:
-        history, new_summary = await window_and_summarize(
-            history, tenant_id=tenant_id, session_id=session_id,
-            prior_summary=summary_row.content if summary_row is not None else None,
-        )
-    else:
-        new_summary = None
+    from langchain_core.messages import HumanMessage, AIMessage
+    history = []
+    for m in history_msgs:
+        if m.role == "user":
+            history.append(HumanMessage(content=m.content))
+        elif m.role == "assistant":
+            history.append(AIMessage(content=m.content))
+
+    # Windowing/summarization applies identically whether this history
+    # came from a private session or a channel's already-agent-filtered
+    # query above -- window_and_summarize() itself doesn't know or care
+    # which. For a channel, the resulting summary row is scoped to this
+    # agent (see the persistence block below), matching how
+    # load_agent_channel_context() looked it up.
+    history, new_summary = await window_and_summarize(
+        history, tenant_id=tenant_id, session_id=session_id,
+        prior_summary=summary_row.content if summary_row is not None else None,
+    )
 
     result = await run_agent(
         user_message=message_text, tenant_id=tenant_id, user_id=user["sub"],
@@ -259,6 +261,7 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
                 session_id=session_id, role="summary", content=new_summary,
                 personality_mode=req.personality_mode, operation_mode=req.operation_mode,
                 created_at=datetime.utcnow(),
+                agent_id=(agent_id if channel is not None else None),
             ))
 
         # mentioned_agent_id (Wunomo Projects Phase 2) is only ever set on

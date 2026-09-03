@@ -5,6 +5,7 @@ called with) -- these tests are about routing, not the LLM.
 """
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -306,3 +307,108 @@ async def test_two_different_users_can_both_post_in_the_same_channel(client, mon
         "message": "@Nova hi from B", "session_id": channel_id,
     })
     assert r.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Context filtering, reading (a) (Wunomo Projects Phase 2): enforced by
+# load_agent_channel_context's query, never by a prompt instruction.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_agent_only_sees_messages_it_authored_or_was_mentioned_in(client, monkeypatch):
+    """Nova and Atlas share one channel. Atlas's private exchange with the
+    user must never appear in the history a later turn loads for Nova, and
+    vice versa -- the whole point of reading (a)."""
+    token, tenant_id, _ = await _register(client, "ctxA")
+    nova_id = await _hire_agent(client, token, "Nova")
+    atlas_id = await _hire_agent(client, token, "Atlas")
+    r = await client.post("/api/v1/channels/", headers=_auth(token), json={"name": "General"})
+    channel_id = r.json()["id"]
+    await client.post(f"/api/v1/channels/{channel_id}/members/agents/{nova_id}", headers=_auth(token))
+    await client.post(f"/api/v1/channels/{channel_id}/members/agents/{atlas_id}", headers=_auth(token))
+
+    calls = []
+
+    async def _run(*, user_message, tenant_id, user_id, session_id, caller_role,
+                    personality_mode, operation_mode, history, context, agent_id):
+        calls.append({"agent_id": agent_id, "history": list(history or [])})
+        reply = f"ack: {user_message}"
+        return {
+            "response": reply, "provider": None, "pending_approvals": [],
+            "role_denied": [], "scope_denied": [],
+            "messages": list(history or []) + [AIMessage(content=reply)],
+            "session_id": session_id, "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    monkeypatch.setattr(chat_module, "run_agent", _run)
+
+    await client.post("/api/v1/chat/", headers=_auth(token), json={
+        "message": "@Nova nova secret task", "session_id": channel_id,
+    })
+    await client.post("/api/v1/chat/", headers=_auth(token), json={
+        "message": "@Atlas atlas secret task", "session_id": channel_id,
+    })
+    await client.post("/api/v1/chat/", headers=_auth(token), json={
+        "message": "@Nova nova follow up", "session_id": channel_id,
+    })
+    # A second Atlas turn so its loaded history (built from messages
+    # strictly before this turn) has something to actually check.
+    await client.post("/api/v1/chat/", headers=_auth(token), json={
+        "message": "@Atlas atlas follow up", "session_id": channel_id,
+    })
+
+    nova_calls = [c for c in calls if c["agent_id"] == nova_id]
+    final_nova_history_text = " ".join(m.content for m in nova_calls[-1]["history"])
+    assert "nova secret task" in final_nova_history_text
+    assert "atlas secret task" not in final_nova_history_text
+
+    atlas_calls = [c for c in calls if c["agent_id"] == atlas_id]
+    final_atlas_history_text = " ".join(m.content for m in atlas_calls[-1]["history"])
+    assert "atlas secret task" in final_atlas_history_text
+    assert "nova secret task" not in final_atlas_history_text
+    assert "nova follow up" not in final_atlas_history_text
+
+
+@pytest.mark.asyncio
+async def test_channel_summary_is_scoped_per_agent_not_shared(client, monkeypatch):
+    """Two agents in the same channel must not collide on, or leak into,
+    each other's rolling summary row -- ChatMessage.agent_id on the
+    summary row itself is what keeps them independent (no new schema)."""
+    import agent.dataops_agent as dataops_agent
+
+    token, tenant_id, _ = await _register(client, "ctxB")
+    nova_id = await _hire_agent(client, token, "Nova")
+    atlas_id = await _hire_agent(client, token, "Atlas")
+    r = await client.post("/api/v1/channels/", headers=_auth(token), json={"name": "General"})
+    channel_id = r.json()["id"]
+    await client.post(f"/api/v1/channels/{channel_id}/members/agents/{nova_id}", headers=_auth(token))
+    await client.post(f"/api/v1/channels/{channel_id}/members/agents/{atlas_id}", headers=_auth(token))
+
+    fake_summarize = AsyncMock(return_value="Nova-only summary text.")
+    monkeypatch.setattr(dataops_agent, "invoke_llm", fake_summarize)
+    monkeypatch.setattr(chat_module, "run_agent", _fake_run_agent({}))
+
+    # One turn to Atlas first -- short, must never trigger summarization
+    # and must never end up scoped under Nova's agent_id.
+    await client.post("/api/v1/chat/", headers=_auth(token), json={
+        "message": "@Atlas quick check", "session_id": channel_id,
+    })
+
+    # 8 turns to Nova crosses CONTEXT_WINDOW_SIZE (12), matching the
+    # private-session rolling-summary test's own iteration count.
+    for i in range(8):
+        r = await client.post("/api/v1/chat/", headers=_auth(token), json={
+            "message": f"@Nova turn {i}", "session_id": channel_id,
+        })
+        assert r.status_code == 200
+
+    fake_summarize.assert_called()
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(ChatMessage).where(
+            ChatMessage.session_id == channel_id, ChatMessage.role == "summary",
+        ))
+        summary_rows = r.scalars().all()
+
+    assert len(summary_rows) == 1
+    assert summary_rows[0].agent_id == nova_id
+    assert summary_rows[0].content == "Nova-only summary text."
