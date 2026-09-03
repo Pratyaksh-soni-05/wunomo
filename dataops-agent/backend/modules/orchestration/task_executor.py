@@ -616,13 +616,25 @@ def _set_task_status_unless_cancelled(task: Task, new_status: TaskStatus) -> boo
 
 
 def _check_wall_clock_cap(task: Task) -> str | None:
+    """Bounds real execution exposure, not raw calendar time since
+    started_at -- item 72 (WALKTHROUGH_FINDINGS_2026-08.md): a task
+    approved more than MAX_TASK_WALL_CLOCK_HOURS after it started used
+    to be killed the instant it was approved, undoing the approval that
+    was just granted. task.paused_seconds (accumulated at every
+    pause->RUNNING transition -- see the two call sites that increment
+    it) is subtracted here, so time spent waiting on a human/quota/lock
+    is free, exactly like the walk-away feature this cap has to coexist
+    with requires."""
     if task.started_at is None:
         return None
-    elapsed_hours = (datetime.utcnow() - task.started_at).total_seconds() / 3600
+    raw_elapsed_seconds = (datetime.utcnow() - task.started_at).total_seconds()
+    paused_seconds = task.paused_seconds or 0
+    elapsed_hours = (raw_elapsed_seconds - paused_seconds) / 3600
     if elapsed_hours > MAX_TASK_WALL_CLOCK_HOURS:
         return (
-            f"Stopped: exceeded the {MAX_TASK_WALL_CLOCK_HOURS}-hour wall-clock budget "
-            f"(started at {task.started_at.isoformat()}, running for {elapsed_hours:.1f}h)."
+            f"Stopped: exceeded the {MAX_TASK_WALL_CLOCK_HOURS}-hour wall-clock execution budget "
+            f"(started at {task.started_at.isoformat()}, {elapsed_hours:.1f}h of active execution "
+            f"excluding {paused_seconds / 3600:.1f}h spent paused for approval/quota/a source lock)."
         )
     return None
 
@@ -697,6 +709,14 @@ async def execute_next_step(task_id: str) -> dict:
             return {"outcome": "not_runnable", "status": task.status.value}
 
         if task.status in (TaskStatus.QUEUED, TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED):
+            # paused_seconds only accumulates for a status that was
+            # actually a pause (QUEUED never was -- nothing to subtract
+            # for a task that hasn't started yet, and its paused_at is
+            # always None here).
+            if task.status in (TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED) and task.paused_at is not None:
+                task.paused_seconds = (task.paused_seconds or 0) + int(
+                    (datetime.utcnow() - task.paused_at).total_seconds()
+                )
             _set_task_status_unless_cancelled(task, TaskStatus.RUNNING)
             task.started_at = task.started_at or datetime.utcnow()
             await db.commit()
@@ -1205,6 +1225,10 @@ async def resume_task(task_id: str, resolved_by: str, notes: str = "") -> dict:
         approval_req.resolved_at = datetime.utcnow()
         approval_req.resolution_note = notes
 
+        if task.paused_at is not None:
+            task.paused_seconds = (task.paused_seconds or 0) + int(
+                (datetime.utcnow() - task.paused_at).total_seconds()
+            )
         step.status = TaskStepStatus.PENDING
         _set_task_status_unless_cancelled(task, TaskStatus.RUNNING)
         await db.commit()

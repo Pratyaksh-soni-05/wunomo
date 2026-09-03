@@ -709,6 +709,22 @@ class Task(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
     paused_at = Column(DateTime, nullable=True)  # drives the pause-timeout expiry check
+    # Cumulative seconds spent in ANY paused status (PAUSED_NEEDS_APPROVAL,
+    # PAUSED_QUOTA_EXCEEDED, PAUSED_SOURCE_LOCKED), incremented at every
+    # transition out of one of those back to RUNNING -- see
+    # task_executor.py's own comment on _check_wall_clock_cap for why this
+    # exists: the wall-clock cap must bound real execution exposure, not
+    # raw calendar time since started_at, or a task paused for approval
+    # over a weekend gets killed the instant it's approved (found live,
+    # WALKTHROUGH_FINDINGS_2026-08.md item 72). PAUSED_FAILED_STEP and
+    # PAUSED_PLAN_INVALID have no resume path anywhere in this codebase
+    # (confirmed by exhaustive grep) and are excluded on purpose -- a task
+    # that reaches either one never transitions back to RUNNING, so there
+    # is nothing to subtract for them. Backfilled to 0 for every existing
+    # row: no historical task has a recoverable pause history to compute
+    # this from, and 0 is the correct, honest value for "unknown, assume
+    # no paused time," not a placeholder.
+    paused_seconds = Column(Integer, nullable=False, default=0)
     completed_at = Column(DateTime, nullable=True)
     # Real, persisted reason for a non-clean stop (stage 6, Q4): which cap
     # fired (step/wall-clock/loop) for a FAILED task, or who cancelled and

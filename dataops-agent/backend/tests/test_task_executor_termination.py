@@ -12,8 +12,10 @@ from sqlalchemy import select
 
 import modules.orchestration.task_executor as executor_module
 from database import AsyncSessionLocal
-from modules.orchestration.task_executor import cancel_task, execute_next_step
-from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus, User
+from modules.orchestration.task_executor import cancel_task, execute_next_step, resume_task
+from models.all_models import (
+    ApprovalRequest, Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus, User,
+)
 
 
 async def _register(client, prefix="taskterm"):
@@ -72,6 +74,65 @@ async def test_wall_clock_cap_terminates_with_a_specific_reason(client, monkeypa
     assert task.status == TaskStatus.FAILED
     assert "wall-clock" in task.termination_reason
     assert "hour" in task.termination_reason
+
+
+@pytest.mark.asyncio
+async def test_wall_clock_cap_excludes_time_already_recorded_as_paused(client):
+    """Item 72's own accounting, in isolation: a task whose raw elapsed
+    time since started_at is way over the 4-hour cap must still run
+    fine if paused_seconds already accounts for nearly all of it,
+    leaving under 4 real execution hours."""
+    tenant_id, user_id = await _register(client, "wallclockpaused")
+    task_id, (step_id,) = await _seed_task(tenant_id, user_id, [{
+        "step_index": 0, "description": "check health", "source": TaskStepSource.LLM_PLANNED,
+        "tool_name": "get_system_health", "tool_args": {}, "status": TaskStepStatus.PENDING,
+    }], status=TaskStatus.RUNNING, started_at=datetime.utcnow() - timedelta(hours=999),
+       paused_seconds=int(timedelta(hours=998).total_seconds()))
+
+    outcome = await execute_next_step(task_id)
+    assert outcome["outcome"] != "terminated_wall_clock"
+
+
+@pytest.mark.asyncio
+async def test_task_approved_more_than_4_hours_after_it_started_does_not_die_on_wall_clock(client, monkeypatch):
+    """Item 72, end to end through the real approval-resume path: a task
+    paused for approval for over MAX_TASK_WALL_CLOCK_HOURS (4) must
+    resume and run its step, not be immediately killed for wall-clock
+    exhaustion the instant it's approved -- the exact bug found live.
+    paused_at is backdated to simulate the wait, matching how a real
+    approval left untouched over a weekend would look by the time
+    someone gets to it."""
+    tenant_id, user_id = await _register(client, "wallclockapproval")
+    task_id, (step_id,) = await _seed_task(tenant_id, user_id, [{
+        "step_index": 0, "description": "sync a source", "source": TaskStepSource.LLM_PLANNED,
+        "tool_name": "sync_source", "tool_args": {"source_id": "src-1"}, "status": TaskStepStatus.PENDING,
+    }], status=TaskStatus.QUEUED, started_at=datetime.utcnow())
+
+    blocked = await execute_next_step(task_id)
+    assert blocked["outcome"] == "blocked_needs_approval"
+
+    # Backdate paused_at by 5 hours -- more than MAX_TASK_WALL_CLOCK_HOURS
+    # (4) -- to simulate an approval that sat untouched for real.
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Task).where(Task.id == task_id))
+        task = r.scalar_one()
+        task.paused_at = datetime.utcnow() - timedelta(hours=5)
+        await db.commit()
+
+    async def _ok(tenant_id, tool_name, tool_args, **kwargs):
+        return {"status": "synced", "rows": 5}
+    monkeypatch.setattr(executor_module, "_call_tool", _ok)
+
+    result = await resume_task(task_id, resolved_by=str(uuid.uuid4()), notes="approved late")
+    assert result["outcome"] == "step_succeeded", result
+
+    task, step = await _fresh(task_id, step_id)
+    assert task.status == TaskStatus.RUNNING
+    assert step.status == TaskStepStatus.SUCCEEDED
+    # ~5 hours of paused time got credited, not lost -- generous bounds
+    # for the real few milliseconds of test execution between the
+    # backdate and the resume call.
+    assert 4.9 * 3600 < task.paused_seconds < 5.1 * 3600
 
 
 @pytest.mark.asyncio
