@@ -46,7 +46,7 @@ from typing import Optional
 from sqlalchemy import select, func
 
 from database import AsyncSessionLocal
-from models.all_models import LlmUsageEvent, PipelineRun, Pipeline, DataSource, User, Tenant
+from models.all_models import AgentInstance, LlmUsageEvent, PipelineRun, Pipeline, DataSource, User, Tenant
 
 WARNING_THRESHOLD = 0.8
 
@@ -155,3 +155,46 @@ async def get_quota_status(tenant_id: str, resource: str) -> dict:
 
 async def get_all_quota_statuses(tenant_id: str) -> dict:
     return {resource: await get_quota_status(tenant_id, resource) for resource in _LIMIT_KEY}
+
+
+async def _agent_token_usage(db, agent_id: str) -> int:
+    """Raw token count (input+output, unweighted), not the tenant-level
+    "credits" formula (input*1 + output*3) - a human setting "Nova gets
+    40k tokens a month" means tokens, not a cost-weighted proxy for
+    tokens. Every llm_usage_events row already carries agent_id (Phase 0/
+    1's own threading work), so this is a live aggregate, same pattern as
+    _current_usage above, not a separately-maintained counter."""
+    r = await db.execute(
+        select(LlmUsageEvent.input_tokens, LlmUsageEvent.output_tokens).where(
+            LlmUsageEvent.agent_id == agent_id,
+            LlmUsageEvent.created_at >= _month_start(),
+        )
+    )
+    return sum((inp or 0) + (out or 0) for inp, out in r.all())
+
+
+async def get_agent_quota_status(agent_id: str) -> dict:
+    """The second gate (Wunomo Projects Phase 1, part two) alongside
+    get_quota_status("ai_credits") above - both must pass, this one
+    never replaces that one. AgentInstance.monthly_token_budget is
+    nullable: None means no agent-level ceiling, draw against the
+    tenant's plan-level quota only (the Phase 0 column comment's own
+    stated intent) - returned as an always-"ok", None-limit status,
+    same shape get_quota_status uses for the Scale plan's unlimited
+    data_sources, so callers can treat both the same way."""
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(AgentInstance.monthly_token_budget).where(AgentInstance.id == agent_id))
+        row = r.first()
+        budget = row[0] if row else None
+        if budget is None:
+            return {"resource": "agent_tokens", "used": 0, "limit": None, "percent": 0.0, "status": "ok"}
+        used = await _agent_token_usage(db, agent_id)
+
+    percent = round((used / budget) * 100, 1) if budget else 100.0
+    if used >= budget:
+        status = "exceeded"
+    elif used >= budget * WARNING_THRESHOLD:
+        status = "warning"
+    else:
+        status = "ok"
+    return {"resource": "agent_tokens", "used": used, "limit": budget, "percent": percent, "status": status}

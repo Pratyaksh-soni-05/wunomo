@@ -73,7 +73,7 @@ from models.all_models import (
 )
 from services.agent_scope import agent_scope_denial_reason
 from services.llm_service import invoke_llm
-from services.quota_service import get_quota_status
+from services.quota_service import get_agent_quota_status, get_quota_status
 from services.rbac import TOOL_CAPABILITIES, has_permission
 
 MAX_ATTEMPTS_PER_STEP = 3  # 1 initial + up to 2 recovery attempts
@@ -983,8 +983,24 @@ async def execute_next_step(task_id: str) -> dict:
                 # degrading to an unadapted retry (Q4) -- the only real
                 # LLM spend anywhere in step execution is this adapt call,
                 # so this is the one place quota needs to be checked.
+                # Two-gate (Wunomo Projects Phase 1, part two): the
+                # tenant-level check existed first; the agent-level one
+                # is the second, independent gate -- either exceeded
+                # pauses the task the same way, and last_error is
+                # overwritten so the pause reason names the actual gate
+                # that blocked it, not the stale domain error from the
+                # tool call that triggered this adapt attempt.
                 quota = await get_quota_status(tenant_id, "ai_credits")
                 if quota["status"] == "exceeded":
+                    last_error = "Paused: the tenant's AI-credit quota is exhausted for this billing period."
+                    quota_paused_attempt = attempt
+                    break
+                agent_quota = await get_agent_quota_status(agent_id) if agent_id else {"status": "ok"}
+                if agent_quota["status"] == "exceeded":
+                    last_error = (
+                        f"Paused: this agent's monthly token budget "
+                        f"({agent_quota['used']}/{agent_quota['limit']} tokens) is exhausted."
+                    )
                     quota_paused_attempt = attempt
                     break
                 adapted_args = await _adapt_step_args(

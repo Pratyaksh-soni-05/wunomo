@@ -24,7 +24,7 @@ from modules.orchestration.task_planner import (
 )
 from services.rbac import has_permission
 
-from .auth import enforce_quota, get_current_user, require_permission
+from .auth import enforce_agent_budget, enforce_quota, get_current_user, require_permission
 
 router = APIRouter()
 
@@ -335,6 +335,11 @@ async def create_task(body: CreateTaskRequest, current_user: dict = Depends(enfo
         ).order_by(AgentInstance.created_at.asc()).limit(1))
         agent_row = r.scalar_one_or_none()
     agent_id = agent_row.id if agent_row is not None else None
+
+    # Gate 2 of the two-gate token-budget path (Wunomo Projects Phase 1,
+    # part two) - before the real planning LLM call, same reasoning as
+    # chat.py's own placement of this check.
+    await enforce_agent_budget(agent_id)
 
     try:
         steps = await generate_plan(tenant_id, user_id, body.goal, task_shape, task_id=task_id, agent_id=agent_id)

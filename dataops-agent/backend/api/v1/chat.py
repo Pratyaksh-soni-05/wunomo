@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from .auth import get_current_user, enforce_quota
+from .auth import get_current_user, enforce_quota, enforce_agent_budget
 from agent.dataops_agent import run_agent, window_and_summarize
 from database import AsyncSessionLocal
 from models.all_models import ChatMessage
@@ -112,6 +112,13 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
         ).order_by(AgentInstance.created_at.asc()).limit(1))
         agent_row = r.scalar_one_or_none()
         agent_id = agent_row.id if agent_row is not None else None
+
+    # Gate 2 of the two-gate token-budget path (Wunomo Projects Phase 1,
+    # part two) - the tenant-level gate already ran as enforce_quota's
+    # own dependency above; this is the agent-level one, checked as soon
+    # as a real agent_id exists and before any further LLM spend
+    # (summarization included) happens for this turn.
+    await enforce_agent_budget(agent_id)
 
     from langchain_core.messages import HumanMessage, AIMessage
     history = []
