@@ -150,6 +150,25 @@ def _quota_paused_reason(task: Task, steps: list[TaskStep]) -> str | None:
     )
 
 
+def _source_locked_reason(task: Task, steps: list[TaskStep]) -> str | None:
+    """Wunomo Projects Phase 2, item 5: a source lock conflict pauses
+    (resumable) rather than fails, same shape as _quota_paused_reason
+    above -- names the step and the real "in use by X since HH:MM"
+    message the lock itself produced, not a generic "locked"."""
+    if task.status != TaskStatus.PAUSED_SOURCE_LOCKED:
+        return None
+    blocked = next(
+        (s for s in sorted(steps, key=lambda s: s.step_index) if s.status == TaskStepStatus.PENDING and s.attempt_count),
+        None,
+    )
+    if blocked is None:
+        return "Paused: the source this step needs is in use by another caller. Resumable once it frees."
+    return (
+        f'Step {blocked.step_index} ("{blocked.description}") is paused after attempt {blocked.attempt_count}: '
+        f'{blocked.error_message}'
+    )
+
+
 def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
     return {
         "id": task.id,
@@ -163,6 +182,7 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         "approval_pending_reason": _approval_pending_reason(task, steps),
         "expiry_reason": _expiry_reason(task),
         "quota_paused_reason": _quota_paused_reason(task, steps),
+        "source_locked_reason": _source_locked_reason(task, steps),
         # Real, persisted (not computed) -- set once, at the moment of a
         # cap-triggered stop or a cancel; see the Task model docstring.
         "termination_reason": task.termination_reason,
@@ -583,7 +603,10 @@ async def advance_task(task_id: str, current_user: dict = Depends(get_current_us
             raise HTTPException(status_code=404, detail="Task not found.")
         if task.user_id != user_id:
             raise HTTPException(status_code=403, detail="Only the task's creator may advance it.")
-        if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.PAUSED_QUOTA_EXCEEDED):
+        if task.status not in (
+            TaskStatus.QUEUED, TaskStatus.RUNNING,
+            TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED,
+        ):
             raise HTTPException(
                 status_code=409,
                 detail=f"Task is not runnable (current status: {task.status.value}).",

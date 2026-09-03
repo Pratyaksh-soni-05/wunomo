@@ -16,7 +16,7 @@ async def generate_sql_transform(tenant_id: str, transformation_goal: str,
 
 @tool
 async def execute_sql_transform(tenant_id: str, user_id: str, session_id: str,
-    sql: str, source_id: str, dry_run: bool = True) -> dict:
+    sql: str, source_id: str, dry_run: bool = True, agent_id: Optional[str] = None) -> dict:
     """Execute SQL transformation against a data source. dry_run=True explains
     without running (via EXPLAIN); dry_run=False actually runs it (SELECT/WITH only)."""
     from modules.transformation.sql_runner import SqlRunner
@@ -24,7 +24,7 @@ async def execute_sql_transform(tenant_id: str, user_id: str, session_id: str,
     runner = SqlRunner(tenant_id)
     if dry_run:
         return cap_tool_result(await runner.dry_run(source_id, sql))
-    result = await runner.run_on_source(source_id, sql)
+    result = await runner.run_on_source(source_id, sql, agent_id=agent_id)
     await log_transform_run(
         tenant_id=tenant_id, user_id=user_id, session_id=session_id,
         source_id=source_id, transform_type="sql", origin="chat_agent",
@@ -35,12 +35,12 @@ async def execute_sql_transform(tenant_id: str, user_id: str, session_id: str,
 
 @tool
 async def run_python_transform(tenant_id: str, user_id: str, session_id: str,
-    source_id: str, script: str) -> dict:
+    source_id: str, script: str, agent_id: Optional[str] = None) -> dict:
     """Execute a sandboxed pandas transformation script against a data source.
     Input DataFrame is `df`, output must be assigned to `result_df`."""
     from modules.transformation.python_runner import PythonRunner
     from modules.transformation.transform_run_log import log_transform_run
-    result = await PythonRunner(tenant_id).run_on_source(source_id, script)
+    result = await PythonRunner(tenant_id).run_on_source(source_id, script, agent_id=agent_id)
     await log_transform_run(
         tenant_id=tenant_id, user_id=user_id, session_id=session_id,
         source_id=source_id, transform_type="pandas", origin="chat_agent",

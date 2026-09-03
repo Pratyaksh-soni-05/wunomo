@@ -285,8 +285,13 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
         # so a tool like triage_incident that declares task_id must always log
         # task_id=None here rather than whatever the LLM might invent for it;
         # task_executor._call_tool() is the only place a real task_id is ever
-        # injected. Also coerce any dict/list-typed arg that arrived
-        # stringified — see _coerce_stringified_object_args' module-level comment.
+        # injected. agent_id (Wunomo Projects Phase 2, item 5) gets the same
+        # override for the source-lock-aware tools -- it's the real calling
+        # agent's identity, used only to label a lock's holder in a denial
+        # message, but an LLM-supplied value here could otherwise let one
+        # agent's tool call misattribute a lock to a different agent. Also
+        # coerce any dict/list-typed arg that arrived stringified — see
+        # _coerce_stringified_object_args' module-level comment.
         for call in (response.tool_calls or []):
             args = call.get("args", {})
             if "tenant_id" in args:
@@ -297,6 +302,8 @@ def build_agent(personality=PersonalityMode.ENGINEER, operation=OperationMode.AS
                 args["session_id"] = state["session_id"]
             if "task_id" in args:
                 args["task_id"] = None
+            if "agent_id" in args:
+                args["agent_id"] = state.get("agent_id")
             _coerce_stringified_object_args(call["name"], args)
 
         # Role-permission gate — evaluated before and independently of

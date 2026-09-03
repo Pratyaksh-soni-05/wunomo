@@ -527,7 +527,7 @@ async def _adapt_step_args(
 
 async def _call_tool(
     tenant_id: str, tool_name: str, tool_args: dict,
-    user_id: str | None = None, task_id: str | None = None,
+    user_id: str | None = None, task_id: str | None = None, agent_id: str | None = None,
 ) -> dict:
     """Invokes the real registered tool directly (not through the agent's
     ToolNode/LangGraph machinery -- there's no LLM reasoning a task step
@@ -535,20 +535,24 @@ async def _call_tool(
     tenant_id is force-injected here, same convention agent_node uses for
     real chat tool calls -- never trusted from tool_args.
 
-    user_id/task_id are injected the same way, but conditionally: unlike
-    tenant_id (every registered tool declares it, by hard rule), most
-    tools don't accept these two at all, and merging an argument a tool's
+    user_id/task_id/agent_id are injected the same way, but conditionally:
+    unlike tenant_id (every registered tool declares it, by hard rule),
+    most tools don't accept these at all, and merging an argument a tool's
     schema doesn't declare would break its own ainvoke() validation. Only
     inject when the target tool's own schema actually asks for it -- this
-    makes the convention generic, not triage_incident-specific: any future
-    tool that adds a user_id/task_id parameter gets it force-injected here
-    automatically, with no further change to this function."""
+    makes the convention generic, not tool-specific: any future tool that
+    adds a user_id/task_id/agent_id parameter gets it force-injected here
+    automatically, with no further change to this function. agent_id
+    (Wunomo Projects Phase 2, item 5) is the calling agent's real identity,
+    used by the source-lock-aware tools to label a lock's holder."""
     tool_obj = tool_by_name(tool_name)
     call_args = {**tool_args, "tenant_id": tenant_id}
     if "user_id" in tool_obj.args:
         call_args["user_id"] = user_id
     if "task_id" in tool_obj.args:
         call_args["task_id"] = task_id
+    if "agent_id" in tool_obj.args:
+        call_args["agent_id"] = agent_id
     result = await tool_obj.ainvoke(call_args)
     if isinstance(result, str):
         try:
@@ -665,9 +669,11 @@ async def _notify_task_stopped(task: Task, title: str, message: str, severity: s
     (someone needs to act) -- never for the retry-prone pauses
     (PAUSED_FAILED_STEP, PAUSED_QUOTA_EXCEEDED) that are already visible
     the moment anyone checks the Tasks screen and would otherwise spam on
-    every failed attempt. Best-effort, matching this module's own
-    NotificationService contract: a delivery failure must never break
-    the actual state transition it's describing."""
+    every failed attempt (PAUSED_SOURCE_LOCKED, Wunomo Projects Phase 2
+    item 5's lock-conflict pause, joins this list for the same reason).
+    Best-effort, matching this module's own NotificationService contract:
+    a delivery failure must never break the actual state transition it's
+    describing."""
     try:
         from modules.reporting.notification_service import NotificationService
         await NotificationService(task.tenant_id).send_alert(
@@ -684,10 +690,13 @@ async def execute_next_step(task_id: str) -> dict:
         task = r.scalar_one_or_none()
         if task is None:
             return {"outcome": "task_not_found"}
-        if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.PAUSED_QUOTA_EXCEEDED):
+        if task.status not in (
+            TaskStatus.QUEUED, TaskStatus.RUNNING,
+            TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED,
+        ):
             return {"outcome": "not_runnable", "status": task.status.value}
 
-        if task.status in (TaskStatus.QUEUED, TaskStatus.PAUSED_QUOTA_EXCEEDED):
+        if task.status in (TaskStatus.QUEUED, TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED):
             _set_task_status_unless_cancelled(task, TaskStatus.RUNNING)
             task.started_at = task.started_at or datetime.utcnow()
             await db.commit()
@@ -935,6 +944,7 @@ async def execute_next_step(task_id: str) -> dict:
     last_error = None
     adapted_once = False
     quota_paused_attempt = None
+    source_locked_paused_attempt = None
     current_args = tool_args
     for attempt in range(starting_attempt, MAX_ATTEMPTS_PER_STEP + 1):
         # Scope re-check (Wunomo Projects Phase 1), immediately before the
@@ -969,7 +979,9 @@ async def execute_next_step(task_id: str) -> dict:
             }
 
         try:
-            result = await _call_tool(tenant_id, tool_name, current_args, user_id=task_user_id, task_id=task_id)
+            result = await _call_tool(
+                tenant_id, tool_name, current_args, user_id=task_user_id, task_id=task_id, agent_id=agent_id,
+            )
         except Exception as exc:
             last_error = f"{type(exc).__name__}: {exc}"
             if attempt < MAX_ATTEMPTS_PER_STEP:
@@ -978,6 +990,18 @@ async def execute_next_step(task_id: str) -> dict:
 
         if isinstance(result, dict) and result.get("error"):
             last_error = str(result["error"])
+            if result.get("lock_conflict"):
+                # A source lock conflict (Wunomo Projects Phase 2, item 5)
+                # is not a domain error to adapt around -- current_args
+                # are already correct, the resource is just busy -- and
+                # not a quota exhaustion either. Pause immediately,
+                # regardless of attempt count or adapted_once, using the
+                # same pause/resume shape as quota_paused_attempt: the
+                # step goes back to PENDING (not FAILED), so resumption
+                # retries with the same attempt budget once the lock frees,
+                # rather than burning an attempt/adapt cycle racing it.
+                source_locked_paused_attempt = attempt
+                break
             if attempt < MAX_ATTEMPTS_PER_STEP and not adapted_once:
                 # Credit exhaustion pauses the task instead of silently
                 # degrading to an unadapted retry (Q4) -- the only real
@@ -1080,6 +1104,28 @@ async def execute_next_step(task_id: str) -> dict:
         return {
             "outcome": "paused_quota_exceeded", "step_id": step_id,
             "attempt_count": quota_paused_attempt, "reason": last_error,
+        }
+
+    if source_locked_paused_attempt is not None:
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
+            step = r.scalar_one()
+            # Same shape as the quota_paused_attempt branch above: back to
+            # PENDING (not FAILED), resuming picks up at
+            # starting_attempt = attempt_count + 1, the SAME budget.
+            step.attempt_count = source_locked_paused_attempt
+            step.error_message = last_error
+            step.status = TaskStepStatus.PENDING
+
+            r = await db.execute(select(Task).where(Task.id == task_id))
+            task = r.scalar_one()
+            if _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_SOURCE_LOCKED):
+                task.paused_at = datetime.utcnow()
+            await db.commit()
+
+        return {
+            "outcome": "paused_source_locked", "step_id": step_id,
+            "attempt_count": source_locked_paused_attempt, "reason": last_error,
         }
 
     async with AsyncSessionLocal() as db:

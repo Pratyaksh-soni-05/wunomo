@@ -10,6 +10,7 @@ import structlog
 from database import AsyncSessionLocal
 from models.all_models import DataSource, SourceType
 from config import settings
+from services.source_lock import acquire_source_lock, describe_holder, format_lock_denial, SourceLockHeld
 
 log = structlog.get_logger()
 
@@ -259,30 +260,41 @@ class ConnectorManager:
             return {"file": file_path, "type": "docx", "status": "error", "error": str(e)}
 
     # ── PREVIEW ───────────────────────────────────────────────────────────────
-    async def preview(self, source_id: str, table: str = "main", limit: int = 50) -> dict:
-        async with AsyncSessionLocal() as db:
-            source = await db.get(DataSource, source_id)
-            if not source or source.tenant_id != self.tenant_id:
-                return {"error": "Source not found"}
-        try:
-            connector = self._get_connector(source)
-            return await connector.preview(table, limit)
-        except Exception as e:
-            return {"error": str(e), "source_id": source_id}
-
-    # ── SYNC ──────────────────────────────────────────────────────────────────
-    async def sync(self, source_id: str, mode: str = "incremental") -> dict:
+    async def preview(self, source_id: str, table: str = "main", limit: int = 50,
+                       agent_id: Optional[str] = None) -> dict:
         async with AsyncSessionLocal() as db:
             source = await db.get(DataSource, source_id)
             if not source or source.tenant_id != self.tenant_id:
                 return {"error": "Source not found"}
             try:
-                connector = self._get_connector(source)
-                result = await connector.sync(mode)
-                source.last_profiled_at = utcnow()
-                await db.commit()
-                log.info("source_synced", source_id=source_id, mode=mode)
-                return result
+                async with acquire_source_lock(source_id, agent_id):
+                    connector = self._get_connector(source)
+                    return await connector.preview(table, limit)
+            except SourceLockHeld as e:
+                holder = await describe_holder(db, e.holder_agent_id)
+                return {"error": format_lock_denial(source_id, holder, e.started_at_iso),
+                        "source_id": source_id, "lock_conflict": True}
+            except Exception as e:
+                return {"error": str(e), "source_id": source_id}
+
+    # ── SYNC ──────────────────────────────────────────────────────────────────
+    async def sync(self, source_id: str, mode: str = "incremental", agent_id: Optional[str] = None) -> dict:
+        async with AsyncSessionLocal() as db:
+            source = await db.get(DataSource, source_id)
+            if not source or source.tenant_id != self.tenant_id:
+                return {"error": "Source not found"}
+            try:
+                async with acquire_source_lock(source_id, agent_id):
+                    connector = self._get_connector(source)
+                    result = await connector.sync(mode)
+                    source.last_profiled_at = utcnow()
+                    await db.commit()
+                    log.info("source_synced", source_id=source_id, mode=mode)
+                    return result
+            except SourceLockHeld as e:
+                holder = await describe_holder(db, e.holder_agent_id)
+                return {"error": format_lock_denial(source_id, holder, e.started_at_iso),
+                        "source_id": source_id, "status": "failed", "lock_conflict": True}
             except Exception as e:
                 log.error("sync_error", source_id=source_id, error=str(e))
                 return {"error": str(e), "source_id": source_id, "status": "failed"}

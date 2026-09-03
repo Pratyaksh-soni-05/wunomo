@@ -647,6 +647,7 @@ class TaskStatus(str, enum.Enum):
     PAUSED_FAILED_STEP = "paused_failed_step"  # a step exhausted its attempt budget, or the initiating user was demoted/deactivated
     PAUSED_PLAN_INVALID = "paused_plan_invalid"  # a completed step's result shows the remaining plan won't reach the goal
     PAUSED_QUOTA_EXCEEDED = "paused_quota_exceeded"  # tenant AI-credit quota exhausted mid-run; resumable once quota resets
+    PAUSED_SOURCE_LOCKED = "paused_source_locked"  # a step's source is held by another caller (Wunomo Projects Phase 2, item 5); resumable once the lock frees
     COMPLETED = "completed"
     COMPLETED_WITH_UNCONFIRMED_STEPS = "completed_with_unconfirmed_steps"  # a dispatched step's verification never reached a terminal state within its window - honest, not clean, success (Q2)
     FAILED = "failed"

@@ -20,10 +20,10 @@ async def register_data_source(tenant_id: str, name: str, file_path: str) -> dic
     return await ConnectorManager(tenant_id).register_uploaded_file(name, file_path)
 
 @tool
-async def profile_schema(tenant_id: str, source_id: str) -> dict:
+async def profile_schema(tenant_id: str, source_id: str, agent_id: Optional[str] = None) -> dict:
     """Auto-discover and profile schema: tables, columns, types, nullability, row counts."""
     from modules.ingestion.schema_profiler import SchemaProfiler
-    return cap_tool_result(await SchemaProfiler(tenant_id, source_id).profile())
+    return cap_tool_result(await SchemaProfiler(tenant_id, source_id, agent_id).profile())
 
 @tool
 async def ingest_file(tenant_id: str, file_path: str, pipeline_id: Optional[str] = None) -> dict:
@@ -36,22 +36,24 @@ async def ingest_file(tenant_id: str, file_path: str, pipeline_id: Optional[str]
     return cap_tool_result(await ConnectorManager(tenant_id).ingest_file(file_path, pipeline_id))
 
 @tool
-async def sync_source(tenant_id: str, source_id: str, mode: str = "incremental") -> dict:
+async def sync_source(tenant_id: str, source_id: str, mode: str = "incremental",
+                       agent_id: Optional[str] = None) -> dict:
     """Trigger a sync from a registered data source. mode: full | incremental."""
     from modules.ingestion.connector_manager import ConnectorManager
-    return await ConnectorManager(tenant_id).sync(source_id, mode)
+    return await ConnectorManager(tenant_id).sync(source_id, mode, agent_id)
 
 @tool
-async def preview_source_data(tenant_id: str, source_id: str, table: str, limit: int = 50) -> dict:
+async def preview_source_data(tenant_id: str, source_id: str, table: str, limit: int = 50,
+                               agent_id: Optional[str] = None) -> dict:
     """Preview sample rows from a source table or file."""
     from modules.ingestion.connector_manager import ConnectorManager
-    return cap_tool_result(await ConnectorManager(tenant_id).preview(source_id, table, limit))
+    return cap_tool_result(await ConnectorManager(tenant_id).preview(source_id, table, limit, agent_id))
 
 @tool
-async def detect_schema_drift(tenant_id: str, source_id: str) -> dict:
+async def detect_schema_drift(tenant_id: str, source_id: str, agent_id: Optional[str] = None) -> dict:
     """Compare current schema vs last snapshot. Returns added/removed/type-changed columns."""
     from modules.ingestion.schema_profiler import SchemaProfiler
-    return cap_tool_result(await SchemaProfiler(tenant_id, source_id).detect_drift())
+    return cap_tool_result(await SchemaProfiler(tenant_id, source_id, agent_id).detect_drift())
 
 ingestion_tools = [list_data_sources, register_data_source, profile_schema,
                    ingest_file, sync_source, preview_source_data, detect_schema_drift]

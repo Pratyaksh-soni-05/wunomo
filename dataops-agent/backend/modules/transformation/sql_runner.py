@@ -2,6 +2,7 @@ import re
 import time
 import structlog
 from datetime import datetime, timezone
+from typing import Optional
 from sqlalchemy import text, select
 
 import asyncpg
@@ -9,6 +10,7 @@ import asyncpg
 from database import AsyncSessionLocal
 from models.all_models import DataSource
 from modules.governance.audit_trail import AuditTrail
+from services.source_lock import acquire_source_lock, describe_holder, format_lock_denial, SourceLockHeld
 
 log = structlog.get_logger()
 
@@ -51,6 +53,7 @@ class SqlRunner:
         params: dict | None = None,
         row_limit: int = DEFAULT_ROW_LIMIT,
         actor: str = "agent",
+        agent_id: Optional[str] = None,
     ) -> dict:
         log.info(
             "sql_runner.run_on_source",
@@ -77,24 +80,33 @@ class SqlRunner:
             else str(source.source_type)
         )
 
+        # The per-source advisory lock (Wunomo Projects Phase 2, item 5)
+        # wraps the actual connection-touching span -- _load_source above
+        # is only a DB metadata lookup, the real connection only opens in
+        # _run_postgres/_run_mysql below.
         start = time.monotonic()
         try:
-            if source_type == "postgres":
-                result = await self._run_postgres(
-                    source.connection_config,
-                    sql_with_limit,
-                    params,
-                )
-            elif source_type == "mysql":
-                result = await self._run_mysql(
-                    source.connection_config,
-                    sql_with_limit,
-                    params,
-                )
-            else:
-                return {
-                    "error": f"SqlRunner does not support source type '{source_type}'."
-                }
+            async with acquire_source_lock(source_id, agent_id):
+                if source_type == "postgres":
+                    result = await self._run_postgres(
+                        source.connection_config,
+                        sql_with_limit,
+                        params,
+                    )
+                elif source_type == "mysql":
+                    result = await self._run_mysql(
+                        source.connection_config,
+                        sql_with_limit,
+                        params,
+                    )
+                else:
+                    return {
+                        "error": f"SqlRunner does not support source type '{source_type}'."
+                    }
+        except SourceLockHeld as e:
+            async with AsyncSessionLocal() as db:
+                holder = await describe_holder(db, e.holder_agent_id)
+            return {"error": format_lock_denial(source_id, holder, e.started_at_iso), "lock_conflict": True}
         except Exception as exc:
             log.error("sql_runner.execution_error", error=str(exc))
             return {"error": f"SQL execution failed: {str(exc)}"}

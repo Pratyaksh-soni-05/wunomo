@@ -6,11 +6,12 @@ import structlog
 import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 from database import AsyncSessionLocal
 from models.all_models import DataSource
 from modules.governance.audit_trail import AuditTrail
+from services.source_lock import acquire_source_lock, describe_holder, format_lock_denial, SourceLockHeld
 
 log = structlog.get_logger()
 
@@ -83,6 +84,7 @@ class PythonRunner:
         code: str,
         row_limit: int = MAX_ROWS_INPUT,
         actor: str = "agent",
+        agent_id: Optional[str] = None,
     ) -> dict:
         """
         Loads a DataSource into a DataFrame and executes the transformation code.
@@ -98,6 +100,10 @@ class PythonRunner:
             code:       Pandas code string (input: `df`, output: `result_df`)
             row_limit:  max input rows loaded
             actor:      for audit trail
+            agent_id:   the calling agent, if any -- threaded through to
+                        _load_dataframe's per-source advisory lock so a
+                        conflict names who's holding it (Wunomo Projects
+                        Phase 2, item 5)
 
         Returns:
           {
@@ -118,7 +124,7 @@ class PythonRunner:
             return safety
 
         # 2. Load data
-        df_result = await self._load_dataframe(source_id, row_limit)
+        df_result = await self._load_dataframe(source_id, row_limit, agent_id)
         if "error" in df_result:
             return df_result
         df = df_result["df"]
@@ -381,75 +387,84 @@ class PythonRunner:
     # Internal: load DataFrame from source
     # ------------------------------------------------------------------
 
-    async def _load_dataframe(self, source_id: str, row_limit: int) -> dict:
+    async def _load_dataframe(self, source_id: str, row_limit: int, agent_id: Optional[str] = None) -> dict:
         """
         Loads a DataSource into a pandas DataFrame using the existing connectors.
-        Supports: csv, excel, json, postgres, mysql.
+        Supports: csv, excel, json, postgres, mysql. This is the one place
+        PythonRunner actually touches the source's real connection -- the
+        rest of run_on_source() only works against the already-in-memory
+        DataFrame this returns -- so the per-source advisory lock (Wunomo
+        Projects Phase 2, item 5) wraps this method's body specifically.
         """
-        try:
-            async with AsyncSessionLocal() as db:
-                from sqlalchemy import select as sa_select
-                result = await db.execute(
-                    sa_select(DataSource).where(
-                        DataSource.id == source_id,
-                        DataSource.tenant_id == self.tenant_id,
-                    )
+        async with AsyncSessionLocal() as db:
+            from sqlalchemy import select as sa_select
+            result = await db.execute(
+                sa_select(DataSource).where(
+                    DataSource.id == source_id,
+                    DataSource.tenant_id == self.tenant_id,
                 )
-                source = result.scalar_one_or_none()
-
-            if source is None:
-                return {"error": f"DataSource {source_id} not found"}
-
-            source_type = (
-                source.source_type.value
-                if hasattr(source.source_type, "value")
-                else str(source.source_type)
             )
-            config = source.connection_config or {}
+            source = result.scalar_one_or_none()
 
-            if source_type in ("csv", "excel", "json"):
-                from modules.ingestion.connectors.file_connector import FileConnector
-                connector = FileConnector(config, source_type)
-                result = await connector.preview(limit=row_limit)
-                if "error" in result:
-                    return result
-                df = pd.DataFrame(result.get("rows", []), columns=result.get("columns") or None)
-            elif source_type == "postgres":
-                import asyncpg
-                host = config.get("host", "localhost")
-                port = int(config.get("port", 5432))
-                database = config.get("database", "")
-                user = config.get("username", config.get("user", ""))
-                password = config.get("password", "")
-                table = config.get("table", config.get("default_table", ""))
-                if not table:
-                    return {"error": "Postgres source has no 'table' specified in connection_config"}
-                conn = await asyncpg.connect(
-                    host=host, port=port, database=database,
-                    user=user, password=password, timeout=30,
+        if source is None:
+            return {"error": f"DataSource {source_id} not found"}
+
+        try:
+            async with acquire_source_lock(source_id, agent_id):
+                source_type = (
+                    source.source_type.value
+                    if hasattr(source.source_type, "value")
+                    else str(source.source_type)
                 )
-                try:
-                    rows_raw = await conn.fetch(f'SELECT * FROM {table} LIMIT {row_limit}')
-                    columns = list(rows_raw[0].keys()) if rows_raw else []
-                    df = pd.DataFrame([dict(r) for r in rows_raw], columns=columns)
-                finally:
-                    await conn.close()
-            elif source_type == "mysql":
-                from modules.ingestion.connectors.mysql_connector import MySQLConnector
-                table = config.get("table", config.get("default_table", ""))
-                if not table:
-                    return {"error": "MySQL source has no 'table' specified in connection_config"}
-                connector = MySQLConnector(config)
-                result = await connector.preview(table, limit=row_limit)
-                df = pd.DataFrame(result.get("rows", []), columns=result.get("columns") or None)
-            else:
-                return {"error": f"PythonRunner does not support source type '{source_type}'"}
+                config = source.connection_config or {}
 
-            if isinstance(df, dict) and "error" in df:
-                return df
+                if source_type in ("csv", "excel", "json"):
+                    from modules.ingestion.connectors.file_connector import FileConnector
+                    connector = FileConnector(config, source_type)
+                    result = await connector.preview(limit=row_limit)
+                    if "error" in result:
+                        return result
+                    df = pd.DataFrame(result.get("rows", []), columns=result.get("columns") or None)
+                elif source_type == "postgres":
+                    import asyncpg
+                    host = config.get("host", "localhost")
+                    port = int(config.get("port", 5432))
+                    database = config.get("database", "")
+                    user = config.get("username", config.get("user", ""))
+                    password = config.get("password", "")
+                    table = config.get("table", config.get("default_table", ""))
+                    if not table:
+                        return {"error": "Postgres source has no 'table' specified in connection_config"}
+                    conn = await asyncpg.connect(
+                        host=host, port=port, database=database,
+                        user=user, password=password, timeout=30,
+                    )
+                    try:
+                        rows_raw = await conn.fetch(f'SELECT * FROM {table} LIMIT {row_limit}')
+                        columns = list(rows_raw[0].keys()) if rows_raw else []
+                        df = pd.DataFrame([dict(r) for r in rows_raw], columns=columns)
+                    finally:
+                        await conn.close()
+                elif source_type == "mysql":
+                    from modules.ingestion.connectors.mysql_connector import MySQLConnector
+                    table = config.get("table", config.get("default_table", ""))
+                    if not table:
+                        return {"error": "MySQL source has no 'table' specified in connection_config"}
+                    connector = MySQLConnector(config)
+                    result = await connector.preview(table, limit=row_limit)
+                    df = pd.DataFrame(result.get("rows", []), columns=result.get("columns") or None)
+                else:
+                    return {"error": f"PythonRunner does not support source type '{source_type}'"}
 
-            return {"df": df}
+                if isinstance(df, dict) and "error" in df:
+                    return df
 
+                return {"df": df}
+
+        except SourceLockHeld as e:
+            async with AsyncSessionLocal() as db:
+                holder = await describe_holder(db, e.holder_agent_id)
+            return {"error": format_lock_denial(source_id, holder, e.started_at_iso), "lock_conflict": True}
         except Exception as exc:
             log.error("python_runner._load_dataframe.error", error=str(exc))
             return {"error": f"Failed to load source data: {str(exc)}"}
