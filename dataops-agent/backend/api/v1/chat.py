@@ -71,6 +71,24 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
     tenant_id = user["tenant_id"]
 
     async with AsyncSessionLocal() as db:
+        # Ownership check: a session_id may only be continued by the user
+        # who started it. GET /sessions and GET /sessions/{id}/history
+        # have always filtered by user_id -- this write path never did,
+        # meaning any tenant member who knew (or was given, or guessed)
+        # another user's session_id could post into it and silently ride
+        # along on that session's turn. Real gap, not hypothetical: found
+        # while designing Phase 2's channels, which are about to make
+        # multi-user sessions a real, deliberate feature -- this has to
+        # be a hard rule before that, not an accident channels inherit.
+        # A brand-new session_id (no rows yet) has no owner to conflict
+        # with, so it's always allowed.
+        r = await db.execute(select(ChatMessage.user_id).where(
+            ChatMessage.session_id == session_id, ChatMessage.tenant_id == tenant_id,
+        ).limit(1))
+        existing_owner = r.scalar_one_or_none()
+        if existing_owner is not None and existing_owner != user["sub"]:
+            raise HTTPException(status_code=403, detail="This session belongs to a different user.")
+
         # Context windowing (Wunomo Projects Phase 0, commit 6): find the
         # most recent already-persisted summary for this session, if any —
         # everything at or before it is already compressed, so only real
@@ -80,13 +98,13 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
         # in the UI); this only changes what gets replayed to the LLM.
         r = await db.execute(select(ChatMessage).where(
             ChatMessage.session_id == session_id, ChatMessage.tenant_id == tenant_id,
-            ChatMessage.role == "summary",
+            ChatMessage.user_id == user["sub"], ChatMessage.role == "summary",
         ).order_by(ChatMessage.created_at.desc()).limit(1))
         summary_row = r.scalar_one_or_none()
 
         query = select(ChatMessage).where(
             ChatMessage.session_id == session_id, ChatMessage.tenant_id == tenant_id,
-            ChatMessage.role.in_(("user", "assistant")),
+            ChatMessage.user_id == user["sub"], ChatMessage.role.in_(("user", "assistant")),
         )
         if summary_row is not None:
             query = query.where(ChatMessage.created_at > summary_row.created_at)

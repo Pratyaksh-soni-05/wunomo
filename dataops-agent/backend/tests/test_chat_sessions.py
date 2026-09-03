@@ -234,3 +234,68 @@ async def test_long_session_persists_a_rolling_summary_row(client, monkeypatch):
 
     assert len(summary_rows) == 1
     assert summary_rows[0].content == "Session summary text."
+
+
+async def _add_member(tenant_id: str, role: str = "owner"):
+    """A second real user in the SAME tenant as an existing one -
+    _register() always creates a brand-new tenant, which can't exercise
+    a same-tenant cross-user session collision."""
+    from services.auth_service import hash_password, issue_token_for_user
+    from models.all_models import User
+
+    async with AsyncSessionLocal() as db:
+        user = User(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, email=unique_email("member"),
+            hashed_password=hash_password("test1234"), full_name="Second User", role=role,
+            is_active=True, email_verified=True,
+        )
+        db.add(user)
+        await db.commit()
+        return issue_token_for_user(user, "password"), user.id
+
+
+@pytest.mark.asyncio
+async def test_a_users_session_cannot_be_continued_by_another_tenant_member(client, monkeypatch):
+    """The real gap this closes: POST /api/v1/chat/'s history load
+    checked tenant_id and session_id but never user_id, unlike GET
+    /sessions and GET /sessions/{id}/history, which always have. Any
+    tenant member who knew another user's session_id could post into it."""
+    fake_llm = FakeToolCallLLM([AIMessage(content="hi there")])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    token_a, tenant_id, _ = await _register(client, "ownersess")
+    r = await client.post("/api/v1/chat/", json={"message": "hello from A"}, headers=_auth(token_a))
+    assert r.status_code == 200
+    session_id = r.json()["session_id"]
+
+    token_b, _ = await _add_member(tenant_id, role="owner")
+    r = await client.post(
+        "/api/v1/chat/", json={"message": "trying to ride along", "session_id": session_id},
+        headers=_auth(token_b),
+    )
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_brand_new_session_id_has_no_owner_conflict(client, monkeypatch):
+    """A session_id with zero existing rows is fine for anyone to start -
+    the check only fires once a real owner already exists."""
+    fake_llm = FakeToolCallLLM([AIMessage(content="hi there")])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    token, tenant_id, _ = await _register(client, "freshsess")
+    fresh_session_id = str(uuid.uuid4())
+    r = await client.post(
+        "/api/v1/chat/", json={"message": "hello", "session_id": fresh_session_id},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["session_id"] == fresh_session_id
