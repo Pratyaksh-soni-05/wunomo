@@ -15,7 +15,7 @@ from api.v1 import (
     incidents, quality, governance, uploads,
     analytics, approvals, transformations,
     cicd, onboarding, catalog, team, billing, settings as settings_router,
-    api_keys, tasks, agents, projects,
+    api_keys, tasks, agents, projects, channels,
 )
 
 
@@ -146,6 +146,9 @@ app.include_router(tasks.router,           prefix="/api/v1/tasks",           tag
 # Wunomo Projects Phase 1 — agent source-scope management + hiring
 app.include_router(agents.router,          prefix="/api/v1/agents",          tags=["Agents"])
 app.include_router(projects.router,        prefix="/api/v1/projects",        tags=["Projects"])
+
+# Wunomo Projects Phase 2 — channels
+app.include_router(channels.router,        prefix="/api/v1/channels",        tags=["Channels"])
 
 
 

@@ -4,13 +4,14 @@ from typing import Optional
 from .auth import get_current_user, enforce_quota, enforce_agent_budget
 from agent.dataops_agent import run_agent, window_and_summarize
 from database import AsyncSessionLocal
-from models.all_models import ChatMessage
+from models.all_models import AgentInstance, AgentInstanceStatus, Channel, ChannelUser, ChatMessage
 from sqlalchemy import select, func, delete
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 from models.approval_model import ApprovalRequest, ApprovalStatus
 from schemas.chat_schema import ChatRequest
-from datetime import datetime
+from services.channel_routing import channel_agent_members, resolve_mentioned_agent
+from services.mentions import parse_mention
 from langchain_core.messages import AIMessage as LCAIMessage, ToolMessage as LCToolMessage, SystemMessage as LCSystemMessage
 
 router = APIRouter()
@@ -65,71 +66,139 @@ def _extract_tool_trace(new_messages, blocked_tool_calls, role_denied_calls, sco
         })
     return trace
 
+def _no_route_response(session_id: str, text: str) -> dict:
+    """Returned when a channel message can't be routed to a real agent
+    (an unresolved @mention, or ambiguity with no mention at all) --
+    never a guess, matching the "never guess" rule Tier 1 argument
+    resolution already established for task execution."""
+    return {
+        "session_id": session_id, "response": text, "provider": None,
+        "pending_approvals": [], "tool_calls": [],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.post("/")
 async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
     session_id = req.session_id or str(uuid.uuid4())
     tenant_id = user["tenant_id"]
+    message_text = req.message
+    mentioned_agent_id = None
 
     async with AsyncSessionLocal() as db:
-        # Ownership check: a session_id may only be continued by the user
-        # who started it. GET /sessions and GET /sessions/{id}/history
-        # have always filtered by user_id -- this write path never did,
-        # meaning any tenant member who knew (or was given, or guessed)
-        # another user's session_id could post into it and silently ride
-        # along on that session's turn. Real gap, not hypothetical: found
-        # while designing Phase 2's channels, which are about to make
-        # multi-user sessions a real, deliberate feature -- this has to
-        # be a hard rule before that, not an accident channels inherit.
-        # A brand-new session_id (no rows yet) has no owner to conflict
-        # with, so it's always allowed.
-        r = await db.execute(select(ChatMessage.user_id).where(
-            ChatMessage.session_id == session_id, ChatMessage.tenant_id == tenant_id,
-        ).limit(1))
-        existing_owner = r.scalar_one_or_none()
-        if existing_owner is not None and existing_owner != user["sub"]:
-            raise HTTPException(status_code=403, detail="This session belongs to a different user.")
+        # Wunomo Projects Phase 2: a channel's messages use its own real
+        # id as their session_id, by convention (see models/all_models.py's
+        # Channel docstring) -- no schema flag needed, just a real-row
+        # lookup against this session_id.
+        r = await db.execute(select(Channel).where(Channel.id == session_id, Channel.tenant_id == tenant_id))
+        channel = r.scalar_one_or_none()
 
-        # Context windowing (Wunomo Projects Phase 0, commit 6): find the
-        # most recent already-persisted summary for this session, if any —
-        # everything at or before it is already compressed, so only real
-        # turns strictly after that point need to be loaded and re-passed
-        # to window_and_summarize(). The original raw rows are never
-        # deleted (a customer can still scroll back through real history
-        # in the UI); this only changes what gets replayed to the LLM.
-        r = await db.execute(select(ChatMessage).where(
-            ChatMessage.session_id == session_id, ChatMessage.tenant_id == tenant_id,
-            ChatMessage.user_id == user["sub"], ChatMessage.role == "summary",
-        ).order_by(ChatMessage.created_at.desc()).limit(1))
-        summary_row = r.scalar_one_or_none()
+        if channel is not None:
+            # Channel membership replaces the private-session ownership
+            # check below -- multiple users legitimately share a channel.
+            r = await db.execute(select(ChannelUser).where(
+                ChannelUser.channel_id == channel.id, ChannelUser.user_id == user["sub"],
+            ))
+            if r.scalar_one_or_none() is None:
+                raise HTTPException(status_code=403, detail="You are not a member of this channel.")
 
-        query = select(ChatMessage).where(
-            ChatMessage.session_id == session_id, ChatMessage.tenant_id == tenant_id,
-            ChatMessage.user_id == user["sub"], ChatMessage.role.in_(("user", "assistant")),
-        )
-        if summary_row is not None:
-            query = query.where(ChatMessage.created_at > summary_row.created_at)
-        r = await db.execute(query.order_by(ChatMessage.created_at.asc()).limit(200))
-        history_msgs = r.scalars().all()
+            # @mention routing: the tagged agent responds, nobody else.
+            # Resolved against real channel_agents membership -- an agent
+            # not added to this channel cannot be mentioned into it,
+            # regardless of what its name looks like in the message text.
+            mentioned_name, remaining_text = parse_mention(req.message)
+            if mentioned_name is not None:
+                target_agent = await resolve_mentioned_agent(db, channel.id, mentioned_name)
+                if target_agent is None:
+                    return _no_route_response(
+                        session_id, f"I don't see anyone named '{mentioned_name}' in this channel.",
+                    )
+                agent_id = target_agent.id
+                mentioned_agent_id = target_agent.id
+                message_text = remaining_text or req.message
+            else:
+                # No explicit mention: unambiguous only with exactly one
+                # agent in the channel -- never guess among several.
+                members = await channel_agent_members(db, channel.id)
+                if len(members) == 1:
+                    agent_id = members[0].id
+                    mentioned_agent_id = agent_id
+                else:
+                    who = "No agents are" if not members else "More than one agent is"
+                    return _no_route_response(
+                        session_id, f"{who} in this channel — please @mention who you're talking to.",
+                    )
 
-        # Wunomo Projects Phase 1: resolve the tenant's real agent so the
-        # scope gate (agent_scope_denied_tool_calls, see agent_node) has an
-        # actual agent_id to check against — without this, run_agent()
-        # falls back to its exact pre-Phase-0 behavior and the scope gate
-        # is a permanent no-op. Every tenant has exactly one agent today
-        # (AXIOM, created either by the Phase 0 backfill migration or by
-        # create_new_tenant_and_user() for anyone who's signed up since);
-        # take the oldest ACTIVE one deterministically rather than assume
-        # "the only one" holds forever — hiring (Phase 1's own next part)
-        # is what makes that assumption stop being true. A tenant with
-        # zero agent rows (shouldn't happen post-backfill, but not
-        # impossible for a row created by some other, older path) falls
-        # back to agent_id=None, the same transitional no-op as before.
-        from models.all_models import AgentInstance, AgentInstanceStatus
-        r = await db.execute(select(AgentInstance).where(
-            AgentInstance.tenant_id == tenant_id, AgentInstance.status == AgentInstanceStatus.ACTIVE,
-        ).order_by(AgentInstance.created_at.asc()).limit(1))
-        agent_row = r.scalar_one_or_none()
-        agent_id = agent_row.id if agent_row is not None else None
+            # Interim context for channel messages (Wunomo Projects Phase
+            # 2 -- real filtered context, item 4 of the phase's build
+            # order, lands in the next commit): every channel turn starts
+            # fresh for now, deliberately, rather than build a throwaway
+            # "unfiltered full channel history" query the next commit
+            # would just replace. Never treat this as finished behavior.
+            history = []
+            summary_row = None
+        else:
+            # Ownership check: a session_id may only be continued by the
+            # user who started it. GET /sessions and GET /sessions/{id}/
+            # history have always filtered by user_id -- this write path
+            # never did, meaning any tenant member who knew (or was
+            # given, or guessed) another user's session_id could post
+            # into it and silently ride along on that session's turn. A
+            # brand-new session_id (no rows yet) has no owner to
+            # conflict with, so it's always allowed.
+            r = await db.execute(select(ChatMessage.user_id).where(
+                ChatMessage.session_id == session_id, ChatMessage.tenant_id == tenant_id,
+            ).limit(1))
+            existing_owner = r.scalar_one_or_none()
+            if existing_owner is not None and existing_owner != user["sub"]:
+                raise HTTPException(status_code=403, detail="This session belongs to a different user.")
+
+            # Context windowing (Wunomo Projects Phase 0, commit 6): find
+            # the most recent already-persisted summary for this session,
+            # if any — everything at or before it is already compressed,
+            # so only real turns strictly after that point need to be
+            # loaded and re-passed to window_and_summarize(). The
+            # original raw rows are never deleted (a customer can still
+            # scroll back through real history in the UI); this only
+            # changes what gets replayed to the LLM.
+            r = await db.execute(select(ChatMessage).where(
+                ChatMessage.session_id == session_id, ChatMessage.tenant_id == tenant_id,
+                ChatMessage.user_id == user["sub"], ChatMessage.role == "summary",
+            ).order_by(ChatMessage.created_at.desc()).limit(1))
+            summary_row = r.scalar_one_or_none()
+
+            query = select(ChatMessage).where(
+                ChatMessage.session_id == session_id, ChatMessage.tenant_id == tenant_id,
+                ChatMessage.user_id == user["sub"], ChatMessage.role.in_(("user", "assistant")),
+            )
+            if summary_row is not None:
+                query = query.where(ChatMessage.created_at > summary_row.created_at)
+            r = await db.execute(query.order_by(ChatMessage.created_at.asc()).limit(200))
+            history_msgs = r.scalars().all()
+
+            from langchain_core.messages import HumanMessage, AIMessage
+            history = []
+            for m in history_msgs:
+                if m.role == "user":
+                    history.append(HumanMessage(content=m.content))
+                elif m.role == "assistant":
+                    history.append(AIMessage(content=m.content))
+
+            # Wunomo Projects Phase 1: resolve the tenant's real agent so
+            # the scope gate (agent_scope_denied_tool_calls, see
+            # agent_node) has an actual agent_id to check against —
+            # without this, run_agent() falls back to its exact
+            # pre-Phase-0 behavior and the scope gate is a permanent
+            # no-op. Every private-chat tenant has exactly one agent
+            # today (AXIOM) -- take the oldest ACTIVE one
+            # deterministically. A tenant with zero agent rows
+            # (shouldn't happen post-backfill) falls back to
+            # agent_id=None, the same transitional no-op as before.
+            r = await db.execute(select(AgentInstance).where(
+                AgentInstance.tenant_id == tenant_id, AgentInstance.status == AgentInstanceStatus.ACTIVE,
+            ).order_by(AgentInstance.created_at.asc()).limit(1))
+            agent_row = r.scalar_one_or_none()
+            agent_id = agent_row.id if agent_row is not None else None
 
     # Gate 2 of the two-gate token-budget path (Wunomo Projects Phase 1,
     # part two) - the tenant-level gate already ran as enforce_quota's
@@ -138,21 +207,16 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
     # (summarization included) happens for this turn.
     await enforce_agent_budget(agent_id)
 
-    from langchain_core.messages import HumanMessage, AIMessage
-    history = []
-    for m in history_msgs:
-        if m.role == "user":
-            history.append(HumanMessage(content=m.content))
-        elif m.role == "assistant":
-            history.append(AIMessage(content=m.content))
-
-    history, new_summary = await window_and_summarize(
-        history, tenant_id=tenant_id, session_id=session_id,
-        prior_summary=summary_row.content if summary_row is not None else None,
-    )
+    if channel is None:
+        history, new_summary = await window_and_summarize(
+            history, tenant_id=tenant_id, session_id=session_id,
+            prior_summary=summary_row.content if summary_row is not None else None,
+        )
+    else:
+        new_summary = None
 
     result = await run_agent(
-        user_message=req.message, tenant_id=tenant_id, user_id=user["sub"],
+        user_message=message_text, tenant_id=tenant_id, user_id=user["sub"],
         session_id=session_id, caller_role=user["role"], personality_mode=req.personality_mode,
         operation_mode=req.operation_mode, history=history, context=req.context,
         agent_id=agent_id,
@@ -197,13 +261,21 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
                 created_at=datetime.utcnow(),
             ))
 
-        for role, content, calls in [
-            ("user", req.message, []),
-            ("assistant", result["response"], tool_trace),
+        # mentioned_agent_id (Wunomo Projects Phase 2) is only ever set on
+        # the user's own message -- it names who THEY addressed, not who
+        # produced the reply. agent_id on the assistant's reply names the
+        # real agent that answered (previously always left NULL on every
+        # ChatMessage row here, even in private chat) -- required the
+        # moment a channel can hold more than one agent, since otherwise
+        # replies in the transcript would be visually indistinguishable.
+        for role, content, calls, msg_agent_id, msg_mentioned_agent_id in [
+            ("user", req.message, [], None, mentioned_agent_id),
+            ("assistant", result["response"], tool_trace, agent_id, None),
         ]:
             db.add(ChatMessage(
                 id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user["sub"],
                 session_id=session_id, role=role, content=content,
+                agent_id=msg_agent_id, mentioned_agent_id=msg_mentioned_agent_id,
                 personality_mode=req.personality_mode, operation_mode=req.operation_mode,
                 tool_calls=calls, created_at=datetime.utcnow(),
             ))
