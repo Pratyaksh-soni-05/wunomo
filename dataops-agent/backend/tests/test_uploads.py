@@ -104,3 +104,41 @@ async def test_upload_register_requires_sources_create_permission(client):
         data={"name": "Should Not Be Created"},
     )
     assert r.status_code == 403, r.text
+
+
+@pytest.mark.asyncio
+async def test_upload_register_rejects_pdf_with_422_not_a_silent_success(client):
+    """A PDF passes ALLOWED_EXTS and _ingest_pdf can genuinely extract its
+    text, but _get_connector has no branch for SourceType.PDF -- registering
+    one as a DataSource used to succeed here and only blow up later, the
+    first time sync_source/a scheduled pipeline touched it. Must be a clean
+    422 at intake instead."""
+    token = await _register_user(client)
+    r = await client.post(
+        "/api/v1/uploads/register",
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4 fake"), "application/pdf")},
+        data={"name": "A PDF Source"},
+    )
+    assert r.status_code == 422, r.text
+    assert "no working connector" in r.json()["detail"].lower()
+
+    token_headers = {"Authorization": f"Bearer {token}"}
+    sources = await client.get("/api/v1/sources/", headers=token_headers)
+    assert sources.json()["sources"] == [], "the rejected PDF must not have been persisted as a source"
+
+
+@pytest.mark.asyncio
+async def test_register_source_rejects_docx_at_the_shared_chokepoint():
+    """register_data_source (the chat tool) and upload_and_register both
+    funnel into ConnectorManager.register_source -- the guard belongs there
+    once, not duplicated in each caller. Exercised directly here, without
+    HTTP, to confirm the chokepoint itself rejects docx regardless of caller."""
+    from modules.ingestion.connector_manager import ConnectorManager
+
+    result = await ConnectorManager("some-tenant").register_source(
+        name="A DOCX Source", source_type="docx", connection_config={"file_path": "/tmp/x.docx"},
+    )
+    assert "error" in result
+    assert result["status_code"] == 422
+    assert "no working connector" in result["error"].lower()

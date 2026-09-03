@@ -52,7 +52,7 @@ async def upload_and_register(
         connection_config={"file_path": dest, "original_name": file.filename}
     )
     if "error" in source_result:
-        raise HTTPException(status_code=409, detail=source_result["error"])
+        raise HTTPException(status_code=source_result.get("status_code", 409), detail=source_result["error"])
     return sanitize_floats({
         "filename": file.filename,
         "source_id": source_result["id"],

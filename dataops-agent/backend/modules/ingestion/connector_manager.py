@@ -31,6 +31,15 @@ SUPPORTED_EXTS = {
     "json": SourceType.JSON, "pdf": SourceType.PDF, "docx": SourceType.DOCX
 }
 
+# PDF/DOCX can be parsed for text (see _ingest_pdf/_ingest_docx below) but
+# _get_connector has no branch for them -- registering one as a DataSource
+# succeeds today and only fails later, the first time anything (sync_source,
+# a scheduled pipeline run) tries to actually use it. Rejected at the one
+# chokepoint both upload_and_register (api/v1/uploads.py) and the
+# register_data_source chat tool funnel through, so neither path can create
+# this time bomb.
+_NO_CONNECTOR_TYPES = {SourceType.PDF, SourceType.DOCX}
+
 
 class ConnectorManager:
     def __init__(self, tenant_id: str):
@@ -66,6 +75,19 @@ class ConnectorManager:
             return {"error": "This connection points at the application's own internal "
                               "database, which holds every tenant's data. Registering it "
                               "as a source is not allowed."}
+        try:
+            resolved_type = SourceType(source_type)
+        except ValueError:
+            return {"error": f"Unknown source_type: {source_type}", "status_code": 422}
+        if resolved_type in _NO_CONNECTOR_TYPES:
+            return {
+                "error": f"{resolved_type.value} has no working connector yet -- its text can "
+                         f"be extracted (see ingest_file), but there's no destination data "
+                         f"model to sync or profile it into. Registering it as a source would "
+                         f"succeed now and only fail later, the first time anything tries to "
+                         f"sync or profile it.",
+                "status_code": 422,
+            }
         async with AsyncSessionLocal() as db:
             existing = await db.execute(select(DataSource).where(
                 DataSource.tenant_id == self.tenant_id,
