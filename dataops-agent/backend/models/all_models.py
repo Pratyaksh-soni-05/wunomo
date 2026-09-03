@@ -522,6 +522,45 @@ class AgentSource(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class Project(Base):
+    """Wunomo Projects Phase 1, part two. "A project is an object inside
+    a tenant" (WUNOMO_PROJECTS_PROPOSAL_v2.md's own correction to itself)
+    - explicitly NOT a workspace/tenant substitute: a project just groups
+    agents (via ProjectAgent below) inside the tenant that already owns
+    billing, team, and sources. An agent hired outside any project (every
+    agent that exists as of this migration, including every tenant's
+    AXIOM row) simply has no ProjectAgent row - membership is optional,
+    not a required foreign key on AgentInstance itself, since retrofitting
+    a NOT NULL project_id onto every pre-existing agent would be a much
+    bigger migration for a distinction (grouped vs ungrouped) this schema
+    doesn't need to force."""
+    __tablename__ = "projects"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_projects_tenant_name"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ProjectAgent(Base):
+    """Join table, not a project_id FK on AgentInstance - same reasoning
+    AgentSource already established for agent/source scope: a real,
+    queryable, joinable table rather than a column that would force
+    every agent into exactly one project (or none) at the schema level
+    when the actual v1 rule is simpler and looser - an agent may belong
+    to zero or one project for now (hiring only ever links one), but
+    nothing here mechanically prevents more later without a migration."""
+    __tablename__ = "project_agents"
+    __table_args__ = (UniqueConstraint("project_id", "agent_id", name="uq_project_agents_project_agent"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class TaskShape(str, enum.Enum):
     """Deliberately narrow for v1 (see CLAUDE.md's item-6 design decisions)
     - a fixed, pre-vetted set of goal->plan-shape pairings, not open-ended
