@@ -298,8 +298,17 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
 async def list_sessions(user=Depends(get_current_user)):
     """Tenant-scoped AND user-scoped: sessions are private per-user (like the
     rest of this chat interface), not visible to other members of the same
-    tenant — see CLAUDE.md Phase 8 for the reasoning."""
+    tenant — see CLAUDE.md Phase 8 for the reasoning.
+
+    Excludes any session_id that's actually a real Channel's id (finding
+    #70, WALKTHROUGH_FINDINGS_2026-08.md): a channel message's user_id is
+    always the real posting user, so without this exclusion a channel a
+    user has ever posted in shows up here as an ordinary private session
+    — title, message count, and all — indistinguishable from a real 1:1
+    AXIOM conversation. A channel's activity belongs exclusively to
+    GET /api/v1/channels/, never here."""
     async with AsyncSessionLocal() as db:
+        channel_ids = select(Channel.id).where(Channel.tenant_id == user["tenant_id"])
         r = await db.execute(
             select(
                 ChatMessage.session_id,
@@ -307,7 +316,10 @@ async def list_sessions(user=Depends(get_current_user)):
                 func.max(ChatMessage.created_at).label("last_activity"),
                 func.count().label("message_count"),
             )
-            .where(ChatMessage.tenant_id == user["tenant_id"], ChatMessage.user_id == user["sub"])
+            .where(
+                ChatMessage.tenant_id == user["tenant_id"], ChatMessage.user_id == user["sub"],
+                ChatMessage.session_id.notin_(channel_ids),
+            )
             .group_by(ChatMessage.session_id)
             .order_by(func.max(ChatMessage.created_at).desc())
         )

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,7 +8,7 @@ from sqlalchemy import select
 
 import agent.dataops_agent as dataops_agent
 from database import AsyncSessionLocal
-from models.all_models import ChatMessage
+from models.all_models import Channel, ChatMessage
 from langchain_core.tools import tool
 
 
@@ -137,6 +138,37 @@ async def test_chat_sessions_list_is_scoped_to_the_requesting_user(client, monke
     assert session_a not in ids_b
     assert session_b in ids_b
     assert session_b not in ids_a
+
+
+@pytest.mark.asyncio
+async def test_chat_sessions_list_excludes_channel_backed_session_ids(client):
+    """Finding #70: a channel's session_id must never appear in
+    GET /chat/sessions as if it were a private session, even though a
+    channel message the caller posted has their own real user_id on it
+    -- exactly the row shape a private session has. Real private
+    sessions must still list normally alongside the exclusion."""
+    token, tenant_id, user_id = await _register(client, "sessionexcl")
+
+    async with AsyncSessionLocal() as db:
+        channel = Channel(id=str(uuid.uuid4()), tenant_id=tenant_id, name="General")
+        db.add(channel)
+        db.add(ChatMessage(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
+            session_id=channel.id, role="user", content="@Nova hello",
+            created_at=datetime.utcnow(),
+        ))
+        private_session_id = str(uuid.uuid4())
+        db.add(ChatMessage(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
+            session_id=private_session_id, role="user", content="a real private message",
+            created_at=datetime.utcnow(),
+        ))
+        await db.commit()
+
+    r = await client.get("/api/v1/chat/sessions", headers=_auth(token))
+    ids = {s["session_id"] for s in r.json()["sessions"]}
+    assert private_session_id in ids
+    assert channel.id not in ids
 
 
 @pytest.mark.asyncio
