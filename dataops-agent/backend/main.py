@@ -27,6 +27,19 @@ log = structlog.get_logger()
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Model liveness check (2026-09-03, see GOTCHAS.md) -- a real 404 gets
+    # logged loudly (model_liveness_check_failed) and is inspectable via
+    # GET /health/models afterward, but a failure in the check's OWN
+    # infrastructure (Redis briefly unavailable, a network blip reaching
+    # a provider) must never prevent the app from starting -- this is a
+    # visibility improvement, not a new hard dependency for boot.
+    try:
+        from services.model_liveness import check_configured_models
+        await check_configured_models()
+    except Exception as exc:
+        log.error("model_liveness_check_errored", error=str(exc))
+
     log.info("axiom.startup", env=settings.APP_ENV, version="1.0.0")
     yield
     await engine.dispose()
@@ -154,6 +167,20 @@ async def health_db():
             status_code=503,
             content={"status": "error", "db": "unreachable", "detail": str(exc)},
         )
+
+
+@app.get("/health/models", tags=["Health"])
+async def health_models(force: bool = False):
+    """Cached model-liveness result (see services/model_liveness.py) --
+    ?force=true bypasses the cache and re-pings every configured model
+    right now. 503 whenever any configured model isn't reachable, so a
+    monitor polling this can alert on a provider deprecation within
+    minutes instead of discovering it mid-incident."""
+    from services.model_liveness import check_configured_models
+    payload = await check_configured_models(force=force)
+    dead = [r for r in payload["results"] if r["status"] != "ok"]
+    status_code = 503 if dead else 200
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 
