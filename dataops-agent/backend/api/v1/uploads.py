@@ -3,12 +3,9 @@ from pydantic import BaseModel
 from typing import Optional
 import shutil, os, uuid, math
 from .auth import get_current_user, require_permission, enforce_quota
-from modules.ingestion.connector_manager import ConnectorManager
+from modules.ingestion.connector_manager import ConnectorManager, UPLOAD_DIR
 
 router = APIRouter()
-
-UPLOAD_DIR = os.path.join(os.path.expanduser("~"), "dataops_uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 ALLOWED_EXTS = {"csv", "xlsx", "xls", "json", "pdf", "docx"}
 
@@ -29,7 +26,7 @@ async def upload_file(file: UploadFile = File(...), user=Depends(get_current_use
     dest = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}.{ext}")
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    result = await ConnectorManager(user["tenant_id"]).ingest_file(dest, ext)
+    result = await ConnectorManager(user["tenant_id"]).ingest_file(dest)
     return sanitize_floats({"filename": file.filename, "path": dest, "ext": ext, **result})
 
 @router.post("/register")
@@ -45,7 +42,7 @@ async def upload_and_register(
     dest = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}.{ext}")
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    ingest_result = await ConnectorManager(user["tenant_id"]).ingest_file(dest, ext)
+    ingest_result = await ConnectorManager(user["tenant_id"]).ingest_file(dest)
     source_result = await ConnectorManager(user["tenant_id"]).register_source(
         name=name or file.filename,
         source_type=ext.lower(),

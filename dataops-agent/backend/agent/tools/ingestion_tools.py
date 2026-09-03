@@ -9,10 +9,15 @@ async def list_data_sources(tenant_id: str) -> dict:
     return await ConnectorManager(tenant_id).list_sources()
 
 @tool
-async def register_data_source(tenant_id: str, name: str, source_type: str, connection_config: dict) -> dict:
-    """Register a new data source. source_type: postgres|mysql|csv|excel|json|api_rest|google_sheets|s3|pdf|docx."""
+async def register_data_source(tenant_id: str, name: str, file_path: str) -> dict:
+    """Register an already-uploaded file (from POST /api/v1/uploads/) as a
+    data source. source_type and connection_config are derived from the
+    real file on disk, never supplied here -- this can only attach an
+    existing upload, never invent a live database or API connection.
+    Registering a non-file source (postgres, mysql, api_rest, ...) is a
+    user action via POST /api/v1/sources/, not available from chat."""
     from modules.ingestion.connector_manager import ConnectorManager
-    return await ConnectorManager(tenant_id).register_source(name, source_type, connection_config)
+    return await ConnectorManager(tenant_id).register_uploaded_file(name, file_path)
 
 @tool
 async def profile_schema(tenant_id: str, source_id: str) -> dict:
@@ -21,10 +26,14 @@ async def profile_schema(tenant_id: str, source_id: str) -> dict:
     return cap_tool_result(await SchemaProfiler(tenant_id, source_id).profile())
 
 @tool
-async def ingest_file(tenant_id: str, file_path: str, source_type: str, pipeline_id: Optional[str] = None) -> dict:
-    """Ingest an uploaded file (CSV, Excel, PDF, DOCX, JSON) and return parsed schema + preview."""
+async def ingest_file(tenant_id: str, file_path: str, pipeline_id: Optional[str] = None) -> dict:
+    """Parse an already-uploaded file (CSV, Excel, PDF, DOCX, JSON -- from
+    POST /api/v1/uploads/) and return its schema + preview. file_path must
+    be a real file already sitting under the upload directory, never an
+    arbitrary filesystem path -- source_type is derived from its real
+    extension, never supplied here."""
     from modules.ingestion.connector_manager import ConnectorManager
-    return cap_tool_result(await ConnectorManager(tenant_id).ingest_file(file_path, source_type, pipeline_id))
+    return cap_tool_result(await ConnectorManager(tenant_id).ingest_file(file_path, pipeline_id))
 
 @tool
 async def sync_source(tenant_id: str, source_id: str, mode: str = "incremental") -> dict:

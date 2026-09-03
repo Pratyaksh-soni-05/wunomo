@@ -1,3 +1,4 @@
+import os
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -13,6 +14,36 @@ from config import settings
 log = structlog.get_logger()
 
 def utcnow(): return datetime.now(timezone.utc).replace(tzinfo=None)
+
+# Canonical upload directory -- api/v1/uploads.py imports this rather than
+# defining its own copy, so there's exactly one place a file a human
+# actually uploaded can live. This is also what makes a file_path
+# "attach-only" checkable at all (see _resolve_uploaded_file_path below) --
+# an agent can reference a real upload, never an arbitrary path elsewhere
+# on the container's filesystem.
+UPLOAD_DIR = os.path.join(os.path.expanduser("~"), "dataops_uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def _resolve_uploaded_file_path(file_path: str) -> Path:
+    """Resolves file_path to a real file that's actually sitting under
+    UPLOAD_DIR -- i.e. something a human already put there via
+    POST /api/v1/uploads/ -- raising ValueError otherwise. This is the
+    entire enforcement mechanism behind "attach-only": ingest_file and
+    register_data_source (both chat-callable, both LLM-supplied paths)
+    can only ever reference a file that genuinely exists here, never an
+    arbitrary filesystem path (e.g. a path-traversal read of something
+    outside the upload directory)."""
+    resolved = Path(file_path).resolve()
+    upload_root = Path(UPLOAD_DIR).resolve()
+    if not resolved.is_relative_to(upload_root):
+        raise ValueError(
+            "file_path must be a file already uploaded via POST /api/v1/uploads/, "
+            "not an arbitrary path."
+        )
+    if not resolved.is_file():
+        raise ValueError(f"No uploaded file found at {file_path}.")
+    return resolved
 
 # Security guard: never let a tenant-registered source point at the app's own
 # control-plane database — that's every tenant's data, not just theirs.
@@ -121,9 +152,41 @@ class ConnectorManager:
 
             return {"id": source.id, "name": source.name, "source_type": source_type, "status": "registered"}
 
+    # ── REGISTER AN UPLOADED FILE (attach-only) ─────────────────────────────────
+    async def register_uploaded_file(self, name: str, file_path: str) -> dict:
+        """Wunomo Projects Phase 2, item 5: the chat-callable half of
+        register_data_source. file_path must resolve to a real file already
+        sitting under UPLOAD_DIR (see _resolve_uploaded_file_path) -- an
+        agent can attach an existing upload as a source, never invent a
+        source_type or connection_config the way the raw register_source()
+        call still allows callers who already have real, non-agent-supplied
+        values for those (api/v1/sources.py's POST /). Both are derived
+        here from the real file on disk instead."""
+        try:
+            resolved = _resolve_uploaded_file_path(file_path)
+        except ValueError as e:
+            return {"error": str(e), "status_code": 422}
+        ext = resolved.suffix.lower().lstrip(".")
+        source_type = SUPPORTED_EXTS.get(ext)
+        if source_type is None:
+            return {"error": f"Unsupported file type: .{ext}", "status_code": 422}
+        return await self.register_source(
+            name=name, source_type=source_type.value,
+            connection_config={"file_path": str(resolved), "original_name": resolved.name},
+        )
+
     # ── INGEST FILE ───────────────────────────────────────────────────────────
-    async def ingest_file(self, file_path: str, source_type: str, pipeline_id: Optional[str] = None) -> dict:
-        ext = Path(file_path).suffix.lower().lstrip(".")
+    async def ingest_file(self, file_path: str, pipeline_id: Optional[str] = None) -> dict:
+        # pipeline_id is unused in this method's own body -- kept only so
+        # services/agent_scope.py's TOOL_SCOPE_RESOLUTION["ingest_file"] has
+        # a real arg to resolve against agent_sources. Removing it would
+        # silently make this tool unscopeable, not just unused.
+        try:
+            resolved = _resolve_uploaded_file_path(file_path)
+        except ValueError as e:
+            return {"file": file_path, "status": "error", "error": str(e)}
+        file_path = str(resolved)
+        ext = resolved.suffix.lower().lstrip(".")
         result = {"file": file_path, "type": ext, "status": "ingested", "rows": 0, "columns": []}
         try:
             if ext == "csv":
