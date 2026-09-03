@@ -23,22 +23,36 @@ was chosen for now. Expect it to be replaced by a real $/token table
 once Stripe billing is genuinely live and per-model pricing needs to be
 exact rather than approximate.
 
-Tier limit calibration (2026-07-18): the originally-proposed Starter cap
-(2,000 credits/mo) was checked against this project's own real dev/
-verification-tenant usage before any enforcement shipped, and found badly
-miscalibrated - several actively-reused verification tenants already
-showed 4,000-84,000 credits/mo from ordinary live-LLM-testing sessions
-under this exact formula (a single afternoon of Gemini/Groq
-live-verification work, not abuse). Recalibrated upward using that real
-usage data as the signal before shipping (Starter 25,000 / Growth
-100,000 / Scale 500,000), discounting the extreme high end as
-accumulated-across-many-sessions test-tenant reuse rather than one real
-customer's single month. Sources/runs/members limits were left as
-originally proposed - the same real-usage check found those already
-realistic (max observed: 5 sources, 1 member, 6 runs/mo across ~2,900
-dev/test tenants). Revisit all of these once real customer usage data
-exists - these are launch-time placeholders with a documented basis, not
-carved in stone.
+Tier limit calibration (2026-07-18) - CORRECTED 2026-09-03, read this
+before this paragraph ends up in a pricing doc: the originally-proposed
+Starter cap (2,000 credits/mo) was checked against usage from a handful
+of this project's own actively-reused internal verification tenants
+(a small number of hand-created accounts belonging to the team, used
+for live Gemini/Groq testing) before any enforcement shipped, and found
+badly miscalibrated - those tenants already showed 4,000-84,000
+credits/mo from ordinary live-LLM-testing sessions under this exact
+formula (a single afternoon of verification work, not abuse).
+Recalibrated upward using that handful of internal accounts as the
+signal (Starter 25,000 / Growth 100,000 / Scale 500,000), discounting
+the extreme high end as accumulated-across-many-sessions reuse rather
+than one real customer's single month. Sources/runs/members limits were
+left as originally proposed on the same basis (max observed: 5 sources,
+1 member, 6 runs/mo across ~2,900 tenant rows, at the time).
+
+This was never customer data, and the "~2,900 tenant rows" figure is
+now itself stale and misleading in the other direction: as of
+2026-09-03 this table holds 23,589 tenant rows, of which a real audit
+found 23,578 carry the pytest fixture's own @example.com email pattern
+and the remaining ~14 are all traceable to the team's own accounts
+(demo/QA/manual-verification tenants) - zero are an external signup.
+The count keeps growing by thousands per day purely from running this
+project's own test suite (4,987 new rows in a single day, 2026-09-02),
+with no teardown. Every number in this docstring, and any per-tenant
+aggregate computed against the `tenants` table today, reflects test-
+suite volume, not usage calibration of any kind. Recalibrate all of
+these against real customer usage once it exists - these remain
+launch-time placeholders, now with a corrected basis, not carved in
+stone.
 """
 from datetime import datetime, timezone
 from typing import Optional
