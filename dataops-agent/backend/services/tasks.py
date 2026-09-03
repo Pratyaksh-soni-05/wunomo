@@ -245,6 +245,125 @@ async def _check_scheduled_pipelines():
     log.info("scheduled_pipeline_check_complete", checked=len(pipelines), fired=fired)
 
 
+# Found live while building this: this dev DB alone has 788 RUNNING +
+# 353 QUEUED + 102 PAUSED_QUOTA_EXCEEDED tasks (WALKTHROUGH_FINDINGS_
+# 2026-08.md item 74) -- doing each one's real execute_next_step() work
+# inline, sequentially, inside the beat tick itself hung past two
+# minutes against real data, not a hypothetical. At 4 worker processes
+# (docker-compose's celery_worker --concurrency=4) and a conservative
+# worst case of ~10s per task (this module's own MAX_ATTEMPTS_PER_STEP=3
+# / TRANSIENT_RETRY_BACKOFF_SECONDS=2 already bound one call's internal
+# retry sleeps to a few seconds, plus real tool/LLM latency), 25 tasks
+# split across 4 workers is ~6-7 per worker -- comfortably inside the
+# 60s tick window even at that pessimistic estimate, with real headroom
+# for the common case. A backlog beyond 25 simply drains across
+# multiple ticks, oldest-first (see the index/order-by below) -- fine,
+# per instruction; a queue that never empties would not be.
+ADVANCE_BATCH_SIZE = 25
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def advance_active_tasks(self):
+    """The auto-advance loop's beat tick (Wunomo Projects Phase 3, item
+    71 / slice 10): "give it a task and walk away" has always actually
+    meant a human had to keep clicking /advance -- this is the second
+    half of that already-shipped feature, not new scope.
+
+    Deliberately does NOT do any task's real advancing work itself --
+    only selects up to ADVANCE_BATCH_SIZE runnable task_ids (oldest-
+    updated-first) and dispatches one advance_one_task.delay(task_id)
+    per id, the same way check_scheduled_pipelines above dispatches
+    execute_scheduled_pipeline_run.delay(...) rather than running a
+    pipeline inline. This is a correction, not the original design: an
+    earlier version of this function called execute_next_step() inline
+    in a loop here, and hung for over two minutes against this dev DB's
+    own real backlog (item 74) -- the fix is dispatching to the worker
+    pool's own concurrency, not doing the work in the scheduler.
+
+    If the same task_id is still sitting on the queue from a previous
+    tick when this one dispatches it again (the worker pool falling
+    behind ADVANCE_BATCH_SIZE/tick), the duplicate is harmless -- the
+    per-task advisory lock (services/task_lock.py, item 73) means
+    whichever copy runs second just gets {"outcome": "task_busy"} and
+    exits immediately. Accepted as a wasted-cycle cost, not fixed with
+    dispatch de-duplication, given ADVANCE_BATCH_SIZE's own headroom."""
+    import asyncio
+    from database import engine
+
+    async def _run():
+        await engine.dispose()
+        return await _select_tasks_to_advance()
+
+    try:
+        task_ids = asyncio.run(_run())
+    except Exception as exc:
+        log.error("advance_active_tasks_failed", error=str(exc))
+        raise self.retry(exc=exc)
+
+    for task_id in task_ids:
+        advance_one_task.delay(task_id)
+    log.info("advance_active_tasks_dispatched", count=len(task_ids))
+
+
+async def _select_tasks_to_advance() -> list[str]:
+    """Selects up to ADVANCE_BATCH_SIZE runnable task_ids, oldest-
+    updated-first -- ix_tasks_status_updated_at (status, updated_at)
+    keeps this an index scan, not a full scan, as the tasks table keeps
+    growing (item 74). Does no task-advancing work itself; the actual
+    execute_next_step() call happens in advance_one_task below, on
+    whichever worker eventually dequeues it."""
+    from sqlalchemy import select
+    from database import AsyncSessionLocal
+    from models.all_models import Task, TaskStatus
+
+    runnable_statuses = (
+        TaskStatus.QUEUED, TaskStatus.RUNNING,
+        TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED,
+    )
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(Task.id)
+            .where(Task.status.in_(runnable_statuses))
+            .order_by(Task.updated_at.asc())
+            .limit(ADVANCE_BATCH_SIZE)
+        )
+        return [row[0] for row in r.all()]
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def advance_one_task(self, task_id: str):
+    """The real per-task work, dispatched by advance_active_tasks above
+    -- never called inline in the beat/scheduling process. Spreads the
+    actual execute_next_step() work (tool calls, possible LLM-adapt
+    calls) across the worker pool's own concurrency instead of
+    serializing every runnable task inside one beat tick.
+
+    not_runnable and task_busy are expected, silent outcomes -- a
+    tenant with 20 tasks paused for approval would otherwise produce 20
+    log lines a minute, forever, for nothing having happened. Every
+    other outcome (a real step succeeding, failing, completing the
+    task, pausing for quota/a source lock/approval) is logged, matching
+    check_scheduled_pipelines' own aggregate-logging convention."""
+    import asyncio
+    from database import engine
+    from modules.orchestration.task_executor import execute_next_step
+
+    async def _run():
+        await engine.dispose()
+        return await execute_next_step(task_id)
+
+    try:
+        outcome = asyncio.run(_run())
+    except Exception as exc:
+        log.error("advance_one_task_failed", task_id=task_id, error=str(exc))
+        raise self.retry(exc=exc)
+
+    if outcome.get("outcome") not in ("not_runnable", "task_busy"):
+        log.info("advance_one_task_outcome", task_id=task_id, outcome=outcome.get("outcome"))
+
+    log.info("advance_active_tasks_complete", checked=len(task_ids), advanced=advanced)
+
+
 @celery_app.task
 def check_all_freshness():
     import asyncio

@@ -43,6 +43,16 @@ celery_app.conf.beat_schedule = {
         "task": "services.tasks.check_scheduled_pipelines",
         "schedule": 60.0,
     },
+    # Auto-advance loop (Wunomo Projects Phase 3, item 71/slice 10) -- same
+    # 60s cadence as check-scheduled-pipelines-1min above, deliberately not
+    # tighter: execute_next_step() itself already has its own internal
+    # retry-backoff sleeps, and a conservative interval keeps a runaway
+    # task's wall-clock/step-budget caps compressing into minutes rather
+    # than seconds if the caps ever need to fire.
+    "advance-active-tasks-1min": {
+        "task": "services.tasks.advance_active_tasks",
+        "schedule": 60.0,
+    },
     "daily-reports-24hr": {
         "task": "services.tasks.generate_daily_reports",
         "schedule": 86400.0,

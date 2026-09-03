@@ -1,7 +1,7 @@
 import uuid, enum
 from datetime import datetime
 from sqlalchemy import (Column, String, Text, Boolean, Integer, Float,
-    DateTime, ForeignKey, JSON, Enum as SAEnum, UniqueConstraint)
+    DateTime, ForeignKey, JSON, Enum as SAEnum, UniqueConstraint, Index)
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -683,6 +683,15 @@ class Task(Base):
     snapshotted role would be a privilege-escalation hole with a built-in
     time window for any task that outlives a demotion or deactivation."""
     __tablename__ = "tasks"
+    __table_args__ = (
+        # Wunomo Projects Phase 3, item 71/slice 10: the auto-advance beat
+        # tick selects the oldest-untouched runnable tasks every 60s
+        # (ORDER BY updated_at ASC WHERE status IN (...) LIMIT N) -- this
+        # index is what keeps that an index scan, not a full table scan,
+        # as this table keeps growing (6,053 rows and counting -- see
+        # WALKTHROUGH_FINDINGS_2026-08.md item 74 on why it grows fast).
+        Index("ix_tasks_status_updated_at", "status", "updated_at"),
+    )
     id = Column(String, primary_key=True, default=gen_uuid)
     tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)  # initiator - see class docstring re: role
@@ -707,6 +716,14 @@ class Task(Base):
     credit_budget_max = Column(Integer, nullable=True)
     credit_budget_used = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Bumped automatically by SQLAlchemy's onupdate on every ORM-level
+    # UPDATE to this row -- what makes "oldest untouched runnable task
+    # first" (the auto-advance beat tick's own ordering) mean "hasn't
+    # made progress in the longest time," not "was created longest ago."
+    # Backfilled from created_at for every pre-existing row (migration
+    # f8a5decd97df) -- the honest value for "last touched" on a row with
+    # no real update-tracking history before this column existed.
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     started_at = Column(DateTime, nullable=True)
     paused_at = Column(DateTime, nullable=True)  # drives the pause-timeout expiry check
     # Cumulative seconds spent in ANY paused status (PAUSED_NEEDS_APPROVAL,

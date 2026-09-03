@@ -697,6 +697,25 @@ async def _notify_task_stopped(task: Task, title: str, message: str, severity: s
 
 
 async def execute_next_step(task_id: str) -> dict:
+    """Thin locking wrapper -- see _execute_next_step_locked for the real
+    logic. Wraps the ENTIRE call (not just the DB reads) in a per-task
+    advisory lock (services/task_lock.py, item 73): two concurrent calls
+    on the same task_id -- a beat tick and a human's /advance click, two
+    overlapping ticks, or just two overlapping human clicks, which could
+    already race before auto-advance ever existed -- can otherwise both
+    read the same step as PENDING before either commits, and both call
+    that step's tool. The lock is held for the full duration of the real
+    call below, including its internal retry-backoff sleeps, so a denied
+    caller gets {"outcome": "task_busy"} immediately rather than racing."""
+    from services.task_lock import acquire_task_lock, TaskLockHeld
+    try:
+        async with acquire_task_lock(task_id):
+            return await _execute_next_step_locked(task_id)
+    except TaskLockHeld:
+        return {"outcome": "task_busy"}
+
+
+async def _execute_next_step_locked(task_id: str) -> dict:
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one_or_none()
