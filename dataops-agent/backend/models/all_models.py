@@ -247,6 +247,17 @@ class ChatMessage(Base):
     # new row-one agent. No FK - matches this table's own existing
     # convention (tenant_id/user_id above are plain columns too, not FKs).
     agent_id = Column(String, nullable=True)
+    # Wunomo Projects Phase 2: which agent this message @mentions, if
+    # any - singular, matching "the tagged agent responds, nobody else"
+    # (multi-mention would need a join table instead; not needed for v1).
+    # Nullable and FK-less for the same reason agent_id above is: every
+    # message before this column existed, and every private 1:1 message
+    # after it, simply has none. @mention ROUTING resolves this against
+    # real ChannelAgent membership (services/channels.py), never trusts
+    # this column alone - an agent removed from a channel after being
+    # mentioned in an old message must not retroactively become
+    # reachable through it.
+    mentioned_agent_id = Column(String, nullable=True)
     role = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
     personality_mode = Column(String(50))
@@ -557,6 +568,62 @@ class ProjectAgent(Base):
 
     id = Column(String, primary_key=True, default=gen_uuid)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Channel(Base):
+    """Wunomo Projects Phase 2 -- the multi-participant conversation the
+    proposal calls a "channel." ChatMessage.session_id (see that model's
+    own column, unchanged) stays a bare, FK-less grouping string exactly
+    as it's always been; for a real channel it's simply set to this
+    row's own id at creation time, by convention, not by a declared
+    foreign key -- correlation is by value, checked at read time
+    (routing, context-filtering), the same way ChatMessage.agent_id's
+    optionality already works on this same table. No backfill needed
+    for today's private 1:1 chat: it keeps generating a bare session_id
+    with no matching Channel row, forever, exactly as before this
+    table existed.
+
+    project_id is nullable, not required -- same reasoning ProjectAgent
+    already established for agent-project membership: a channel MAY
+    live inside a project, but forcing "create a project first" before
+    anyone can ever open a channel isn't a v1 requirement this schema
+    needs to enforce."""
+    __tablename__ = "channels"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ChannelUser(Base):
+    """Human membership -- a channel's real participant set, queried by
+    the ownership/membership check the same way agent_sources/
+    project_agents already are, not inferred from who happens to have
+    posted a message."""
+    __tablename__ = "channel_users"
+    __table_args__ = (UniqueConstraint("channel_id", "user_id", name="uq_channel_users_channel_user"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    channel_id = Column(String, ForeignKey("channels.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ChannelAgent(Base):
+    """Agent membership -- @mention routing resolves against this table,
+    never a string match on an agent's name: an agent not in
+    channel_agents for a given channel cannot be mentioned in it,
+    regardless of what its name looks like in the message text."""
+    __tablename__ = "channel_agents"
+    __table_args__ = (UniqueConstraint("channel_id", "agent_id", name="uq_channel_agents_channel_agent"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    channel_id = Column(String, ForeignKey("channels.id"), nullable=False, index=True)
     agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
