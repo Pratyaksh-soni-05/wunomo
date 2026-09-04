@@ -18,7 +18,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from database import AsyncSessionLocal
-from models.all_models import AgentInstance, AgentInstanceStatus, Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus
+from models.all_models import (
+    AgentInstance, AgentInstanceStatus, RUNNABLE_TASK_STATUSES, Task, TaskShape, TaskStatus, TaskStep,
+    TaskStepSource, TaskStepStatus,
+)
 from modules.orchestration.task_planner import (
     PlanGenerationError, PlanValidationError, generate_plan, validate_step_plan, validate_step_plan_scope,
 )
@@ -603,10 +606,7 @@ async def advance_task(task_id: str, current_user: dict = Depends(get_current_us
             raise HTTPException(status_code=404, detail="Task not found.")
         if task.user_id != user_id:
             raise HTTPException(status_code=403, detail="Only the task's creator may advance it.")
-        if task.status not in (
-            TaskStatus.QUEUED, TaskStatus.RUNNING,
-            TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED,
-        ):
+        if task.status not in RUNNABLE_TASK_STATUSES:
             raise HTTPException(
                 status_code=409,
                 detail=f"Task is not runnable (current status: {task.status.value}).",

@@ -186,6 +186,43 @@ async def health_models(force: bool = False):
     return JSONResponse(status_code=status_code, content=payload)
 
 
+@app.get("/health/tasks", tags=["Health"])
+async def health_tasks():
+    """Backlog visibility for the auto-advance loop (Wunomo Projects
+    Phase 3, item 71): a live, on-demand answer to "is the beat tick's
+    25/tick cap draining the backlog or falling behind it" -- previously
+    only visible by grepping advance_active_tasks_dispatched log lines.
+    Uses the same RUNNABLE_TASK_STATUSES services/tasks.py's beat tick
+    selects against, so this can never disagree with what the tick
+    itself considers runnable. Broken down by status so a growing QUEUED
+    count (plans piling up unstarted) reads differently from a growing
+    PAUSED_QUOTA_EXCEEDED one (a quota problem, not a scheduler one)."""
+    from sqlalchemy import func, select
+    from database import AsyncSessionLocal
+    from models.all_models import RUNNABLE_TASK_STATUSES, Task
+    from services.tasks import ADVANCE_BATCH_SIZE
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(Task.status, func.count())
+            .where(Task.status.in_(RUNNABLE_TASK_STATUSES))
+            .group_by(Task.status)
+        )
+        by_status = {status.value: count for status, count in r.all()}
+
+    total = sum(by_status.values())
+    return {
+        "total_runnable": total,
+        "by_status": by_status,
+        "batch_size": ADVANCE_BATCH_SIZE,
+        # Ceiling division: how many 60s ticks it would take to drain the
+        # current backlog if zero new runnable work ever arrived --
+        # optimistic on purpose (real arrivals only push this further
+        # out), still useful as a lower bound on "how far behind is it."
+        "estimated_ticks_to_drain_if_no_new_work": -(-total // ADVANCE_BATCH_SIZE) if total else 0,
+    }
+
+
 
 if __name__ == "__main__":
     uvicorn.run(

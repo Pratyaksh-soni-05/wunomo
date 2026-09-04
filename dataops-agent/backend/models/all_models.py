@@ -655,6 +655,19 @@ class TaskStatus(str, enum.Enum):
     EXPIRED = "expired"  # sat paused past the pause-timeout with no resolution
 
 
+# The single source of truth for "auto-advanceable" -- task_executor.py's
+# execute_next_step(), services/tasks.py's beat tick, and main.py's
+# GET /health/tasks all import this same tuple rather than each defining
+# their own copy, so a status added or removed here can never make the
+# beat tick and the backlog-visibility endpoint disagree about what
+# "runnable" means. PAUSED_NEEDS_APPROVAL is deliberately excluded -- a
+# task waiting on a human must never be picked up automatically.
+RUNNABLE_TASK_STATUSES = (
+    TaskStatus.QUEUED, TaskStatus.RUNNING,
+    TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED,
+)
+
+
 class TaskStepStatus(str, enum.Enum):
     PENDING = "pending"
     RUNNING = "running"

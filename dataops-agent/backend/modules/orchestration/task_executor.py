@@ -68,7 +68,7 @@ from agent.personality import get_risk_level
 from modules.governance.policy_engine import PolicyEngine
 from modules.orchestration.task_planner import tool_by_name, tool_schema_for_prompt
 from models.all_models import (
-    ApprovalRequest, ApprovalStatus, RunStatus, Task, TaskStatus, TaskStep,
+    ApprovalRequest, ApprovalStatus, RUNNABLE_TASK_STATUSES, RunStatus, Task, TaskStatus, TaskStep,
     TaskStepSource, TaskStepStatus, User,
 )
 from services.agent_scope import agent_scope_denial_reason
@@ -721,10 +721,7 @@ async def _execute_next_step_locked(task_id: str) -> dict:
         task = r.scalar_one_or_none()
         if task is None:
             return {"outcome": "task_not_found"}
-        if task.status not in (
-            TaskStatus.QUEUED, TaskStatus.RUNNING,
-            TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED,
-        ):
+        if task.status not in RUNNABLE_TASK_STATUSES:
             return {"outcome": "not_runnable", "status": task.status.value}
 
         if task.status in (TaskStatus.QUEUED, TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED):

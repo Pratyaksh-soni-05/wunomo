@@ -295,39 +295,50 @@ def advance_active_tasks(self):
         return await _select_tasks_to_advance()
 
     try:
-        task_ids = asyncio.run(_run())
+        task_ids, total_runnable = asyncio.run(_run())
     except Exception as exc:
         log.error("advance_active_tasks_failed", error=str(exc))
         raise self.retry(exc=exc)
 
     for task_id in task_ids:
         advance_one_task.delay(task_id)
-    log.info("advance_active_tasks_dispatched", count=len(task_ids))
-
-
-async def _select_tasks_to_advance() -> list[str]:
-    """Selects up to ADVANCE_BATCH_SIZE runnable task_ids, oldest-
-    updated-first -- ix_tasks_status_updated_at (status, updated_at)
-    keeps this an index scan, not a full scan, as the tasks table keeps
-    growing (item 74). Does no task-advancing work itself; the actual
-    execute_next_step() call happens in advance_one_task below, on
-    whichever worker eventually dequeues it."""
-    from sqlalchemy import select
-    from database import AsyncSessionLocal
-    from models.all_models import Task, TaskStatus
-
-    runnable_statuses = (
-        TaskStatus.QUEUED, TaskStatus.RUNNING,
-        TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED,
+    # Backlog visibility (added after the fact, per instruction): a
+    # 25/tick cap against a real backlog otherwise has no way to show
+    # whether it's draining or growing between observations -- comparing
+    # total_runnable across consecutive tick logs is what answers that.
+    # Also exposed on demand via GET /health/tasks (main.py), which uses
+    # the identical RUNNABLE_TASK_STATUSES this query does.
+    log.info(
+        "advance_active_tasks_dispatched",
+        dispatched=len(task_ids), total_runnable=total_runnable, batch_size=ADVANCE_BATCH_SIZE,
     )
+
+
+async def _select_tasks_to_advance() -> tuple[list[str], int]:
+    """Returns (task_ids to dispatch this tick, total runnable count).
+    Selects up to ADVANCE_BATCH_SIZE runnable task_ids, oldest-updated-
+    first -- ix_tasks_status_updated_at (status, updated_at) keeps this
+    an index scan, not a full scan, as the tasks table keeps growing
+    (item 74). The total count is a second, cheap COUNT(*) against the
+    same index, purely for backlog visibility (see advance_active_tasks'
+    own log line and GET /health/tasks) -- it does no task-advancing
+    work itself; the actual execute_next_step() call happens in
+    advance_one_task below, on whichever worker eventually dequeues it."""
+    from sqlalchemy import func, select
+    from database import AsyncSessionLocal
+    from models.all_models import RUNNABLE_TASK_STATUSES, Task
+
     async with AsyncSessionLocal() as db:
+        total_runnable = await db.scalar(
+            select(func.count()).select_from(Task).where(Task.status.in_(RUNNABLE_TASK_STATUSES))
+        )
         r = await db.execute(
             select(Task.id)
-            .where(Task.status.in_(runnable_statuses))
+            .where(Task.status.in_(RUNNABLE_TASK_STATUSES))
             .order_by(Task.updated_at.asc())
             .limit(ADVANCE_BATCH_SIZE)
         )
-        return [row[0] for row in r.all()]
+        return [row[0] for row in r.all()], total_runnable
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
