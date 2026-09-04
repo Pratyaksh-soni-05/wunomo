@@ -667,6 +667,17 @@ RUNNABLE_TASK_STATUSES = (
     TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED,
 )
 
+# The single source of truth for "this task is done, nothing further will
+# ever happen to it" -- originally api/v1/tasks.py's own private
+# _TERMINAL_STATUSES (used by the topbar counter and the Tasks list badge),
+# promoted here (2026-09-04) so api/v1/agents.py's offboard check can share
+# the exact same definition rather than risk a second, driftable copy of
+# "terminal" existing side by side with the first.
+TERMINAL_TASK_STATUSES = frozenset({
+    TaskStatus.PLAN_REJECTED, TaskStatus.COMPLETED, TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS,
+    TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.EXPIRED,
+})
+
 
 class TaskStepStatus(str, enum.Enum):
     PENDING = "pending"

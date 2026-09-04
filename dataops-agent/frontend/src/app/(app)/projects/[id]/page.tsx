@@ -79,7 +79,10 @@ export default function ProjectDetailPage() {
             ) : (
               <div className="grid grid-3" style={{ gap: 12 }}>
                 {agentList.map((a) => (
-                  <Card key={a.id}>
+                  <Card
+                    key={a.id} hover style={{ cursor: "pointer" }}
+                    onClick={() => router.push(`/agents/${a.id}`)}
+                  >
                     <CardBody>
                       <div className="font-medium text-sm">{a.name}</div>
                       <Badge variant="midnight" style={{ marginTop: 6 }}>

@@ -1305,6 +1305,55 @@ export function hireAgent(
   });
 }
 
+// ---------- Agent detail (Wunomo Projects Phase 2 frontend, slice 4) ----------
+
+export interface AgentListItem {
+  id: string;
+  name: string;
+  employee_type: string;
+  status: string;
+  monthly_token_budget: number | null;
+}
+
+export interface AgentQuota {
+  agent_id: string;
+  resource: string;
+  used: number;
+  limit: number | null;
+  percent: number;
+  status: string;
+}
+
+export function listAgents(token: string): Promise<{ agents: AgentListItem[] }> {
+  return authedRequest("/api/v1/agents/", token);
+}
+
+export function getAgentSources(token: string, agentId: string): Promise<{ agent_id: string; sources: { id: string; name: string }[] }> {
+  return authedRequest(`/api/v1/agents/${agentId}/sources`, token);
+}
+
+export function grantAgentSource(token: string, agentId: string, sourceId: string) {
+  return request(`/api/v1/agents/${agentId}/sources/${sourceId}`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function revokeAgentSource(token: string, agentId: string, sourceId: string) {
+  return request(`/api/v1/agents/${agentId}/sources/${sourceId}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function getAgentQuota(token: string, agentId: string): Promise<AgentQuota> {
+  return authedRequest(`/api/v1/agents/${agentId}/quota`, token);
+}
+
+export function offboardAgent(token: string, agentId: string): Promise<{ agent_id: string; agent_name: string; status: string }> {
+  return request(`/api/v1/agents/${agentId}/offboard`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 // ---------- Local session storage ----------
 
 const TOKEN_KEY = "axiom_token";

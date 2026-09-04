@@ -19,8 +19,8 @@ from sqlalchemy import select
 
 from database import AsyncSessionLocal
 from models.all_models import (
-    AgentInstance, AgentInstanceStatus, RUNNABLE_TASK_STATUSES, Task, TaskShape, TaskStatus, TaskStep,
-    TaskStepSource, TaskStepStatus,
+    AgentInstance, AgentInstanceStatus, RUNNABLE_TASK_STATUSES, TERMINAL_TASK_STATUSES, Task, TaskShape,
+    TaskStatus, TaskStep, TaskStepSource, TaskStepStatus,
 )
 from modules.orchestration.task_planner import (
     PlanGenerationError, PlanValidationError, generate_plan, validate_step_plan, validate_step_plan_scope,
@@ -256,23 +256,16 @@ async def list_all_tenant_tasks(current_user: dict = Depends(require_permission(
     return [_serialize_task_summary(t) for t in tasks]
 
 
-# Anything not in this set needs a human's attention or is actively
-# working -- a draft plan awaiting review, a step blocked on approval or
-# quota, or genuinely running. The topbar counter (stage 7) and the Tasks
-# list's badge both read this same definition.
-_TERMINAL_STATUSES = frozenset({
-    TaskStatus.PLAN_REJECTED, TaskStatus.COMPLETED, TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS,
-    TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.EXPIRED,
-})
-
-
 @router.get("/counts")
 async def task_counts(current_user: dict = Depends(get_current_user)):
     """One real number: how many tasks (own, or every tenant task if you
     hold tasks.manage_all) are not yet in a terminal state -- running,
     queued, or waiting on you. Real or absent was the explicit
     requirement for the topbar counter this backs; this endpoint is what
-    makes that number real."""
+    makes that number real. TERMINAL_TASK_STATUSES (models/all_models.py)
+    is "anything not in this set needs a human's attention or is actively
+    working" -- shared with api/v1/agents.py's offboard check (2026-09-04)
+    so both agree on what "done" means, rather than each defining it."""
     tenant_id = current_user["tenant_id"]
     user_id = current_user["sub"]
     can_view_all = has_permission(current_user.get("role"), "tasks.manage_all")
@@ -284,7 +277,7 @@ async def task_counts(current_user: dict = Depends(get_current_user)):
         r = await db.execute(query)
         statuses = r.scalars().all()
 
-    active = sum(1 for s in statuses if s not in _TERMINAL_STATUSES)
+    active = sum(1 for s in statuses if s not in TERMINAL_TASK_STATUSES)
     return {"active": active}
 
 

@@ -30,10 +30,11 @@ from sqlalchemy import delete, select
 from .auth import require_permission
 from database import AsyncSessionLocal
 from models.all_models import (
-    AgentEmployeeType, AgentInstance, AgentInstanceStatus, AgentSource,
-    DataSource, OperationMode, PersonalityMode, Project, ProjectAgent,
+    AgentEmployeeType, AgentInstance, AgentInstanceStatus, AgentSource, ChannelAgent,
+    DataSource, OperationMode, PersonalityMode, Project, ProjectAgent, Task, TERMINAL_TASK_STATUSES,
 )
 from services.llm_service import SUPPORTED_MODEL_OVERRIDES
+from services.quota_service import get_agent_quota_status
 from services.settings_service import get_ai_model_override
 
 router = APIRouter()
@@ -125,6 +126,93 @@ async def list_agent_sources(agent_id: str, user=Depends(require_permission("age
         sources = [{"id": sid, "name": name} for sid, name in r.all()]
 
     return {"agent_id": agent_id, "sources": sources}
+
+
+@router.get("/{agent_id}/quota")
+async def get_agent_quota(agent_id: str, user=Depends(require_permission("agents.manage"))):
+    """Read side for the agent detail screen's budget card (Wunomo
+    Projects Phase 2 frontend, slice 4) -- get_agent_quota_status() has
+    existed since Phase 1 part two as an internal enforcement gate (chat
+    turn start, task creation, mid-task before an adapt call); this is
+    its first read-only exposure so a human can see the same number the
+    gate itself checks, not just the static budget set at hire time."""
+    tenant_id = user["tenant_id"]
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(AgentInstance).where(
+            AgentInstance.id == agent_id, AgentInstance.tenant_id == tenant_id,
+        ))
+        if r.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Agent not found.")
+
+    quota = await get_agent_quota_status(agent_id)
+    return {"agent_id": agent_id, **quota}
+
+
+@router.post("/{agent_id}/offboard")
+async def offboard_agent(agent_id: str, user=Depends(require_permission("agents.manage"))):
+    """Sets AgentInstanceStatus.OFFBOARDED -- a real, enforced state, not
+    a display label. Three things happen together, atomically:
+
+    1. Blocked (409) while any of this agent's tasks is non-terminal
+       (TERMINAL_TASK_STATUSES, models/all_models.py -- shared with
+       api/v1/tasks.py's own /counts endpoint so both agree on "done").
+       Names the first such task so the caller knows exactly what to
+       resolve (cancel it, wait for it to finish) before retrying.
+       PAUSED_NEEDS_APPROVAL tasks are already non-terminal, so a pending
+       approval blocks offboarding too, with no separate check needed.
+    2. Removes this agent's channel_agents rows -- without this,
+       services/channel_routing.py's resolve_mentioned_agent() and
+       channel_agent_members() would still resolve it (neither filters
+       on status independently; the status filter added there in this
+       same change only excludes non-ACTIVE agents that are STILL
+       members). ChatMessage rows keep their attribution regardless
+       (agent_id is FK-less by existing convention) -- history is never
+       touched here.
+    3. Sets status = OFFBOARDED. Enforced at every real dispatch point:
+       chat's and task creation's own agent-resolution queries already
+       filter ACTIVE; task_executor.py's _caller_still_authorized() now
+       re-checks it per step, the same way it re-checks the initiating
+       user's is_active.
+
+    Deliberately NOT done here: agent_sources rows are preserved (no
+    security reason to drop them -- dispatch is blocked at the status
+    layer regardless of what's granted), and the agent's name stays
+    blocked from reuse (hire_agent()'s duplicate-name check has no status
+    filter) so a new unrelated agent can never inherit an offboarded
+    one's name in old channel history."""
+    tenant_id = user["tenant_id"]
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(AgentInstance).where(
+            AgentInstance.id == agent_id, AgentInstance.tenant_id == tenant_id,
+        ))
+        agent = r.scalar_one_or_none()
+        if agent is None:
+            raise HTTPException(status_code=404, detail="Agent not found.")
+        if agent.status == AgentInstanceStatus.OFFBOARDED:
+            return {"agent_id": agent_id, "agent_name": agent.name, "status": agent.status.value}
+
+        r = await db.execute(
+            select(Task.id, Task.status).where(Task.agent_id == agent_id, Task.status.notin_(TERMINAL_TASK_STATUSES))
+        )
+        blocking_task = r.first()
+        if blocking_task is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": (
+                        f"Cannot offboard '{agent.name}': task {blocking_task.id} is still "
+                        f"{blocking_task.status.value}. Resolve or cancel it first."
+                    ),
+                    "task_id": blocking_task.id,
+                },
+            )
+
+        await db.execute(delete(ChannelAgent).where(ChannelAgent.agent_id == agent_id))
+        agent.status = AgentInstanceStatus.OFFBOARDED
+        await db.commit()
+        await db.refresh(agent)
+
+    return {"agent_id": agent_id, "agent_name": agent.name, "status": agent.status.value}
 
 
 # ---------------------------------------------------------------------------

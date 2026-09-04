@@ -68,8 +68,8 @@ from agent.personality import get_risk_level
 from modules.governance.policy_engine import PolicyEngine
 from modules.orchestration.task_planner import tool_by_name, tool_schema_for_prompt
 from models.all_models import (
-    ApprovalRequest, ApprovalStatus, RUNNABLE_TASK_STATUSES, RunStatus, Task, TaskStatus, TaskStep,
-    TaskStepSource, TaskStepStatus, User,
+    AgentInstance, AgentInstanceStatus, ApprovalRequest, ApprovalStatus, RUNNABLE_TASK_STATUSES, RunStatus,
+    Task, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus, User,
 )
 from services.agent_scope import agent_scope_denial_reason
 from services.llm_service import invoke_llm
@@ -105,13 +105,16 @@ log = structlog.get_logger()
 
 async def _caller_still_authorized(db, task: Task, tool_name: str, tool_args: dict) -> tuple[bool, str | None]:
     """Fresh, per-step re-read of the task's initiating user's
-    is_active/role, AND (Wunomo Projects Phase 1) the calling agent's
-    current scope -- never trusts anything cached on Task (there is
-    nothing to trust; Task carries no role column by design, see
-    amendment 3). Mirrors get_current_user()'s own per-request re-read
-    for REST, applied here at the step-execution boundary instead. An
-    agent can be re-scoped mid-task exactly as a user can be demoted;
-    this re-checks both, the same way, at the same call site.
+    is_active/role, the calling agent's own status (Wunomo Projects Phase
+    2 frontend, slice 4 -- OFFBOARDED must be enforced, not just
+    displayed: a status that only greys out a UI card is a label, not a
+    state), AND (Wunomo Projects Phase 1) the calling agent's current
+    scope -- never trusts anything cached on Task (there is nothing to
+    trust; Task carries no role column by design, see amendment 3).
+    Mirrors get_current_user()'s own per-request re-read for REST, applied
+    here at the step-execution boundary instead. An agent can be
+    re-scoped, offboarded, or a user demoted mid-task; this re-checks all
+    three, the same way, at the same call site.
 
     The scope half only ever has something real to check when tool_args
     already holds a resolved value, not a planner/human-edit placeholder
@@ -129,6 +132,16 @@ async def _caller_still_authorized(db, task: Task, tool_name: str, tool_args: di
     row = r.first()
     if row is None or not row.is_active:
         return False, "the initiating user's account is no longer active"
+
+    # task.agent_id is nullable -- older/agent-less tasks predate Wunomo
+    # Projects Phase 1's agent wiring and never set it. No agent_id means
+    # no agent to offboard-check, not an offboarded one: skip, don't block.
+    if task.agent_id is not None:
+        r = await db.execute(select(AgentInstance.status).where(AgentInstance.id == task.agent_id))
+        agent_status_row = r.first()
+        if agent_status_row is None or agent_status_row[0] != AgentInstanceStatus.ACTIVE:
+            return False, "the calling agent has been offboarded"
+
     capability = TOOL_CAPABILITIES.get(tool_name)
     if capability is None or not has_permission(row.role, capability):
         return False, f"the initiating user's role ('{row.role}') no longer has permission to use '{tool_name}'"

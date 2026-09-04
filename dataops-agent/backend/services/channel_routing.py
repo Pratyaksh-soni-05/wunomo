@@ -8,24 +8,35 @@ into it again just because its name still appears somewhere in scrollback.
 """
 from sqlalchemy import func, or_, select
 
-from models.all_models import AgentInstance, ChannelAgent, ChatMessage
+from models.all_models import AgentInstance, AgentInstanceStatus, ChannelAgent, ChatMessage
 
 
 async def resolve_mentioned_agent(db, channel_id: str, name: str) -> AgentInstance | None:
-    """Case-insensitive match against this channel's real agent members."""
+    """Case-insensitive match against this channel's real agent members.
+    Excludes OFFBOARDED agents (Wunomo Projects Phase 2 frontend, slice 4)
+    -- offboarding must actually remove reachability, not just relabel a
+    status column; an offboarded agent left resolvable here would still
+    answer to @mention despite the UI claiming it's gone."""
     r = await db.execute(
         select(AgentInstance)
         .join(ChannelAgent, ChannelAgent.agent_id == AgentInstance.id)
-        .where(ChannelAgent.channel_id == channel_id, func.lower(AgentInstance.name) == name.lower())
+        .where(
+            ChannelAgent.channel_id == channel_id, func.lower(AgentInstance.name) == name.lower(),
+            AgentInstance.status == AgentInstanceStatus.ACTIVE,
+        )
     )
     return r.scalar_one_or_none()
 
 
 async def channel_agent_members(db, channel_id: str) -> list[AgentInstance]:
+    """Excludes OFFBOARDED agents -- same reasoning as resolve_mentioned_agent
+    above. This also feeds the "exactly one agent in the channel" single-
+    member auto-routing check in chat.py, so an offboarded agent must not
+    count toward that total either."""
     r = await db.execute(
         select(AgentInstance)
         .join(ChannelAgent, ChannelAgent.agent_id == AgentInstance.id)
-        .where(ChannelAgent.channel_id == channel_id)
+        .where(ChannelAgent.channel_id == channel_id, AgentInstance.status == AgentInstanceStatus.ACTIVE)
     )
     return list(r.scalars().all())
 
