@@ -1250,6 +1250,36 @@ export function cancelTask(token: string, id: string): Promise<TaskItem> {
   return request(`/api/v1/tasks/${id}/cancel`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
 }
 
+// ---------- Projects (Wunomo Projects Phase 1, part two) ----------
+
+export interface ProjectItem {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface ProjectAgentItem {
+  id: string;
+  name: string;
+  employee_type: string;
+}
+
+export function listProjects(token: string): Promise<{ projects: ProjectItem[] }> {
+  return authedRequest("/api/v1/projects/", token);
+}
+
+export function createProject(token: string, name: string): Promise<ProjectItem> {
+  return request("/api/v1/projects/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ name }),
+  });
+}
+
+export function getProjectAgents(
+  token: string, projectId: string
+): Promise<{ project_id: string; agents: ProjectAgentItem[] }> {
+  return authedRequest(`/api/v1/projects/${projectId}/agents`, token);
+}
+
 // ---------- Local session storage ----------
 
 const TOKEN_KEY = "axiom_token";

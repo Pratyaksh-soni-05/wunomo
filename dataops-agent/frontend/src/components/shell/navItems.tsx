@@ -93,6 +93,19 @@ export const NAV_SECTIONS: NavSection[] = [
           </>
         ),
       },
+      {
+        // Wunomo Projects Phase 1, part two -- lives alongside AXIOM/Tasks,
+        // not under Data or Admin, since a project's whole job is grouping
+        // the agents doing the work, not the data itself.
+        slug: "projects",
+        label: "Projects",
+        domain: "axiom",
+        icon: icon(
+          <>
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </>
+        ),
+      },
     ],
   },
   {
@@ -325,7 +338,7 @@ export const AXIOM_NAV_SECTIONS: NavSection[] = sectionsForDomain("axiom");
  * unreachable for their main use case.
  */
 const AXIOM_DOMAIN_PREFIXES = [
-  "/chat", "/tasks", "/sources", "/catalog", "/pipelines", "/transforms",
+  "/chat", "/tasks", "/projects", "/sources", "/catalog", "/pipelines", "/transforms",
   "/quality", "/incidents", "/governance", "/automations", "/cicd",
 ];
 
