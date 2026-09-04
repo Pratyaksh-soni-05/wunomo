@@ -338,7 +338,7 @@ export const AXIOM_NAV_SECTIONS: NavSection[] = sectionsForDomain("axiom");
  * unreachable for their main use case.
  */
 const AXIOM_DOMAIN_PREFIXES = [
-  "/chat", "/tasks", "/projects", "/sources", "/catalog", "/pipelines", "/transforms",
+  "/chat", "/tasks", "/projects", "/agents", "/sources", "/catalog", "/pipelines", "/transforms",
   "/quality", "/incidents", "/governance", "/automations", "/cicd",
 ];
 

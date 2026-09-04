@@ -65,7 +65,12 @@ export default function ProjectDetailPage() {
 
       <div style={{ padding: "20px 24px" }}>
         <Card>
-          <CardHeader><span className="font-medium text-sm">Agents in this project</span></CardHeader>
+          <CardHeader className="flex items-center justify-between">
+            <span className="font-medium text-sm">Agents in this project</span>
+            <Button size="sm" onClick={() => router.push(`/agents/hire?project_id=${projectId}`)}>
+              + Hire Agent
+            </Button>
+          </CardHeader>
           <CardBody>
             {agentList.length === 0 ? (
               <p className="text-muted text-sm">

@@ -1280,6 +1280,31 @@ export function getProjectAgents(
   return authedRequest(`/api/v1/projects/${projectId}/agents`, token);
 }
 
+// ---------- Hiring (Wunomo Projects Phase 1, part two) ----------
+
+export interface HiredAgent {
+  id: string;
+  name: string;
+  employee_type: string;
+  personality: string;
+  operation_mode: string;
+  model: string;
+  project_id: string | null;
+  sources: { id: string; name: string }[];
+  monthly_token_budget: number | null;
+  status: string;
+}
+
+export function hireAgent(
+  token: string,
+  params: { name: string; project_id?: string | null; source_ids?: string[]; monthly_token_budget?: number | null }
+): Promise<HiredAgent> {
+  return request("/api/v1/agents/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ employee_type: "dataops", ...params }),
+  });
+}
+
 // ---------- Local session storage ----------
 
 const TOKEN_KEY = "axiom_token";
