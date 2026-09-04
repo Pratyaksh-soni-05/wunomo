@@ -1137,6 +1137,15 @@ export interface TaskStepItem {
   approval_request_id: string | null;
 }
 
+export interface TaskCost {
+  llm_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  credits: number;
+}
+
 export interface TaskItem {
   id: string;
   tenant_id: string;
@@ -1149,6 +1158,7 @@ export interface TaskItem {
   approval_pending_reason: string | null;
   expiry_reason: string | null;
   quota_paused_reason: string | null;
+  source_locked_reason: string | null;
   termination_reason: string | null;
   paused_at: string | null;
   plan_approved_by: string | null;
@@ -1159,6 +1169,7 @@ export interface TaskItem {
   created_at: string | null;
   started_at: string | null;
   steps: TaskStepItem[];
+  cost: TaskCost;
 }
 
 export interface TaskSummary {

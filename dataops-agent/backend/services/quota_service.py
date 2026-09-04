@@ -212,3 +212,33 @@ async def get_agent_quota_status(agent_id: str) -> dict:
     else:
         status = "ok"
     return {"resource": "agent_tokens", "used": used, "limit": budget, "percent": percent, "status": status}
+
+
+async def get_task_cost(db, tenant_id: str, task_id: str) -> dict:
+    """Wunomo Projects Phase 4, item 2: what a task actually spent, for
+    the task detail screen -- an agent that works unattended (item 71's
+    auto-advance loop) should show what it spent while nobody was
+    watching, not just that it finished. Reuses credits_for_event's
+    existing formula (the same "AI Credits" unit already shown on
+    Billing) rather than inventing a second cost metric -- tenant-scoped
+    for defense in depth even though task_id alone is already
+    effectively unique, matching every other query in this module.
+    Takes an already-open db session (called from within GET
+    /tasks/{id}'s own session, not a second round trip)."""
+    r = await db.execute(
+        select(LlmUsageEvent.input_tokens, LlmUsageEvent.output_tokens, LlmUsageEvent.reasoning_tokens)
+        .where(LlmUsageEvent.tenant_id == tenant_id, LlmUsageEvent.task_id == task_id)
+    )
+    rows = r.all()
+    input_tokens = sum(inp or 0 for inp, _out, _reason in rows)
+    output_tokens = sum(out or 0 for _inp, out, _reason in rows)
+    reasoning_tokens = sum(reason or 0 for _inp, _out, reason in rows)
+    credits = sum(credits_for_event(inp, out) for inp, out, _reason in rows)
+    return {
+        "llm_calls": len(rows),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "credits": credits,
+    }

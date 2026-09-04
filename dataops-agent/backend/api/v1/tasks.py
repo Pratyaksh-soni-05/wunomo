@@ -305,7 +305,10 @@ async def get_task(task_id: str, current_user: dict = Depends(get_current_user))
         r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
         steps = r.scalars().all()
 
-    return _serialize_task(task, steps)
+        from services.quota_service import get_task_cost
+        cost = await get_task_cost(db, tenant_id, task_id)
+
+    return {**_serialize_task(task, steps), "cost": cost}
 
 
 @router.post("/")
