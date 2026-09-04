@@ -413,11 +413,39 @@ export function getSources(token: string): Promise<{ sources: DataSourceItem[]; 
   return authedRequest("/api/v1/sources/", token);
 }
 
+export interface CreateSourceResult {
+  id?: string;
+  name?: string;
+  source_type?: string;
+  status?: string;
+  // register_source() (backend) reports a refusal -- app-database guard,
+  // unknown type, no-connector type -- as a plain {"error": ...} body on a
+  // 200 response, not an HTTP error status. Callers must check this field;
+  // a 200 status alone does not mean the source was actually created.
+  error?: string;
+}
+
 export function createSource(
   token: string,
   params: { name: string; source_type: string; connection_config: Record<string, unknown> }
-): Promise<{ id: string; name: string; source_type: string; status: string }> {
+): Promise<CreateSourceResult> {
   return request("/api/v1/sources/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  tables_found?: number;
+}
+
+export function testSourceConnection(
+  token: string,
+  params: { source_type: string; connection_config: Record<string, unknown> }
+): Promise<ConnectionTestResult> {
+  return request("/api/v1/sources/test-connection", {
     method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
   });
 }

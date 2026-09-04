@@ -17,6 +17,29 @@ class MySQLConnector:
             cursorclass=pymysql.cursors.DictCursor
         )
 
+    # ── TABLES (lightweight) ─────────────────────────────────────────────────
+    def _list_tables_sync(self) -> list[str]:
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema=%s AND table_type='BASE TABLE'",
+                    (self.config["database"],)
+                )
+                return [r["table_name"] for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    async def list_tables(self) -> list[str]:
+        """A real connect-and-read-one-thing check with no per-table row
+        counts -- the same connection path get_schema()/sync() use
+        (_get_connection()), just without the heavier per-table work.
+        Added for the source-connect test-connection endpoint
+        (api/v1/sources.py), mirroring PostgresConnector's own
+        list_tables()."""
+        return await asyncio.to_thread(self._list_tables_sync)
+
     # ── SCHEMA ────────────────────────────────────────────────────────────────
     def _get_schema_sync(self) -> list:
         conn = self._get_connection()

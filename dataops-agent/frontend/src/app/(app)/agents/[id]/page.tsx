@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -135,7 +136,10 @@ export default function AgentDetailPage() {
           <CardHeader><span className="font-medium text-sm">Data source scope</span></CardHeader>
           <CardBody>
             {sourceList.length === 0 ? (
-              <p className="text-muted text-sm">No sources connected yet.</p>
+              <p className="text-muted text-sm">
+                No sources connected yet. <Link href="/sources" className="auth-link-btn">Connect one</Link> to
+                scope this agent&apos;s access.
+              </p>
             ) : (
               <div className="flex flex-col gap-2">
                 {sourceList.map((s) => (
