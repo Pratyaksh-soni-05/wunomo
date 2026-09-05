@@ -52,7 +52,7 @@ async def _reset_rate_limit_state():
     """
     import services.auth_service as auth_service
     redis = auth_service._redis()
-    for pattern in ("otp:*", "rl:*"):
+    for pattern in ("otp:*", "rl:*", "revoked:*"):
         async for key in redis.scan_iter(match=pattern):
             await redis.delete(key)
     yield
