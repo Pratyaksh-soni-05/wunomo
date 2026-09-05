@@ -79,18 +79,39 @@ def verify_password(pw: str, hashed: str) -> bool:
 
 
 def create_token(data: dict) -> str:
+    """Every token this app issues is minted here, so `jti` is added here.
+
+    `jti` is a unique id per token, which is what makes revoking ONE token
+    possible — without it the only lever is "invalidate everything this user
+    holds". Generated with uuid4: no I/O, so this stays synchronous and all
+    five issuing paths (password, email-code, Google, workspace-switch,
+    invite-accept) get one for free rather than each needing to remember.
+    """
     now = utcnow()
     exp = now + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
-    return jwt.encode({**data, "iat": now, "exp": exp}, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(
+        {**data, "jti": uuid.uuid4().hex, "iat": now, "exp": exp},
+        settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM,
+    )
 
 
-def issue_token_for_user(user: User, auth_method: str) -> str:
+def issue_token_for_user(user: User, auth_method: str, epoch: int = 0) -> str:
+    """Kept synchronous (see issue_token_and_remember's docstring for why).
+
+    `epoch` therefore has to be passed in rather than read here — the lookup is
+    async. It defaults to 0, and that default fails CLOSED rather than open: a
+    user who has never revoked sits at epoch 0, so a 0-token is valid for them;
+    a user who HAS revoked sits at 1 or higher, so a 0-token is immediately
+    stale (0 < 1) and rejected. A caller forgetting to pass the epoch produces
+    a token that stops working, never one that outlives a revocation.
+    """
     return create_token({
         "sub": user.id,
         "tenant_id": user.tenant_id,
         "email": user.email,
         "role": user.role,
         "auth_method": auth_method,
+        "epoch": epoch,
     })
 
 
@@ -103,7 +124,11 @@ async def issue_token_and_remember(user: User, auth_method: str) -> str:
     ~20 test files that call it directly as a plain synchronous "mint a
     token for this seeded user" helper don't all need touching for
     something they don't care about."""
-    token = issue_token_for_user(user, auth_method)
+    # Stamp the user's current token epoch. This is the async half that
+    # issue_token_for_user() cannot do itself, and it is why every real login
+    # path goes through this wrapper rather than the sync function directly.
+    from services.token_revocation import current_epoch
+    token = issue_token_for_user(user, auth_method, epoch=await current_epoch(user.id))
     await _remember_workspace(user.email, user.tenant_id)
     return token
 

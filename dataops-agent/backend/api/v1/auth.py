@@ -58,6 +58,13 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     if row is None or not row.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
+    # Revocation: a specifically-blocklisted jti, or a token issued before this
+    # user's current epoch ("log out all devices"). Checked here as well as in
+    # both middlewares — see services/token_revocation.py.
+    from services.token_revocation import is_revoked
+    if await is_revoked(payload):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
     payload["role"] = row.role
     payload["plan"] = row.plan
     return payload
@@ -100,6 +107,49 @@ def enforce_quota(resource: str):
             )
         return current_user
     return _check
+
+
+class RevokeRequest(BaseModel):
+    # Default is the safer of the two: "log out everywhere" is the action a
+    # user reaches for when they think they have been compromised, and quietly
+    # revoking only the current session in that moment would leave the attacker
+    # logged in while the user believed otherwise.
+    scope: str = "all"
+
+
+@router.post("/revoke")
+async def revoke_tokens(body: RevokeRequest, user=Depends(get_current_user)):
+    """Self-service revocation.
+
+    scope="all" (default) — bumps the caller's token epoch, invalidating every
+    token they hold, on every device, immediately. This is "log out all
+    devices". It is implemented as one counter rather than by tracking each
+    issued jti: a per-user set of jtis grows with every login and needs
+    reconciling as tokens expire, whereas the epoch does the same job in O(1)
+    with nothing to clean up.
+
+    scope="current" — blocklists only the calling token's own jti, leaving the
+    user's other sessions alone. For "sign out this browser" without disturbing
+    their phone.
+
+    Note the caller's own token is invalidated either way: the response is the
+    last thing this token can do. That is the intended behaviour for both
+    scopes, not an oversight.
+    """
+    from services.token_revocation import bump_epoch, revoke_jti
+
+    if body.scope == "current":
+        await revoke_jti(user.get("jti"), user.get("exp"))
+        return {"revoked": "current_session"}
+
+    if body.scope != "all":
+        raise HTTPException(
+            status_code=400,
+            detail="scope must be 'all' or 'current'",
+        )
+
+    epoch = await bump_epoch(user["sub"])
+    return {"revoked": "all_sessions", "epoch": epoch}
 
 
 class RegisterRequest(BaseModel):

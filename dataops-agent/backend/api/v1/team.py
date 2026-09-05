@@ -177,6 +177,16 @@ async def change_member_role(
 
         target.role = body.role
         await db.commit()
+
+    # Revoke every token this member currently holds. get_current_user already
+    # re-reads `role` per request, so their capabilities drop immediately even
+    # without this — but that only covers callers who go through it. Bumping the
+    # epoch also invalidates the token for the two middlewares, and forces a
+    # fresh login so the new role is reflected in the token itself rather than
+    # being silently patched over on every request. Automatic on purpose:
+    # revocation an admin has to remember is revocation that does not happen.
+    from services.token_revocation import bump_epoch
+    await bump_epoch(user_id)
     return {"message": "Role updated", "id": user_id, "role": body.role}
 
 
@@ -218,4 +228,10 @@ async def remove_team_member(
 
         target.is_active = False
         await db.commit()
+
+    # Same reasoning as the demotion path: is_active=False already blocks them
+    # at get_current_user, but the epoch bump kills the token everywhere,
+    # including before authentication runs.
+    from services.token_revocation import bump_epoch
+    await bump_epoch(user_id)
     return {"message": "Member removed", "id": user_id}
