@@ -49,7 +49,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
         # not take effect until the token expired, the same staleness class as
         # the role gap this function exists to close.
         r = await db.execute(
-            select(User.is_active, User.role, Tenant.plan)
+            select(User.is_active, User.role, User.tenant_id, Tenant.plan)
             .join(Tenant, User.tenant_id == Tenant.id)
             .where(User.id == payload.get("sub"))
         )
@@ -63,6 +63,14 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     # both middlewares — see services/token_revocation.py.
     from services.token_revocation import is_revoked
     if await is_revoked(payload):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+    # The tenant_id claim was trusted but never verified. Safe in practice
+    # (nothing mutates User.tenant_id, and forging the claim needs the signing
+    # key) — but it is an assumption, and both middlewares scope RLS and rate
+    # limiting off this claim before this function ever runs. Making it a
+    # structural check costs nothing: the row is already in hand.
+    if payload.get("tenant_id") != row.tenant_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
     payload["role"] = row.role
