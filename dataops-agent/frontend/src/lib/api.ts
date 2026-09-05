@@ -1192,6 +1192,10 @@ export interface TaskItem {
   goal: string;
   task_shape: TaskShapeValue;
   status: string;
+  // Wunomo Projects Phase 4 frontend, slice 11: the chat session this task
+  // was started from, if any -- the write side was already correct
+  // (TaskCreateModal/create_task), this was simply never in the response.
+  originating_session_id: string | null;
   pause_reason: string | null;
   // Wunomo Projects Phase 2 frontend, slice 9: only set when pause_reason
   // names a scope denial specifically -- lets the task detail page render

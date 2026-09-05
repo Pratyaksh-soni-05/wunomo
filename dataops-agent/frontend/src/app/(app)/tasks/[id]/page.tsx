@@ -274,6 +274,14 @@ export default function TaskDetailPage() {
               <span className="text-xs text-muted">
                 · {task.cost.credits.toLocaleString()} AI Credits
               </span>
+              {task.originating_session_id && (
+                <button
+                  className="auth-link-btn text-xs"
+                  onClick={() => router.push(`/chat?session=${task.originating_session_id}`)}
+                >
+                  ← Back to conversation
+                </button>
+              )}
             </div>
           </div>
           <div className="flex gap-2">

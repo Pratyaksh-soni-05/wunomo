@@ -233,6 +233,10 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         "goal": task.goal,
         "task_shape": task.task_shape.value,
         "status": task.status.value,
+        # Real, persisted since item 46's own fix (the write path was
+        # already correct) -- Wunomo Projects Phase 4 frontend, slice 11
+        # is the read side: this was simply never in the API response.
+        "originating_session_id": task.originating_session_id,
         "pause_reason": pause_reason,
         "scope_denial": _scope_denial_grant_ids(pause_reason),
         "completion_note": _completion_note(task, steps),

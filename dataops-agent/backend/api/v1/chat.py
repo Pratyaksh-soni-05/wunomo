@@ -5,7 +5,7 @@ from typing import Optional
 from .auth import get_current_user, enforce_quota, enforce_agent_budget
 from agent.dataops_agent import run_agent, window_and_summarize
 from database import AsyncSessionLocal
-from models.all_models import AgentInstance, AgentInstanceStatus, Channel, ChannelUser, ChatMessage
+from models.all_models import AgentInstance, AgentInstanceStatus, Channel, ChannelUser, ChatMessage, Task
 from sqlalchemy import select, func, delete
 from datetime import datetime, timezone
 import uuid
@@ -461,6 +461,29 @@ async def _resolve_blocked_call_statuses(db, tenant_id: str, session_id: str, ms
     return resolved_messages
 
 
+async def _task_card_entries(db, tenant_id: str, user_id: str, session_id: str) -> list[dict]:
+    """Wunomo Projects Phase 4 frontend, slice 11: the inline "Started
+    task: ..." card shown when a task is created from chat was purely
+    client-side state (LocalChatMessage.taskCard) that never survived a
+    session switch or page reload -- the write side (originating_session_id
+    getting set) was already correct; nothing ever read it back. Computed
+    fresh here from the real, already-persisted Task rows rather than a
+    second stored copy that could drift -- the same principle behind every
+    other *_reason() helper in api/v1/tasks.py. Interleaved into the real
+    message timeline by created_at below, matching where the card actually
+    appeared the first time (right after the message that triggered it)."""
+    r = await db.execute(select(Task).where(
+        Task.tenant_id == tenant_id, Task.user_id == user_id, Task.originating_session_id == session_id,
+    ).order_by(Task.created_at.asc()))
+    return [
+        {
+            "role": "assistant", "content": "", "tool_calls": [], "timestamp": str(t.created_at),
+            "taskCard": {"id": t.id, "goal": t.goal},
+        }
+        for t in r.scalars().all()
+    ]
+
+
 @router.get("/sessions/{session_id}/history")
 async def get_history(session_id: str, user=Depends(get_current_user)):
     async with AsyncSessionLocal() as db:
@@ -471,6 +494,8 @@ async def get_history(session_id: str, user=Depends(get_current_user)):
         ).order_by(ChatMessage.created_at.asc()))
         msgs = r.scalars().all()
         messages = await _resolve_blocked_call_statuses(db, user["tenant_id"], session_id, msgs)
+        task_cards = await _task_card_entries(db, user["tenant_id"], user["sub"], session_id)
+        messages = sorted(messages + task_cards, key=lambda m: m["timestamp"])
         return {"session_id": session_id, "messages": messages}
 
 
@@ -483,9 +508,18 @@ async def delete_session(session_id: str, user=Depends(get_current_user)):
     There is no ChatSession table -- a "session" is purely the session_id
     grouping key on ChatMessage, so there's nothing to cascade beyond that
     one table. Investigated before building (see findings doc item 4):
-    Task.originating_session_id is never actually set by any code path
-    today (logged separately as item 46), so no task can be orphaned by
-    this. ApprovalRequest.session_id IS populated for chat-originated
+    at the time this was written, Task.originating_session_id was never
+    actually set by any code path (item 46) -- that gap closed separately
+    (TaskCreateModal/create_task both wire it through correctly today,
+    Wunomo Projects Phase 4 frontend, slice 11), so deleting a session a
+    task once originated from now leaves that task's own back-reference
+    pointing at messages that no longer exist. Deliberately not guarded
+    here: the task itself (goal, steps, real progress) is untouched and
+    fully independent of its originating session -- only the "← Back to
+    conversation" link on the task detail page would land on an empty
+    thread instead of a live one, a soft UX rough edge, not a data-
+    integrity problem, matching every other session_id reference in this
+    codebase being FK-less by convention. ApprovalRequest.session_id IS populated for chat-originated
     approvals, but the row is fully self-contained (action_name/action_args/
     reason all live on it) and nothing joins it back to chat_messages at
     read time -- so a *resolved* approval survives its origin conversation
