@@ -151,7 +151,7 @@ export default function TaskDetailPage() {
     if (updated) qc.setQueryData(["task", taskId], updated);
     qc.invalidateQueries({ queryKey: ["task", taskId] });
     qc.invalidateQueries({ queryKey: ["tasks"] });
-    qc.invalidateQueries({ queryKey: ["task-counts"] });
+    qc.invalidateQueries({ queryKey: ["active-tasks"] });
   };
 
   const approveMut = useMutation({

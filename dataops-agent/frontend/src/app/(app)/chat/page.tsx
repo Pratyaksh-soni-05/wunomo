@@ -345,6 +345,8 @@ export default function ChatPage() {
         onClear={() => setAttachedContext(null)}
         onGoToApprovals={() => router.push("/approvals")}
         currentUserRole={currentUserRole}
+        token={token}
+        sessionId={activeSessionId}
       />
       <TaskCreateModal
         token={token}

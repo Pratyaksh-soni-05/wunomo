@@ -1240,8 +1240,40 @@ export function getAllTenantTasks(token: string): Promise<TaskSummary[]> {
   return authedRequest("/api/v1/tasks/all", token);
 }
 
-export function getTaskCounts(token: string): Promise<{ active: number }> {
-  return authedRequest("/api/v1/tasks/counts", token);
+// Wunomo Projects Phase 4 frontend, slice 12: the tenant-wide task rail.
+// Replaces the old getTaskCounts()/tasks/counts -- the topbar badge is now
+// just activeTasks.length off this same response, so the badge and the
+// rail can never disagree about what "active" means.
+export interface ActiveTaskCurrentStep {
+  step_index: number;
+  description: string;
+  status: string;
+}
+
+export interface ActiveTaskRailItem {
+  id: string;
+  goal: string;
+  status: string;
+  task_shape: TaskShapeValue;
+  agent_id: string | null;
+  agent_name: string | null;
+  originating_session_id: string | null;
+  current_step: ActiveTaskCurrentStep | null;
+  // needs_attention/attention_tier are derived server-side as
+  // active-minus-RUNNABLE_TASK_STATUSES, not a hardcoded list -- see
+  // api/v1/tasks.py's list_active_tasks. tier 0 = expiring approval
+  // (most urgent), 1 = already dead (failed step / invalid plan), 2 =
+  // an unapproved draft plan (no decay, least urgent of the three).
+  needs_attention: boolean;
+  attention_tier: 0 | 1 | 2 | null;
+  action_text: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  paused_at: string | null;
+}
+
+export function getActiveTasks(token: string): Promise<ActiveTaskRailItem[]> {
+  return authedRequest("/api/v1/tasks/active", token);
 }
 
 export function getTask(token: string, id: string): Promise<TaskItem> {

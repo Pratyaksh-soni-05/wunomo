@@ -23,6 +23,7 @@ from models.all_models import (
     AgentInstance, AgentInstanceStatus, RUNNABLE_TASK_STATUSES, TERMINAL_TASK_STATUSES, Task, TaskShape,
     TaskStatus, TaskStep, TaskStepSource, TaskStepStatus,
 )
+from modules.orchestration.task_executor import APPROVAL_PAUSE_TIMEOUT_HOURS
 from modules.orchestration.task_planner import (
     PlanGenerationError, PlanValidationError, generate_plan, validate_step_plan, validate_step_plan_scope,
 )
@@ -102,6 +103,27 @@ def _pause_reason(task: Task, steps: list[TaskStep]) -> str | None:
     return (
         f'Step {failed.step_index} ("{failed.description}") failed after {failed.attempt_count} attempt(s): '
         f'{failed.error_message} This task can\'t be resumed — start a new one once the underlying problem is fixed.'
+    )
+
+
+def _plan_invalid_reason(task: Task, steps: list[TaskStep]) -> str | None:
+    """PAUSED_PLAN_INVALID (models/all_models.py) has no resume path
+    anywhere in this codebase either -- same unrecoverable shape as
+    PAUSED_FAILED_STEP above, discovered while building the tenant-wide
+    task rail (Wunomo Projects Phase 4 frontend, slice 12): the rail's
+    'needs attention' set is derived as active-minus-runnable rather than
+    a hardcoded list specifically so a status like this can't be
+    forgotten, which immediately surfaced that this one had no reason
+    text at all -- not even the narrower gap finding 76 was about. No
+    code path sets this status today (confirmed by grep), so there is no
+    established per-step detail to name yet; this stays a generic, honest
+    message rather than inventing structure that doesn't exist, and can
+    be sharpened the day something actually assigns this status."""
+    if task.status != TaskStatus.PAUSED_PLAN_INVALID:
+        return None
+    return (
+        "A completed step's result showed the remaining plan can no longer reach the goal. "
+        "This task can't be resumed — start a new one once the underlying problem is fixed."
     )
 
 
@@ -239,6 +261,7 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         "originating_session_id": task.originating_session_id,
         "pause_reason": pause_reason,
         "scope_denial": _scope_denial_grant_ids(pause_reason),
+        "plan_invalid_reason": _plan_invalid_reason(task, steps),
         "completion_note": _completion_note(task, steps),
         "approval_pending_reason": _approval_pending_reason(task, steps),
         "expiry_reason": _expiry_reason(task),
@@ -314,29 +337,138 @@ async def list_all_tenant_tasks(current_user: dict = Depends(require_permission(
     return [_serialize_task_summary(t) for t in tasks]
 
 
-@router.get("/counts")
-async def task_counts(current_user: dict = Depends(get_current_user)):
-    """One real number: how many tasks (own, or every tenant task if you
-    hold tasks.manage_all) are not yet in a terminal state -- running,
-    queued, or waiting on you. Real or absent was the explicit
-    requirement for the topbar counter this backs; this endpoint is what
-    makes that number real. TERMINAL_TASK_STATUSES (models/all_models.py)
-    is "anything not in this set needs a human's attention or is actively
-    working" -- shared with api/v1/agents.py's offboard check (2026-09-04)
-    so both agree on what "done" means, rather than each defining it."""
+# attention_tier: lower sorts first. PAUSED_NEEDS_APPROVAL alone has a real
+# clock (APPROVAL_PAUSE_TIMEOUT_HOURS) -- ignoring it costs a task that dies
+# on its own. PAUSED_FAILED_STEP/PAUSED_PLAN_INVALID are already dead (no
+# resume path either has, see _plan_invalid_reason above) -- ignoring them
+# costs nothing further, but they're still worth surfacing over a
+# never-started draft. DRAFT_PLAN just sits, forever, with no decay at all.
+_ATTENTION_TIERS: dict[TaskStatus, int] = {
+    TaskStatus.PAUSED_NEEDS_APPROVAL: 0,
+    TaskStatus.PAUSED_FAILED_STEP: 1,
+    TaskStatus.PAUSED_PLAN_INVALID: 1,
+    TaskStatus.DRAFT_PLAN: 2,
+}
+
+
+def _rail_action_text(task: Task) -> str | None:
+    """Short, imperative "what do I do now" for the rail's compact row --
+    same requirement as slice 9's denial messaging, applied to every
+    status that can land in _ATTENTION_TIERS above. Deliberately a
+    one-liner distinct from the longer *_reason() prose used on the task
+    detail page (those explain what happened; this says what to do)."""
+    if task.status == TaskStatus.PAUSED_NEEDS_APPROVAL:
+        if task.paused_at is None:
+            return "Review to approve or reject."
+        elapsed_hours = (datetime.utcnow() - task.paused_at).total_seconds() / 3600
+        remaining = max(0, round(APPROVAL_PAUSE_TIMEOUT_HOURS - elapsed_hours))
+        return f"Review to approve or reject — expires in {remaining}h."
+    if task.status in (TaskStatus.PAUSED_FAILED_STEP, TaskStatus.PAUSED_PLAN_INVALID):
+        return "Can't be resumed — start a new task."
+    if task.status == TaskStatus.DRAFT_PLAN:
+        return "Review the plan to approve or reject."
+    return None
+
+
+def _current_step_summary(steps: list[TaskStep]) -> dict | None:
+    """The next thing this task will do, or the last thing it did if
+    every step is already done -- not stored, derived the same way every
+    other per-task read-time field in this file is."""
+    if not steps:
+        return None
+    ordered = sorted(steps, key=lambda s: s.step_index)
+    current = next(
+        (s for s in ordered if s.status not in (TaskStepStatus.SUCCEEDED, TaskStepStatus.SKIPPED)), ordered[-1],
+    )
+    return {"step_index": current.step_index, "description": current.description, "status": current.status.value}
+
+
+@router.get("/active")
+async def list_active_tasks(current_user: dict = Depends(get_current_user)):
+    """The tenant-wide task rail (Wunomo Projects Phase 4 frontend, slice
+    12): every non-terminal task visible to the caller (own tasks always,
+    every tenant task with tasks.manage_all -- same visibility rule as
+    GET / and the retired GET /counts, which this endpoint replaces so
+    the topbar badge and the rail can never disagree about what "active"
+    means -- both are now literally len() of this one response instead of
+    two independently-maintained definitions).
+
+    "Needs attention" is derived as active-minus-RUNNABLE_TASK_STATUSES,
+    not a hardcoded list, specifically so a status nobody remembers to
+    add later is still caught -- this is exactly how building this
+    endpoint surfaced that PAUSED_PLAN_INVALID had no reason text
+    anywhere (see _plan_invalid_reason above).
+
+    Two bulk queries total regardless of how many tasks are active, not
+    one per task: the Task+AgentInstance join below, then one TaskStep
+    fetch batched by task_id IN (...). With a batch cap of 25
+    auto-advancing at once (task_executor.py), per-task queries here
+    would mean up to 25 round trips on every single poll tick."""
     tenant_id = current_user["tenant_id"]
     user_id = current_user["sub"]
     can_view_all = has_permission(current_user.get("role"), "tasks.manage_all")
 
     async with AsyncSessionLocal() as db:
-        query = select(Task.status).where(Task.tenant_id == tenant_id)
+        query = (
+            select(Task, AgentInstance.name)
+            .outerjoin(AgentInstance, Task.agent_id == AgentInstance.id)
+            .where(Task.tenant_id == tenant_id, Task.status.notin_(TERMINAL_TASK_STATUSES))
+        )
         if not can_view_all:
             query = query.where(Task.user_id == user_id)
         r = await db.execute(query)
-        statuses = r.scalars().all()
+        rows = r.all()
 
-    active = sum(1 for s in statuses if s not in TERMINAL_TASK_STATUSES)
-    return {"active": active}
+        task_ids = [t.id for t, _ in rows]
+        steps_by_task: dict[str, list[TaskStep]] = {tid: [] for tid in task_ids}
+        if task_ids:
+            r = await db.execute(select(TaskStep).where(TaskStep.task_id.in_(task_ids)))
+            for step in r.scalars().all():
+                steps_by_task[step.task_id].append(step)
+
+    # Sort on the raw datetimes before serializing to ISO strings below --
+    # tier 0 wants oldest paused_at first (soonest to expire), tier 1 wants
+    # newest updated_at first (most recently died), tier 2 wants oldest
+    # created_at first (longest waiting); everything else (not needing
+    # attention) sorts newest-updated-first, same as any normal activity
+    # list. A missing timestamp sorts last within its own tier rather than
+    # crashing the comparison or silently floating to the top.
+    _EPOCH = datetime(1970, 1, 1)
+
+    def _sort_key(pair):
+        task, _ = pair
+        tier = _ATTENTION_TIERS.get(task.status)
+        if tier is None:
+            return (1, -(task.updated_at or _EPOCH).timestamp())
+        if tier == 0:
+            return (0, tier, (task.paused_at or datetime.max).timestamp())
+        if tier == 1:
+            return (0, tier, -(task.updated_at or _EPOCH).timestamp())
+        return (0, tier, (task.created_at or datetime.max).timestamp())
+
+    rows = sorted(rows, key=_sort_key)
+
+    items = []
+    for task, agent_name in rows:
+        tier = _ATTENTION_TIERS.get(task.status)
+        items.append({
+            "id": task.id,
+            "goal": task.goal,
+            "status": task.status.value,
+            "task_shape": task.task_shape.value,
+            "agent_id": task.agent_id,
+            "agent_name": agent_name,
+            "originating_session_id": task.originating_session_id,
+            "current_step": _current_step_summary(steps_by_task[task.id]),
+            "needs_attention": tier is not None,
+            "attention_tier": tier,
+            "action_text": _rail_action_text(task),
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+            "paused_at": task.paused_at.isoformat() if task.paused_at else None,
+        })
+
+    return items
 
 
 @router.get("/{task_id}")

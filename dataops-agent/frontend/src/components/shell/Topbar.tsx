@@ -2,12 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { ALL_NAV_ITEMS } from "./navItems";
 import { ThemeToggle } from "./ThemeToggle";
-import { clearSession, checkDbHealth, getToken, getTaskCounts, type DecodedUser } from "@/lib/api";
+import { Badge } from "@/components/ui";
+import { taskStatusVariant, taskStatusLabel } from "@/components/tasks/taskDisplay";
+import { clearSession, checkDbHealth, getToken, getActiveTasks, type DecodedUser } from "@/lib/api";
 
 const HEALTH_POLL_MS = 30000;
-const TASK_COUNT_POLL_MS = 20000;
+// Wunomo Projects Phase 4 frontend, slice 12: 20s matches the old
+// tenant-wide tasks/counts poll's own cadence while anything is active;
+// backs off to 60s (not stopped entirely, unlike the single-task detail
+// page's terminal-state case) once the rail is empty, since a task can
+// become active again from someone else's action, not just this user's.
+const ACTIVE_TASKS_POLL_MS = 20000;
+const ACTIVE_TASKS_IDLE_POLL_MS = 60000;
 
 export function Topbar({
   onToggleSidebar,
@@ -22,8 +31,10 @@ export function Topbar({
   const pathname = usePathname();
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
+  const [railOpen, setRailOpen] = useState(false);
+  const railRef = useRef<HTMLDivElement>(null);
   const [dbHealthy, setDbHealthy] = useState<boolean | null>(null);
-  const [activeTaskCount, setActiveTaskCount] = useState<number | null>(null);
+  const token = getToken();
 
   const activeSlug = pathname.split("/")[1];
   const activeItem = ALL_NAV_ITEMS.find((i) => i.slug === activeSlug);
@@ -43,26 +54,19 @@ export function Topbar({
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      const token = getToken();
-      if (!token) return;
-      try {
-        const { active } = await getTaskCounts(token);
-        if (!cancelled) setActiveTaskCount(active);
-      } catch {
-        // Non-fatal - leave the last known count in place rather than
-        // flashing to a misleading 0.
-      }
-    };
-    poll();
-    const interval = setInterval(poll, TASK_COUNT_POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
+  // Shared ["active-tasks"] query key -- ContextPanel polls the exact same
+  // key while a chat session is open, so this is one network call serving
+  // both surfaces, not two independent polls (see queryClient.tsx's single
+  // app-wide QueryClient).
+  const activeTasksQuery = useQuery({
+    queryKey: ["active-tasks"],
+    queryFn: () => getActiveTasks(token as string),
+    enabled: !!token,
+    refetchInterval: (q) => ((q.state.data?.length ?? 0) > 0 ? ACTIVE_TASKS_POLL_MS : ACTIVE_TASKS_IDLE_POLL_MS),
+  });
+  const activeTasks = activeTasksQuery.data ?? [];
+  const attentionTasks = activeTasks.filter((t) => t.needs_attention);
+  const otherTasks = activeTasks.filter((t) => !t.needs_attention);
 
   useEffect(() => {
     if (!accountOpen) return;
@@ -75,6 +79,18 @@ export function Topbar({
       document.removeEventListener("click", onClick);
     };
   }, [accountOpen]);
+
+  useEffect(() => {
+    if (!railOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (railRef.current && !railRef.current.contains(e.target as Node)) setRailOpen(false);
+    };
+    const t = setTimeout(() => document.addEventListener("click", onClick), 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("click", onClick);
+    };
+  }, [railOpen]);
 
   return (
     <header className="topbar">
@@ -106,21 +122,89 @@ export function Topbar({
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
-        {activeTaskCount !== null && (
-          <button
-            className="topbar-icon-btn"
-            style={{ display: "flex", alignItems: "center", gap: 6, width: "auto", padding: "0 10px", fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}
-            onClick={() => router.push("/tasks")}
-            title="Tasks not yet in a terminal state - running, queued, or waiting on you"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="4" width="18" height="18" rx="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
-            {activeTaskCount} active
-          </button>
+        {activeTasksQuery.data !== undefined && (
+          <div style={{ position: "relative" }} ref={railRef}>
+            <button
+              className="topbar-icon-btn"
+              style={{
+                display: "flex", alignItems: "center", gap: 6, width: "auto", padding: "0 10px",
+                fontSize: 12, fontWeight: 600,
+                color: attentionTasks.length > 0 ? "var(--warning)" : "var(--text-secondary)",
+              }}
+              onClick={() => {
+                setRailOpen((v) => !v);
+                setAccountOpen(false);
+              }}
+              title="Tasks not yet in a terminal state - running, queued, or waiting on you"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+              {activeTasks.length} active
+            </button>
+            {railOpen && (
+              <div className="notif-panel">
+                <div className="notif-panel-header">
+                  <span className="font-semibold text-sm">Active Tasks</span>
+                  {attentionTasks.length > 0 && <Badge variant="warning">{attentionTasks.length} need you</Badge>}
+                </div>
+                <div className="notif-list">
+                  {activeTasks.length === 0 ? (
+                    <div className="chat-empty-note" style={{ padding: 16 }}>Nothing active right now.</div>
+                  ) : (
+                    <>
+                      {attentionTasks.map((t) => (
+                        <div
+                          key={t.id}
+                          className="notif-item unread"
+                          onClick={() => {
+                            setRailOpen(false);
+                            router.push(`/tasks/${t.id}`);
+                          }}
+                        >
+                          <div className="notif-item-body">
+                            <div className="font-medium text-sm truncate">{t.goal}</div>
+                            <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                              {t.agent_name ?? "Unassigned"} · <Badge variant={taskStatusVariant(t.status)}>{taskStatusLabel(t.status)}</Badge>
+                            </div>
+                            {t.action_text && (
+                              <div className="text-xs" style={{ marginTop: 4, color: "var(--warning)", fontWeight: 600 }}>
+                                {t.action_text}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {otherTasks.map((t) => (
+                        <div
+                          key={t.id}
+                          className="notif-item"
+                          onClick={() => {
+                            setRailOpen(false);
+                            router.push(`/tasks/${t.id}`);
+                          }}
+                        >
+                          <div className="notif-item-body">
+                            <div className="font-medium text-sm truncate">{t.goal}</div>
+                            <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                              {t.agent_name ?? "Unassigned"} · <Badge variant={taskStatusVariant(t.status)}>{taskStatusLabel(t.status)}</Badge>
+                              {t.current_step && ` · Step ${t.current_step.step_index + 1}: ${t.current_step.description}`}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+                <div className="notif-panel-footer">
+                  <a onClick={() => { setRailOpen(false); router.push("/tasks"); }}>View all tasks</a>
+                </div>
+              </div>
+            )}
+          </div>
         )}
         <div className="ai-status" title="Real-time database connectivity check">
           <div className="ai-dot" style={dbHealthy === false ? { background: "var(--danger)" } : undefined} />
@@ -135,7 +219,10 @@ export function Topbar({
               got in Phase 2. */}
           <button
             className="topbar-avatar"
-            onClick={() => setAccountOpen((v) => !v)}
+            onClick={() => {
+              setAccountOpen((v) => !v);
+              setRailOpen(false);
+            }}
             title={user?.email ?? "Account"}
             aria-label={user?.email ? `Account menu for ${user.email}` : "Account menu"}
             aria-haspopup="menu"
