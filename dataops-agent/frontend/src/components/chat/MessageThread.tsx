@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { Card, Button, Modal, Select } from "@/components/ui";
 import { ToolCallBlock } from "./ToolCallBlock";
 import type { LocalChatMessage } from "./types";
-import type { AgentListItem, ChannelItem, ChannelMemberAgent, ChatContext } from "@/lib/api";
+import type {
+  AgentListItem, ChannelItem, ChannelMemberAgent, ChannelMemberUser, ChatContext, TeamMember,
+} from "@/lib/api";
 
 const QUICK_PROMPTS = [
   "List my data sources",
@@ -57,8 +59,14 @@ export function MessageThread({
   onStartTask,
   channel,
   channelAgents,
+  channelUsers,
   availableAgents,
+  availablePeople,
+  currentUserId,
   onAddAgent,
+  onRemoveAgent,
+  onAddPerson,
+  onRemovePerson,
 }: {
   messages: LocalChatMessage[];
   sending: boolean;
@@ -77,16 +85,24 @@ export function MessageThread({
   onStartTask: () => void;
   channel?: ChannelItem | null;
   channelAgents?: ChannelMemberAgent[];
+  channelUsers?: ChannelMemberUser[];
   availableAgents?: AgentListItem[];
+  availablePeople?: TeamMember[];
+  currentUserId?: string | null;
   onAddAgent?: (agentId: string) => void;
+  onRemoveAgent?: (agentId: string, agentName: string) => void;
+  onAddPerson?: (userId: string) => void;
+  onRemovePerson?: (userId: string) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
-  const [addAgentModalOpen, setAddAgentModalOpen] = useState(false);
+  const [membersModalOpen, setMembersModalOpen] = useState(false);
 
   const channelAgentIds = new Set((channelAgents ?? []).map((a) => a.id));
   const addableAgents = (availableAgents ?? []).filter((a) => !channelAgentIds.has(a.id));
+  const channelUserIds = new Set((channelUsers ?? []).map((u) => u.id));
+  const addablePeople = (availablePeople ?? []).filter((p) => p.is_active && !channelUserIds.has(p.id));
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -131,7 +147,7 @@ export function MessageThread({
         </div>
         <div className="chat-header-controls">
           {channel && (
-            <Button size="sm" variant="secondary" onClick={() => setAddAgentModalOpen(true)}>+ Add Agent</Button>
+            <Button size="sm" variant="secondary" onClick={() => setMembersModalOpen(true)}>Members</Button>
           )}
           <Button size="sm" variant="secondary" onClick={onStartTask}>+ Start a Task</Button>
           <Select
@@ -162,7 +178,7 @@ export function MessageThread({
             <p className="text-muted text-sm" style={{ maxWidth: 360 }}>
               {channel
                 ? (channelAgents?.length ?? 0) === 0
-                  ? "No agents are in this channel yet — use \"+ Add Agent\" above before sending a message."
+                  ? "No agents are in this channel yet — use \"Members\" above to add one before sending a message."
                   : (channelAgents?.length ?? 0) > 1
                     ? "Multiple agents are in this channel — @mention who you're talking to."
                     : `Message ${channelAgents?.[0]?.name} directly, no @mention needed.`
@@ -281,34 +297,65 @@ export function MessageThread({
 
       {channel && (
         <Modal
-          open={addAgentModalOpen}
-          onClose={() => setAddAgentModalOpen(false)}
-          title={`Add an agent to #${channel.name}`}
+          open={membersModalOpen}
+          onClose={() => setMembersModalOpen(false)}
+          title={`#${channel.name} members`}
         >
-          {addableAgents.length === 0 ? (
-            <p className="text-muted text-sm">
-              {(availableAgents ?? []).length === 0
-                ? "No active agents exist yet — hire one first."
-                : "Every active agent is already a member of this channel."}
-            </p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {addableAgents.map((a) => (
-                <div key={a.id} className="flex items-center justify-between text-sm" style={{ padding: "4px 0" }}>
-                  <span>{a.name}</span>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      onAddAgent?.(a.id);
-                      setAddAgentModalOpen(false);
-                    }}
-                  >
-                    Add
-                  </Button>
+          <div className="flex flex-col gap-4">
+            <div>
+              <div className="font-medium text-sm" style={{ marginBottom: 6 }}>Agents</div>
+              {(channelAgents ?? []).length === 0 ? (
+                <p className="text-muted text-sm">No agents yet.</p>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {(channelAgents ?? []).map((a) => (
+                    <div key={a.id} className="flex items-center justify-between text-sm" style={{ padding: "4px 0" }}>
+                      <span>{a.name}</span>
+                      <Button size="sm" variant="secondary" onClick={() => onRemoveAgent?.(a.id, a.name)}>Remove</Button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
+              {addableAgents.length > 0 && (
+                <div className="flex flex-col gap-1" style={{ marginTop: 8 }}>
+                  {addableAgents.map((a) => (
+                    <div key={a.id} className="flex items-center justify-between text-sm" style={{ padding: "4px 0" }}>
+                      <span className="text-muted">{a.name}</span>
+                      <Button size="sm" onClick={() => onAddAgent?.(a.id)}>Add</Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+
+            <div>
+              <div className="font-medium text-sm" style={{ marginBottom: 6 }}>People</div>
+              {(channelUsers ?? []).length === 0 ? (
+                <p className="text-muted text-sm">No one else here yet.</p>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {(channelUsers ?? []).map((u) => (
+                    <div key={u.id} className="flex items-center justify-between text-sm" style={{ padding: "4px 0" }}>
+                      <span>{u.email}{u.id === currentUserId ? " (you)" : ""}</span>
+                      <Button size="sm" variant="secondary" onClick={() => onRemovePerson?.(u.id)}>
+                        {u.id === currentUserId ? "Leave" : "Remove"}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {addablePeople.length > 0 && (
+                <div className="flex flex-col gap-1" style={{ marginTop: 8 }}>
+                  {addablePeople.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between text-sm" style={{ padding: "4px 0" }}>
+                      <span className="text-muted">{p.email}</span>
+                      <Button size="sm" onClick={() => onAddPerson?.(p.id)}>Add</Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </Modal>
       )}
     </div>

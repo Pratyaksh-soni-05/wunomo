@@ -144,11 +144,37 @@ async def add_user_member(channel_id: str, target_user_id: str, user=Depends(get
 
 @router.delete("/{channel_id}/members/users/{target_user_id}")
 async def remove_user_member(channel_id: str, target_user_id: str, user=Depends(get_current_user)):
+    """Blocked (409) when this would leave the channel with zero human
+    members (Wunomo Projects Phase 2 frontend, slice 7, explicit user
+    decision) -- _require_membership gates every management action
+    including adding a new member, so a channel with no human members
+    left has nobody in the tenant who can ever add themselves back in.
+    In practice this can only ever be a self-removal: the caller must
+    already be a member to reach this endpoint at all, so if exactly one
+    member remains, it can only be the caller. There is no delete-channel
+    or dedicated leave endpoint in this codebase today -- the real,
+    honest way out named in the refusal is to add a second person first
+    (still allowed while you're the sole member) and then remove
+    yourself, which succeeds once you're no longer alone."""
     tenant_id = user["tenant_id"]
     async with AsyncSessionLocal() as db:
         channel = await _require_membership(db, channel_id, user["sub"])
         if channel.tenant_id != tenant_id:
             raise HTTPException(status_code=404, detail="Channel not found.")
+
+        r = await db.execute(select(func.count()).select_from(ChannelUser).where(ChannelUser.channel_id == channel_id))
+        member_count = r.scalar_one()
+        r = await db.execute(select(ChannelUser).where(
+            ChannelUser.channel_id == channel_id, ChannelUser.user_id == target_user_id,
+        ))
+        if r.scalar_one_or_none() is not None and member_count <= 1:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "You're the only person in this channel — add someone else before leaving, "
+                    "so it doesn't become unreachable to everyone in your workspace."
+                ),
+            )
 
         from sqlalchemy import delete
         await db.execute(delete(ChannelUser).where(

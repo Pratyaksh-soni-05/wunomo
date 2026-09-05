@@ -173,6 +173,45 @@ async def test_offboarding_a_channels_only_agent_drops_its_agent_count_to_zero(c
 
 
 @pytest.mark.asyncio
+async def test_removing_the_only_human_member_is_blocked_with_a_real_way_out(client):
+    """Slice 7 explicit user decision: block, don't allow silently, since
+    _require_membership gates every management action (including adding a
+    new member) -- a channel with zero human members has nobody left in
+    the tenant who could ever add themselves back in. There is no
+    delete-channel or leave endpoint in this codebase; the 409 must name
+    a real, actually-available way out (add someone else first), not a
+    fictional one."""
+    token, tenant_id, user_id = await _register(client, "chanH")
+    r = await client.post("/api/v1/channels/", headers=_auth(token), json={"name": "Solo"})
+    channel_id = r.json()["id"]
+
+    r = await client.delete(f"/api/v1/channels/{channel_id}/members/users/{user_id}", headers=_auth(token))
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert "only person in this channel" in detail
+    assert "add someone else" in detail.lower()
+    assert "delete" not in detail.lower(), "no delete-channel endpoint exists -- must not imply one does"
+
+    # Confirmed real way out: add a second person, then leaving succeeds.
+    token_b, user_b_id = await _add_member(tenant_id)
+    await client.post(f"/api/v1/channels/{channel_id}/members/users/{user_b_id}", headers=_auth(token))
+    r = await client.delete(f"/api/v1/channels/{channel_id}/members/users/{user_id}", headers=_auth(token))
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_removing_a_member_when_others_remain_is_not_blocked(client):
+    token, tenant_id, user_id = await _register(client, "chanI")
+    token_b, user_b_id = await _add_member(tenant_id)
+    r = await client.post("/api/v1/channels/", headers=_auth(token), json={"name": "Duo"})
+    channel_id = r.json()["id"]
+    await client.post(f"/api/v1/channels/{channel_id}/members/users/{user_b_id}", headers=_auth(token))
+
+    r = await client.delete(f"/api/v1/channels/{channel_id}/members/users/{user_b_id}", headers=_auth(token))
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_channel_management_rejects_cross_tenant_agent_and_user(client):
     token_a, tenant_a, _ = await _register(client, "chanE1")
     token_b, tenant_b, _ = await _register(client, "chanE2")

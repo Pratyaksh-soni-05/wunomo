@@ -8,13 +8,16 @@ import { SessionList, MessageThread, ContextPanel, type LocalChatMessage } from 
 import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
 import {
   getToken, decodeUserFromToken, getChatSessions, getChatHistory, sendChatMessage, getSources,
-  deleteChatSession, listChannels, createChannel, getChannel, addChannelAgent, listAgents,
+  deleteChatSession, listChannels, createChannel, getChannel, addChannelAgent, removeChannelAgent,
+  addChannelUser, removeChannelUser, listAgents, getTeamMembers,
   ApiError, type ChatContext, type TaskItem,
 } from "@/lib/api";
 
 export default function ChatPage() {
   const token = getToken() as string;
-  const tenantId = decodeUserFromToken(token)?.tenant_id ?? null;
+  const decoded = decodeUserFromToken(token);
+  const tenantId = decoded?.tenant_id ?? null;
+  const currentUserId = decoded?.sub ?? null;
   const toast = useToast();
   const router = useRouter();
   const qc = useQueryClient();
@@ -39,6 +42,7 @@ export default function ChatPage() {
   const sourcesQuery = useQuery({ queryKey: ["sources"], queryFn: () => getSources(token) });
   const channelsQuery = useQuery({ queryKey: ["channels"], queryFn: () => listChannels(token) });
   const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: () => listAgents(token) });
+  const teamQuery = useQuery({ queryKey: ["team-members"], queryFn: () => getTeamMembers(token) });
 
   const activeChannel = channelsQuery.data?.channels.find((c) => c.id === activeSessionId) ?? null;
   const channelDetailQuery = useQuery({
@@ -160,6 +164,54 @@ export default function ChatPage() {
     }
   };
 
+  const removeAgentFromActiveChannel = async (agentId: string, agentName: string) => {
+    if (!activeSessionId) return;
+    try {
+      await removeChannelAgent(token, activeSessionId, agentId);
+      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
+      toast.push(`${agentName} removed from the channel.`, "default");
+    } catch {
+      toast.push("Failed to remove agent.", "danger");
+    }
+  };
+
+  const addPersonToActiveChannel = async (userId: string) => {
+    if (!activeSessionId) return;
+    try {
+      await addChannelUser(token, activeSessionId, userId);
+      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+      toast.push("Added to the channel.", "success");
+    } catch {
+      toast.push("Failed to add person.", "danger");
+    }
+  };
+
+  // Backend refuses (409) removing the channel's only human member -- the
+  // real, honest way out named in that refusal is "add someone else
+  // first" (there is no delete-channel or dedicated leave endpoint in
+  // this codebase). Removing yourself drops you out of the channel view
+  // entirely, since GET .../{id} requires membership.
+  const removePersonFromActiveChannel = async (userId: string) => {
+    if (!activeSessionId) return;
+    try {
+      await removeChannelUser(token, activeSessionId, userId);
+      if (userId === currentUserId) {
+        chatGenerationRef.current += 1;
+        setActiveSessionId(null);
+        setMessages([]);
+        qc.invalidateQueries({ queryKey: ["channels"] });
+        toast.push("You left the channel.", "default");
+      } else {
+        qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+        toast.push("Removed from the channel.", "default");
+      }
+    } catch (err) {
+      const message = err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Failed to remove person.";
+      toast.push(message, "danger");
+    }
+  };
+
   const send = async () => {
     const text = draft.trim();
     if (!text || sending) return;
@@ -246,8 +298,14 @@ export default function ChatPage() {
         onStartTask={() => setTaskModalOpen(true)}
         channel={activeChannel}
         channelAgents={channelDetailQuery.data?.agents ?? []}
+        channelUsers={channelDetailQuery.data?.users ?? []}
         availableAgents={activeAgents}
+        availablePeople={teamQuery.data?.members ?? []}
+        currentUserId={currentUserId}
         onAddAgent={addAgentToActiveChannel}
+        onRemoveAgent={removeAgentFromActiveChannel}
+        onAddPerson={addPersonToActiveChannel}
+        onRemovePerson={removePersonFromActiveChannel}
       />
       <ContextPanel
         messages={messages}

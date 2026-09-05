@@ -1436,6 +1436,29 @@ export function addChannelAgent(
   });
 }
 
+export function removeChannelAgent(token: string, channelId: string, agentId: string): Promise<unknown> {
+  return request(`/api/v1/channels/${channelId}/members/agents/${agentId}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function addChannelUser(
+  token: string, channelId: string, userId: string
+): Promise<{ channel_id: string; user_id: string; added: boolean }> {
+  return request(`/api/v1/channels/${channelId}/members/users/${userId}`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+// Backend refuses (409) removing the channel's only human member -- see
+// channels.py's remove_user_member docstring. Callers should surface
+// ApiError.detail (a plain string here) rather than a generic failure.
+export function removeChannelUser(token: string, channelId: string, userId: string): Promise<unknown> {
+  return request(`/api/v1/channels/${channelId}/members/users/${userId}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 // ---------- Local session storage ----------
 
 const TOKEN_KEY = "axiom_token";
