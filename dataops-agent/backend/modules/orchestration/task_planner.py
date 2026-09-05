@@ -169,7 +169,7 @@ async def validate_step_plan_scope(db, agent_id: str | None, steps: list) -> Non
             continue
         reason = await agent_scope_denial_reason(db, agent_id, step.get("tool_name"), step.get("tool_args") or {})
         if reason is not None:
-            raise PlanValidationError(f"Step {i}: {reason} This plan cannot succeed as written.")
+            raise PlanValidationError(f"Step {i}: {reason['message']} This plan cannot succeed as written.")
 
 
 async def _in_scope_sources_for_prompt(agent_id: str | None) -> list[dict] | None:

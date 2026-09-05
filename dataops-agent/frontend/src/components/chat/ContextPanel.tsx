@@ -12,6 +12,7 @@ export function ContextPanel({
   onAttach,
   onClear,
   onGoToApprovals,
+  currentUserRole,
 }: {
   messages: LocalChatMessage[];
   sources: DataSourceItem[];
@@ -19,6 +20,7 @@ export function ContextPanel({
   onAttach: (ctx: ChatContext) => void;
   onClear: () => void;
   onGoToApprovals: () => void;
+  currentUserRole?: string | null;
 }) {
   const toolLog = messages.flatMap((m) =>
     (m.tool_calls || []).map((call) => ({ call, approval: m.approvals?.find((a: PendingApproval) => a.name === call.tool) }))
@@ -61,7 +63,7 @@ export function ContextPanel({
         ) : (
           toolLog.map((entry, i) => (
             <div className="chat-tool-log-item" key={i}>
-              <ToolCallBlock call={entry.call} approval={entry.approval} onGoToApprovals={onGoToApprovals} />
+              <ToolCallBlock call={entry.call} approval={entry.approval} onGoToApprovals={onGoToApprovals} currentUserRole={currentUserRole} />
             </div>
           ))
         )}

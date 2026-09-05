@@ -9,6 +9,7 @@ amendment 3 -- role is re-read fresh right before each step runs, never
 cached here).
 """
 import json
+import re
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -80,13 +81,28 @@ def _pause_reason(task: Task, steps: list[TaskStep]) -> str | None:
     """Computed at read time from the real, already-persisted step data --
     never a separate stored field to drift out of sync. 'Step 3 failed' is
     useless; this surfaces which step, its own description, and the real
-    underlying error every time, not a generic wrapper message."""
+    underlying error every time, not a generic wrapper message.
+
+    Always appends the "can't be resumed" disclosure (Wunomo Projects
+    Phase 2 frontend, slice 9, logged as finding 76): PAUSED_FAILED_STEP
+    has no resume path anywhere in this codebase, for any of its causes
+    (scope denial, attempt-budget exhaustion, the initiating user losing
+    access) -- computed here rather than baked into error_message at
+    write time so it can never go stale if a resume path is ever built
+    later. Fixing the scope-denial half of this (granting the missing
+    source) is a real, separate action a human can take, but performing
+    it does not unblock THIS task -- only a new one. Telling someone to
+    grant access without this line leads them to fix the scope and then
+    wait for a task that will never move."""
     if task.status != TaskStatus.PAUSED_FAILED_STEP:
         return None
     failed = next((s for s in sorted(steps, key=lambda s: s.step_index) if s.status == TaskStepStatus.FAILED), None)
     if failed is None:
         return None
-    return f'Step {failed.step_index} ("{failed.description}") failed after {failed.attempt_count} attempt(s): {failed.error_message}'
+    return (
+        f'Step {failed.step_index} ("{failed.description}") failed after {failed.attempt_count} attempt(s): '
+        f'{failed.error_message} This task can\'t be resumed — start a new one once the underlying problem is fixed.'
+    )
 
 
 def _completion_note(task: Task, steps: list[TaskStep]) -> str | None:
@@ -138,7 +154,20 @@ def _expiry_reason(task: Task) -> str | None:
 
 def _quota_paused_reason(task: Task, steps: list[TaskStep]) -> str | None:
     """Q4: credit exhaustion pauses (resumable) rather than fails -- names
-    the step waiting on quota, distinct from every other pause reason."""
+    the step waiting on quota, distinct from every other pause reason.
+
+    Two genuinely different causes share this one TaskStatus (Wunomo
+    Projects Phase 2 frontend, slice 9): the TENANT's overall AI-credit
+    quota, or THIS AGENT's own monthly_token_budget -- two separate gates
+    with two separate fixes (upgrade the plan vs. raise/clear one agent's
+    budget), so conflating them sends whoever's reading this to the wrong
+    screen. task_executor.py's own last_error already distinguishes them
+    correctly at write time ("the tenant's AI-credit quota is exhausted"
+    vs. "this agent's monthly token budget (X/Y tokens) is exhausted") --
+    this function used to discard that distinction and always claim the
+    tenant was the cause, even when it was the agent's own budget. Fixed
+    by reading the real blocked.error_message instead of a hardcoded
+    guess, the same way _source_locked_reason() below already does."""
     if task.status != TaskStatus.PAUSED_QUOTA_EXCEEDED:
         return None
     blocked = next(
@@ -146,10 +175,10 @@ def _quota_paused_reason(task: Task, steps: list[TaskStep]) -> str | None:
         None,
     )
     if blocked is None:
-        return "Paused: tenant AI-credit quota exhausted. Resumable once quota is available again."
+        return "Paused: a token/credit budget is exhausted. Resumable once it's available again."
     return (
-        f'Step {blocked.step_index} ("{blocked.description}") is paused after attempt {blocked.attempt_count} '
-        f'because the tenant\'s AI-credit quota is exhausted. Resumable once quota is available again.'
+        f'Step {blocked.step_index} ("{blocked.description}") is paused after attempt {blocked.attempt_count}: '
+        f'{blocked.error_message}'
     )
 
 
@@ -172,7 +201,31 @@ def _source_locked_reason(task: Task, steps: list[TaskStep]) -> str | None:
     )
 
 
+_SCOPE_DENIAL_GRANT_PATTERN = re.compile(r"POST /api/v1/agents/([^/]+)/sources/([^.\s]+)\.")
+
+
+def _scope_denial_grant_ids(pause_reason: str | None) -> dict | None:
+    """Recovers {agent_id, source_id} from a PAUSED_FAILED_STEP's own
+    persisted error message when it names a scope denial's real grant
+    endpoint (Wunomo Projects Phase 2 frontend, slice 9) -- lets the task
+    detail page render a real, pre-scoped "Grant access" link the same
+    way the chat trace does (api/v1/chat.py's _extract_tool_trace), by
+    parsing the ids straight out of agent_scope_denial_reason()'s own
+    fixed message format rather than adding a schema column just to
+    duplicate ids the message already names exactly. Returns None for
+    every other PAUSED_FAILED_STEP cause (attempt-budget exhaustion, the
+    initiating user losing access) -- their messages don't contain this
+    pattern at all."""
+    if not pause_reason:
+        return None
+    m = _SCOPE_DENIAL_GRANT_PATTERN.search(pause_reason)
+    if not m:
+        return None
+    return {"agent_id": m.group(1), "source_id": m.group(2)}
+
+
 def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
+    pause_reason = _pause_reason(task, steps)
     return {
         "id": task.id,
         "tenant_id": task.tenant_id,
@@ -180,7 +233,8 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         "goal": task.goal,
         "task_shape": task.task_shape.value,
         "status": task.status.value,
-        "pause_reason": _pause_reason(task, steps),
+        "pause_reason": pause_reason,
+        "scope_denial": _scope_denial_grant_ids(pause_reason),
         "completion_note": _completion_note(task, steps),
         "approval_pending_reason": _approval_pending_reason(task, steps),
         "expiry_reason": _expiry_reason(task),

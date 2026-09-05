@@ -133,8 +133,8 @@ async def test_denial_message_points_at_the_grant_endpoint(client):
     async with AsyncSessionLocal() as db:
         reason = await agent_scope_denial_reason(db, agent_id, "sync_source", {"source_id": source_id})
     assert reason is not None
-    assert f"/api/v1/agents/{agent_id}/sources/{source_id}" in reason
-    assert "Owner or Admin can grant it" in reason
+    assert f"/api/v1/agents/{agent_id}/sources/{source_id}" in reason["message"]
+    assert "Owner or Admin can grant it" in reason["message"]
 
 
 @pytest.mark.asyncio

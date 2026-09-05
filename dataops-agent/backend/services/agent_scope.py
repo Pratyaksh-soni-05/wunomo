@@ -183,9 +183,17 @@ async def agent_touches_source(db, agent_id: str, source_id: str) -> bool:
     return r.first() is not None
 
 
-async def agent_scope_denial_reason(db, agent_id: str | None, tool_name: str, args: dict) -> str | None:
-    """Returns a legible, specific denial reason if `args` names a
-    resolved source outside `agent_id`'s scope, else None (allowed).
+async def agent_scope_denial_reason(db, agent_id: str | None, tool_name: str, args: dict) -> dict | None:
+    """Returns a legible, specific denial dict if `args` names a resolved
+    source outside `agent_id`'s scope, else None (allowed). The dict is
+    {"message": str, "agent_id", "agent_name", "source_id", "source_name",
+    "tool_name"} -- structured (Wunomo Projects Phase 2 frontend, slice 9)
+    so callers that need to build a real UI action (a "grant access"
+    button pre-scoped to this exact agent/source, a deduped notification
+    keyed on this exact (agent_id, source_id) pair) don't have to parse
+    ids back out of the prose message. Every existing caller that only
+    ever used this as a bare string now reads reason["message"] instead --
+    the message text itself is unchanged.
 
     agent_id=None is a transitional no-op (skip, never deny): every real
     chat/task caller resolves the tenant's real agent_id before reaching
@@ -221,9 +229,13 @@ async def agent_scope_denial_reason(db, agent_id: str | None, tool_name: str, ar
         source = await db.get(DataSource, source_id)
         agent_name = agent.name if agent else agent_id
         source_name = source.name if source else source_id
-        return (
+        message = (
             f"'{agent_name}' isn't scoped to access '{source_name}' — this source hasn't "
             f"been assigned to this agent, so '{tool_name}' can't run against it. An Owner "
             f"or Admin can grant it: POST /api/v1/agents/{agent_id}/sources/{source_id}."
         )
+        return {
+            "message": message, "agent_id": agent_id, "agent_name": agent_name,
+            "source_id": source_id, "source_name": source_name, "tool_name": tool_name,
+        }
     return None

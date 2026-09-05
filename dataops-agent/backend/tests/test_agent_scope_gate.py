@@ -107,7 +107,28 @@ async def test_agent_with_zero_scope_rows_is_denied_everything(client):
     async with AsyncSessionLocal() as db:
         reason = await agent_scope_denial_reason(db, agent_id, "sync_source", {"source_id": source_a})
     assert reason is not None
-    assert "isn't scoped" in reason
+    assert "isn't scoped" in reason["message"]
+
+
+@pytest.mark.asyncio
+async def test_denial_dict_carries_structured_fields_not_just_a_string(client):
+    """Wunomo Projects Phase 2 frontend, slice 9: callers that build a real
+    UI action (a "grant access" link pre-scoped to this exact agent/
+    source, a deduped notification keyed on the (agent_id, source_id)
+    pair) need these fields directly -- not a prose string to parse ids
+    back out of."""
+    _, tenant_id, _ = await _register(client)
+    source_a = await _make_source(tenant_id, "Warehouse")
+    agent_id = await _make_agent(tenant_id, scoped_source_ids=[])
+
+    async with AsyncSessionLocal() as db:
+        denial = await agent_scope_denial_reason(db, agent_id, "sync_source", {"source_id": source_a})
+    assert set(denial.keys()) == {"message", "agent_id", "agent_name", "source_id", "source_name", "tool_name"}
+    assert denial["agent_id"] == agent_id
+    assert denial["source_id"] == source_a
+    assert denial["source_name"] == "Warehouse"
+    assert denial["tool_name"] == "sync_source"
+    assert "POST /api/v1/agents/" in denial["message"]
 
 
 @pytest.mark.asyncio
@@ -154,10 +175,11 @@ async def test_pipeline_and_incident_resolution_reach_the_owning_source(client):
     async with AsyncSessionLocal() as db:
         assert await agent_scope_denial_reason(db, agent_id, "run_pipeline", {"pipeline_id": pipeline_on_a_id}) is None
         denial = await agent_scope_denial_reason(db, agent_id, "run_pipeline", {"pipeline_id": pipeline_on_b_id})
-        assert denial is not None and "Source B" in denial
+        assert denial is not None and "Source B" in denial["message"]
+        assert denial["source_name"] == "Source B" and denial["source_id"] == source_b
 
         denial = await agent_scope_denial_reason(db, agent_id, "resolve_incident", {"incident_id": incident_on_b_id})
-        assert denial is not None and "Source B" in denial
+        assert denial is not None and "Source B" in denial["message"]
 
 
 # ---------------------------------------------------------------------------

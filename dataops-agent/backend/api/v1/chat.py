@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -50,6 +51,23 @@ def _extract_tool_trace(new_messages, blocked_tool_calls, role_denied_calls, sco
                 elif call["id"] in results_by_id:
                     status = "completed"
                     result = results_by_id[call["id"]]
+                    # A source-lock conflict (Wunomo Projects Phase 2, item 5)
+                    # is discovered only AFTER the tool actually runs -- it
+                    # returns a normal {"error": ..., "lock_conflict": True}
+                    # result, not a pre-flight denial like scope/role. Without
+                    # this check it renders identically to a real success
+                    # (Wunomo Projects Phase 2 frontend, slice 9): a lock
+                    # conflict in chat fails fast and does NOT retry on its
+                    # own (contrast a task step, which pauses and the beat
+                    # tick retries) -- the frontend needs a distinct status to
+                    # say that correctly rather than relying on the LLM
+                    # choosing to relay the raw error text.
+                    try:
+                        parsed = json.loads(result) if isinstance(result, str) else result
+                    except (json.JSONDecodeError, TypeError):
+                        parsed = None
+                    if isinstance(parsed, dict) and parsed.get("lock_conflict"):
+                        status = "denied_source_locked"
                 else:
                     continue
                 trace.append({
@@ -62,9 +80,16 @@ def _extract_tool_trace(new_messages, blocked_tool_calls, role_denied_calls, sco
             "result": None, "status": "denied_insufficient_role",
         })
     for call in (scope_denied_calls or []):
+        # scope_denial (Wunomo Projects Phase 2 frontend, slice 9) carries
+        # the structured {agent_id, agent_name, source_id, source_name} the
+        # frontend needs to render a real "grant access" link pre-scoped to
+        # this exact agent/source -- not just the prose reason string.
+        scope_denial = call.get("scope_denial") or {}
         trace.append({
             "tool": call["name"], "args": call.get("args", {}),
             "result": None, "status": "denied_out_of_scope", "reason": call.get("reason"),
+            "agent_id": scope_denial.get("agent_id"), "agent_name": scope_denial.get("agent_name"),
+            "source_id": scope_denial.get("source_id"), "source_name": scope_denial.get("source_name"),
         })
     return trace
 

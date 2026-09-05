@@ -110,7 +110,12 @@ async def enforce_agent_budget(agent_id: str | None) -> None:
     if result["status"] == "exceeded":
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail={"error": "agent_budget_exceeded", **result},
+            # agent_id (Wunomo Projects Phase 2 frontend, slice 9): without
+            # it, a frontend catching this 402 has no way to link to the
+            # one agent whose budget is actually the problem -- the caller
+            # already has it (it's this function's own argument), so there
+            # was no reason to make the frontend re-resolve it.
+            detail={"error": "agent_budget_exceeded", "agent_id": agent_id, **result},
         )
 
 

@@ -142,7 +142,11 @@ async def agent_scope_denied_tool_calls(agent_id: str | None, tool_calls: list[d
         for call in tool_calls:
             reason = await agent_scope_denial_reason(db, agent_id, call["name"], call.get("args", {}))
             if reason is not None:
-                denied.append({**call, "reason": reason})
+                # "reason" stays a bare string for the existing response_text
+                # fallback below (unchanged); "scope_denial" carries the full
+                # structured dict for chat.py's trace builder to turn into a
+                # real, pre-scoped "grant access" UI action.
+                denied.append({**call, "reason": reason["message"], "scope_denial": reason})
             else:
                 kept.append(call)
     tool_calls[:] = kept

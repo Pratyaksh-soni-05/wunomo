@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -30,6 +30,17 @@ export default function AgentDetailPage() {
   const toast = useToast();
   const qc = useQueryClient();
   const [offboardModalOpen, setOffboardModalOpen] = useState(false);
+  // Wunomo Projects Phase 2 frontend, slice 9: completes the "pre-scoped"
+  // half of the denial-UI grant links (chat's ToolCallBlock, the task
+  // detail page) -- reads window.location.search directly rather than
+  // useSearchParams(), matching chat/page.tsx's own established reason:
+  // useSearchParams() needs a <Suspense> boundary this app's shell doesn't
+  // set up, or the production build fails; this only ever runs client-side
+  // anyway ("use client" at the top of this file).
+  const [highlightSourceId, setHighlightSourceId] = useState<string | null>(null);
+  useEffect(() => {
+    setHighlightSourceId(new URLSearchParams(window.location.search).get("highlight_source"));
+  }, []);
 
   // No GET /api/v1/agents/{id} endpoint exists -- same reasoning as the
   // Projects detail page: list_agents() is already a single cheap
@@ -143,7 +154,14 @@ export default function AgentDetailPage() {
             ) : (
               <div className="flex flex-col gap-2">
                 {sourceList.map((s) => (
-                  <label key={s.id} className="flex items-center gap-2 text-sm">
+                  <label
+                    key={s.id}
+                    className="flex items-center gap-2 text-sm"
+                    style={s.id === highlightSourceId ? {
+                      background: "var(--accent-subtle-bg)", border: "1px solid var(--accent-subtle-border)",
+                      borderRadius: "var(--radius-sm)", padding: "6px 8px", margin: "-6px -8px",
+                    } : undefined}
+                  >
                     <input
                       type="checkbox"
                       checked={grantedIds.has(s.id)}
@@ -154,6 +172,7 @@ export default function AgentDetailPage() {
                       }}
                     />
                     {s.name}
+                    {s.id === highlightSourceId && <span className="text-xs text-muted">← needs access</span>}
                   </label>
                 ))}
               </div>

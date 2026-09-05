@@ -227,9 +227,10 @@ async def test_caller_still_authorized_rejects_offboarded_agent(client, created_
 
     async with AsyncSessionLocal() as db:
         task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one()
-        authorized, reason = await _caller_still_authorized(db, task, "sync_source", {})
+        authorized, reason, scope_denial = await _caller_still_authorized(db, task, "sync_source", {})
         assert authorized is False
         assert "offboarded" in reason
+        assert scope_denial is None  # this denial was agent-offboarded, not a scope gap
 
 
 # ---------------------------------------------------------------------------

@@ -68,8 +68,9 @@ from agent.personality import get_risk_level
 from modules.governance.policy_engine import PolicyEngine
 from modules.orchestration.task_planner import tool_by_name, tool_schema_for_prompt
 from models.all_models import (
-    AgentInstance, AgentInstanceStatus, ApprovalRequest, ApprovalStatus, RUNNABLE_TASK_STATUSES, RunStatus,
-    Task, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus, User,
+    AgentInstance, AgentInstanceStatus, ApprovalRequest, ApprovalStatus, Incident, IncidentSeverity,
+    IncidentStatus, RUNNABLE_TASK_STATUSES, RunStatus, Task, TaskStatus, TaskStep, TaskStepSource,
+    TaskStepStatus, User,
 )
 from services.agent_scope import agent_scope_denial_reason
 from services.llm_service import invoke_llm
@@ -103,7 +104,7 @@ _VERIFIABLE_TOOLS = {"run_pipeline"}
 log = structlog.get_logger()
 
 
-async def _caller_still_authorized(db, task: Task, tool_name: str, tool_args: dict) -> tuple[bool, str | None]:
+async def _caller_still_authorized(db, task: Task, tool_name: str, tool_args: dict) -> tuple[bool, str | None, dict | None]:
     """Fresh, per-step re-read of the task's initiating user's
     is_active/role, the calling agent's own status (Wunomo Projects Phase
     2 frontend, slice 4 -- OFFBOARDED must be enforced, not just
@@ -127,11 +128,19 @@ async def _caller_still_authorized(db, task: Task, tool_name: str, tool_args: di
     this function. This function's own scope check earns its keep on a
     RESUME (a step whose args were already resolved on an earlier call,
     e.g. while waiting on approval) where the agent's scope may have
-    changed since resolution happened."""
+    changed since resolution happened.
+
+    Returns (authorized, message, scope_denial) -- scope_denial is the
+    full structured dict from agent_scope_denial_reason() (Wunomo
+    Projects Phase 2 frontend, slice 9), non-None ONLY when the denial was
+    specifically a scope gap, so the caller can trigger the deduped
+    "grant access" notification for that cause alone -- not for the other
+    three (user deactivated, role changed, agent offboarded), which have
+    no comparable single-action fix or "recurs across many tasks" shape."""
     r = await db.execute(select(User.is_active, User.role).where(User.id == task.user_id))
     row = r.first()
     if row is None or not row.is_active:
-        return False, "the initiating user's account is no longer active"
+        return False, "the initiating user's account is no longer active", None
 
     # task.agent_id is nullable -- older/agent-less tasks predate Wunomo
     # Projects Phase 1's agent wiring and never set it. No agent_id means
@@ -140,15 +149,15 @@ async def _caller_still_authorized(db, task: Task, tool_name: str, tool_args: di
         r = await db.execute(select(AgentInstance.status).where(AgentInstance.id == task.agent_id))
         agent_status_row = r.first()
         if agent_status_row is None or agent_status_row[0] != AgentInstanceStatus.ACTIVE:
-            return False, "the calling agent has been offboarded"
+            return False, "the calling agent has been offboarded", None
 
     capability = TOOL_CAPABILITIES.get(tool_name)
     if capability is None or not has_permission(row.role, capability):
-        return False, f"the initiating user's role ('{row.role}') no longer has permission to use '{tool_name}'"
+        return False, f"the initiating user's role ('{row.role}') no longer has permission to use '{tool_name}'", None
     scope_denial = await agent_scope_denial_reason(db, task.agent_id, tool_name, tool_args)
     if scope_denial is not None:
-        return False, scope_denial
-    return True, None
+        return False, scope_denial["message"], scope_denial
+    return True, None, None
 
 
 
@@ -692,10 +701,21 @@ async def _notify_task_stopped(task: Task, title: str, message: str, severity: s
     tells you when it's done or needs you. Fires at the transitions that
     genuinely warrant it -- every terminal state, plus mid-task approval
     (someone needs to act) -- never for the retry-prone pauses
-    (PAUSED_FAILED_STEP, PAUSED_QUOTA_EXCEEDED) that are already visible
-    the moment anyone checks the Tasks screen and would otherwise spam on
-    every failed attempt (PAUSED_SOURCE_LOCKED, Wunomo Projects Phase 2
-    item 5's lock-conflict pause, joins this list for the same reason).
+    (PAUSED_QUOTA_EXCEEDED, PAUSED_SOURCE_LOCKED) that self-heal via the
+    beat tick and would otherwise spam on every failed attempt.
+
+    PAUSED_FAILED_STEP is a partial exception (Wunomo Projects Phase 2
+    frontend, slice 9): unlike the two pauses above, it never resolves on
+    its own -- there is no resume path for it at all, for any cause. Its
+    scope-denial cause specifically gets its own notification
+    (_notify_scope_denial_once, below) because it has a real, one-action
+    fix (grant the source) and a real reason to alert someone even though
+    nobody's watching an unattended run; its other causes (attempt-budget
+    exhaustion, the initiating user losing access) still don't notify
+    here, matching the original reasoning -- they don't have an
+    equally clean single fix to point someone at, and are rarer in
+    practice than a scope gap recurring across several tasks.
+
     Best-effort, matching this module's own NotificationService contract:
     a delivery failure must never break the actual state transition it's
     describing."""
@@ -707,6 +727,66 @@ async def _notify_task_stopped(task: Task, title: str, message: str, severity: s
         )
     except Exception as exc:
         log.warning("task_notification_failed", task_id=task.id, error=str(exc))
+
+
+async def _notify_scope_denial_once(task: Task, scope_denial: dict) -> None:
+    """One notification per distinct (agent, source) scope gap, not one
+    per task (Wunomo Projects Phase 2 frontend, slice 9, explicit
+    requirement) -- several tasks can independently hit the identical
+    already-known gap (e.g. a recurring workflow needing a source that
+    was never granted), and alerting once per task would mean N Slack
+    messages for one real fix, the exact shape that gets a channel muted.
+    Deduped via a real, visible Incident row -- the same dedup shape
+    services/tasks.py's _check_freshness() already uses for stale
+    sources: an OPEN incident for this exact cause is loaded and, if
+    found, no new alert fires (the open incident IS the record); only a
+    genuinely new (agent_id, source_id) pair creates one and alerts.
+
+    The message names the fix (a real, absolute link to the agent's
+    detail page) AND the consequence (this specific task can't resume
+    even after the fix) -- a notification that says only "a task
+    stopped" costs the same round trip through the app as no
+    notification at all; one that says "grant access" without saying the
+    paused task is already unrecoverable sends someone to fix the scope
+    and then wait for a task that will never move (see finding 76)."""
+    agent_id, source_id = scope_denial["agent_id"], scope_denial["source_id"]
+    already_known = False
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Incident).where(
+            Incident.tenant_id == task.tenant_id, Incident.status == IncidentStatus.OPEN,
+            Incident.title.like("Scope gap:%"),
+        ))
+        for existing in r.scalars().all():
+            if existing.affected_assets == [agent_id, source_id]:
+                already_known = True
+                break
+        if not already_known:
+            db.add(Incident(
+                id=str(uuid.uuid4()), tenant_id=task.tenant_id,
+                title=f"Scope gap: {scope_denial['agent_name']} → {scope_denial['source_name']}",
+                description=scope_denial["message"], severity=IncidentSeverity.MEDIUM,
+                affected_assets=[agent_id, source_id], detected_at=datetime.utcnow(),
+            ))
+            await db.commit()
+
+    if already_known:
+        return
+
+    try:
+        from config import settings
+        from modules.reporting.notification_service import NotificationService
+        grant_url = f"{settings.FRONTEND_URL}/agents/{agent_id}?highlight_source={source_id}"
+        await NotificationService(task.tenant_id).send_alert(
+            channel="both", severity="medium", title=f"Task paused — {scope_denial['agent_name']} denied access",
+            message=(
+                f"{scope_denial['agent_name']} doesn't have access to \"{scope_denial['source_name']}\" "
+                f"(needed by \"{scope_denial['tool_name']}\") on task \"{task.goal}\". "
+                f"Grant it here: {grant_url} — this task can't be resumed, so you'll need to start a new one."
+            ),
+            metadata={"task_id": task.id, "agent_id": agent_id, "source_id": source_id},
+        )
+    except Exception as exc:
+        log.warning("scope_denial_notification_failed", task_id=task.id, error=str(exc))
 
 
 async def execute_next_step(task_id: str) -> dict:
@@ -874,7 +954,7 @@ async def _execute_next_step_locked(task_id: str) -> dict:
             )
             return {"outcome": "task_completed"}
 
-        authorized, denial_reason = await _caller_still_authorized(db, task, step.tool_name, step.tool_args or {})
+        authorized, denial_reason, scope_denial = await _caller_still_authorized(db, task, step.tool_name, step.tool_args or {})
         if not authorized:
             step.attempt_count += 1
             step.status = TaskStepStatus.FAILED
@@ -883,6 +963,8 @@ async def _execute_next_step_locked(task_id: str) -> dict:
             step.completed_at = datetime.utcnow()
             _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
             await db.commit()
+            if scope_denial is not None:
+                await _notify_scope_denial_once(task, scope_denial)
             return {
                 "outcome": "blocked_permission", "step_id": step.id,
                 "attempt_count": step.attempt_count, "reason": denial_reason,
@@ -1015,16 +1097,17 @@ async def _execute_next_step_locked(task_id: str) -> dict:
                 step = r.scalar_one()
                 step.attempt_count = attempt
                 step.status = TaskStepStatus.FAILED
-                step.error_message = f"Blocked: {scope_denial}"
+                step.error_message = f"Blocked: {scope_denial['message']}"
                 step.completed_at = datetime.utcnow()
 
                 r = await db.execute(select(Task).where(Task.id == task_id))
                 task = r.scalar_one()
                 _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
                 await db.commit()
+            await _notify_scope_denial_once(task, scope_denial)
             return {
                 "outcome": "blocked_permission", "step_id": step_id,
-                "attempt_count": attempt, "reason": scope_denial,
+                "attempt_count": attempt, "reason": scope_denial["message"],
             }
 
         try:

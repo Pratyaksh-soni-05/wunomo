@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     GOOGLE_OAUTH_REDIRECT_URI: str = "http://localhost:3000/api/auth/callback/google"
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = ""
+    # Wunomo Projects Phase 2 frontend, slice 9: the first place a backend
+    # notification embeds a real, clickable link back into the app -- every
+    # earlier alert (incident, pipeline failure, stale sources) was plain
+    # text with no URL at all. Same default-localhost-3000 convention
+    # GOOGLE_OAUTH_REDIRECT_URI above already uses for "the frontend."
+    FRONTEND_URL: str = "http://localhost:3000"
 
     @property
     def cors_origins(self) -> List[str]:

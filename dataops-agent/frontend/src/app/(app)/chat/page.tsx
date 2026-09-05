@@ -18,6 +18,7 @@ export default function ChatPage() {
   const decoded = decodeUserFromToken(token);
   const tenantId = decoded?.tenant_id ?? null;
   const currentUserId = decoded?.sub ?? null;
+  const currentUserRole = decoded?.role ?? null;
   const toast = useToast();
   const router = useRouter();
   const qc = useQueryClient();
@@ -252,6 +253,34 @@ export default function ChatPage() {
       qc.invalidateQueries({ queryKey: ["chat-sessions"] });
     } catch (err) {
       if (chatGenerationRef.current !== myGeneration) return;
+      // Wunomo Projects Phase 2 frontend, slice 9: every ApiError used to
+      // collapse to the same "try rephrasing" text regardless of status --
+      // actively wrong for a 402, since rephrasing can't fix an exhausted
+      // quota. Two distinct causes share this status (enforce_quota's
+      // tenant-wide "ai_credits" gate vs. enforce_agent_budget's per-agent
+      // gate) with two different fixes, so a single generic message would
+      // send whoever reads it to the wrong screen.
+      if (err instanceof ApiError && err.status === 402 && err.detail && typeof err.detail === "object") {
+        const detail = err.detail as { error?: string; agent_id?: string; used?: number; limit?: number };
+        if (detail.error === "quota_exceeded") {
+          const message = "Your workspace's AI-credit quota is exhausted for this billing period.";
+          setSendError(message);
+          toast.push(message, "danger", { label: "Go to Billing", onClick: () => router.push("/billing") });
+        } else if (detail.error === "agent_budget_exceeded") {
+          const usage = detail.used != null && detail.limit != null ? ` (${detail.used}/${detail.limit} tokens)` : "";
+          const message = `This agent's own monthly token budget${usage} is exhausted.`;
+          setSendError(message);
+          toast.push(message, "danger", {
+            label: "Go to agent",
+            onClick: () => { if (detail.agent_id) router.push(`/agents/${detail.agent_id}`); },
+          });
+        } else {
+          const message = "AXIOM couldn't complete that request. Try again.";
+          setSendError(message);
+          toast.push(message, "danger");
+        }
+        return;
+      }
       const message =
         err instanceof ApiError
           ? "AXIOM couldn't complete that request — it may have tried an action it couldn't format correctly. Try rephrasing, or try again."
@@ -306,6 +335,7 @@ export default function ChatPage() {
         onRemoveAgent={removeAgentFromActiveChannel}
         onAddPerson={addPersonToActiveChannel}
         onRemovePerson={removePersonFromActiveChannel}
+        currentUserRole={currentUserRole}
       />
       <ContextPanel
         messages={messages}
@@ -314,6 +344,7 @@ export default function ChatPage() {
         onAttach={setAttachedContext}
         onClear={() => setAttachedContext(null)}
         onGoToApprovals={() => router.push("/approvals")}
+        currentUserRole={currentUserRole}
       />
       <TaskCreateModal
         token={token}

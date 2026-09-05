@@ -67,6 +67,7 @@ export function MessageThread({
   onRemoveAgent,
   onAddPerson,
   onRemovePerson,
+  currentUserRole,
 }: {
   messages: LocalChatMessage[];
   sending: boolean;
@@ -93,6 +94,7 @@ export function MessageThread({
   onRemoveAgent?: (agentId: string, agentName: string) => void;
   onAddPerson?: (userId: string) => void;
   onRemovePerson?: (userId: string) => void;
+  currentUserRole?: string | null;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -301,6 +303,7 @@ export function MessageThread({
                     call={call}
                     approval={m.approvals?.find((a) => a.name === call.tool)}
                     onGoToApprovals={onGoToApprovals}
+                    currentUserRole={currentUserRole}
                   />
                 ))}
               </div>

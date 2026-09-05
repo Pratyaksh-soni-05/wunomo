@@ -336,8 +336,19 @@ export interface ChatToolCall {
     | "approval_rejected"
     | "approval_executed"
     | "approval_failed"
-    | "denied_insufficient_role";
+    | "denied_insufficient_role"
+    // Wunomo Projects Phase 2 frontend, slice 9:
+    | "denied_out_of_scope"
+    | "denied_source_locked";
   approval_id?: string;
+  // denied_out_of_scope only -- lets the UI render a real "grant access"
+  // link pre-scoped to this exact agent/source, role-gated to Owner/Admin
+  // (the only roles the real grant endpoint accepts).
+  reason?: string;
+  agent_id?: string;
+  agent_name?: string;
+  source_id?: string;
+  source_name?: string;
 }
 
 export interface ChatMessageItem {
@@ -1182,6 +1193,11 @@ export interface TaskItem {
   task_shape: TaskShapeValue;
   status: string;
   pause_reason: string | null;
+  // Wunomo Projects Phase 2 frontend, slice 9: only set when pause_reason
+  // names a scope denial specifically -- lets the task detail page render
+  // a real "grant access" link pre-scoped to this exact agent/source, the
+  // same way the chat trace does.
+  scope_denial: { agent_id: string; source_id: string } | null;
   completion_note: string | null;
   approval_pending_reason: string | null;
   expiry_reason: string | null;

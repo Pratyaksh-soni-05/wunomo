@@ -21,7 +21,12 @@ const ACTIVE_POLL_MS = 4000;
 const AUTO_ADVANCE_DELAY_MS = 600;
 const AUTO_ADVANCE_MAX_STEPS = 50;
 
-const ADVANCEABLE_STATUSES = new Set(["queued", "running", "paused_quota_exceeded"]);
+// Wunomo Projects Phase 2 frontend, slice 9: paused_source_locked was
+// missing here even though the backend's own RUNNABLE_TASK_STATUSES
+// (models/all_models.py) already includes it and the beat tick auto-
+// retries it -- the manual "Advance" button was disappearing for a task
+// that the system was actively retrying in the background.
+const ADVANCEABLE_STATUSES = new Set(["queued", "running", "paused_quota_exceeded", "paused_source_locked"]);
 
 function shapeLabel(shape: string): string {
   return TASK_SHAPES.find((s) => s.value === shape)?.label ?? shape;
@@ -294,8 +299,25 @@ export default function TaskDetailPage() {
       <div style={{ padding: "20px 24px" }}>
         {reason && (
           <Card style={{ marginBottom: 16, borderLeft: `3px solid var(--${reason.variant === "gray" ? "border" : reason.variant})` }}>
-            <CardBody>
+            <CardBody className={task.scope_denial ? "flex items-center justify-between" : undefined}>
               <div className="text-sm">{reason.text}</div>
+              {/* Wunomo Projects Phase 2 frontend, slice 9: a real,
+                  pre-scoped link, role-gated the same way the chat
+                  version is -- the grant endpoint is Owner/Admin only
+                  server-side, so a button someone can't use is worse
+                  than none (explicit requirement). */}
+              {task.scope_denial && (
+                user?.role && ["owner", "admin"].includes(user.role.toLowerCase()) ? (
+                  <Button
+                    size="sm"
+                    onClick={() => router.push(`/agents/${task.scope_denial!.agent_id}?highlight_source=${task.scope_denial!.source_id}`)}
+                  >
+                    Grant access
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted">An Owner or Admin needs to grant this.</span>
+                )
+              )}
             </CardBody>
           </Card>
         )}
