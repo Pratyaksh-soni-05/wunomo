@@ -35,7 +35,7 @@ class TenantContextMiddleware:
             await self.app(scope, receive, send)
             return
 
-        tenant_id = self._tenant_from_headers(scope.get("headers") or [])
+        tenant_id = await self._tenant_from_headers(scope.get("headers") or [])
         token = set_current_tenant_id(tenant_id)
         try:
             await self.app(scope, receive, send)
@@ -43,7 +43,7 @@ class TenantContextMiddleware:
             reset_current_tenant_id(token)
 
     @staticmethod
-    def _tenant_from_headers(raw_headers) -> str | None:
+    async def _tenant_from_headers(raw_headers) -> str | None:
         for key, value in raw_headers:
             if key.lower() != b"authorization":
                 continue
@@ -64,6 +64,17 @@ class TenantContextMiddleware:
                 # get_current_user() produce the real 401. Failing closed here
                 # means such a request reads nothing rather than everything.
                 return None
+            # A revoked token must not establish a tenant context. Without
+            # this check it would still scope RLS to its tenant on the way to
+            # being rejected by get_current_user — the revocation would hold
+            # for authorisation but not for data scoping, which is exactly the
+            # "second, un-patched validation path" this class of fix has to
+            # avoid. Returning None routes the request to the unauthenticated
+            # path, which reads nothing.
+            from services.token_revocation import is_revoked
+            if await is_revoked(claims):
+                return None
+
             value = claims.get("tenant_id")
             return str(value) if value else None
         return None

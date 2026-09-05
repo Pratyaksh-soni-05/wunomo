@@ -77,7 +77,7 @@ class RateLimitMiddleware:
 
         headers = scope.get("headers") or []
         client_ip = self._client_ip(scope)
-        tenant_id = self._tenant_from_headers(headers)
+        tenant_id = await self._tenant_from_headers(headers)
 
         allowed, retry_after = await self._check(category, tenant_id, client_ip)
         if not allowed:
@@ -120,7 +120,7 @@ class RateLimitMiddleware:
         return client[0] if client else "unknown"
 
     @staticmethod
-    def _tenant_from_headers(raw_headers):
+    async def _tenant_from_headers(raw_headers):
         """Tenant from the JWT, or None.
 
         Best-effort and never rejects: an absent, malformed or expired token
@@ -145,6 +145,14 @@ class RateLimitMiddleware:
                 )
             except Exception:
                 return None
+            # A revoked token must not spend its former tenant's rate-limit
+            # budget. Returning None drops it onto the stricter per-IP
+            # unauthenticated backstop instead, which is the correct bucket for
+            # a request that is about to be rejected anyway.
+            from services.token_revocation import is_revoked
+            if await is_revoked(claims):
+                return None
+
             value = claims.get("tenant_id")
             return str(value) if value else None
         return None
