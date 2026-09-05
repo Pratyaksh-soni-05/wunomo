@@ -137,5 +137,9 @@
 
   In practice this guard can only ever fire on self-removal: reaching the endpoint at all requires already being a member, so if exactly one member remains, it can only be the caller — no separate "removing someone else who happens to be the last one" case exists.
 
+- **`@mention` autocomplete shipped 2026-09-05 (Wunomo Projects Phase 2 frontend, slice 8) — a pure frontend feature, no backend change.** `MessageThread.tsx`'s composer detects a leading, in-progress `@token` (regex `^@(\S*)$` against the live draft) and shows a dropdown of *that channel's own current agent members* — never every tenant agent, since suggesting one that isn't a member yet would offer a selection guaranteed to hit slice 6's own "isn't a member yet" error. Selecting a suggestion inserts the agent's complete name, never a partial one — `resolve_mentioned_agent()` (backend) does exact, case-insensitive matching with no prefix/fuzzy support, confirmed by reading its query before building the UI around it, so the parser needs the full name or it falls through to slice 6's "doesn't match any agent" message. Arrow keys navigate, Enter/Tab select, Escape dismisses.
+
+  **A real bug found and fixed during this slice's own verification**: Escape dismissed by exact query-text match (`mentionDismissedFor === query`), so dismissing a bare `@` (empty-string query) permanently suppressed the dropdown on every future bare `@` typed into that same message — retyping it reproduces the identical empty query the dismissal was keyed on. Fixed by clearing the dismissal whenever the draft leaves `@`-mention shape entirely (deleting it, completing a mention, sending), not just when the query text changes — dismissal now means "not this autocomplete session," not "not this exact string, ever."
+
 ---
 

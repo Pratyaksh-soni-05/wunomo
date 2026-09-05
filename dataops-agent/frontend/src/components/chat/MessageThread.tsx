@@ -98,11 +98,52 @@ export function MessageThread({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
   const [membersModalOpen, setMembersModalOpen] = useState(false);
+  const [mentionHighlight, setMentionHighlight] = useState(0);
+  const [mentionDismissedFor, setMentionDismissedFor] = useState<string | null>(null);
 
   const channelAgentIds = new Set((channelAgents ?? []).map((a) => a.id));
   const addableAgents = (availableAgents ?? []).filter((a) => !channelAgentIds.has(a.id));
   const channelUserIds = new Set((channelUsers ?? []).map((u) => u.id));
   const addablePeople = (availablePeople ?? []).filter((p) => p.is_active && !channelUserIds.has(p.id));
+
+  // @mention autocomplete (slice 8): only the leading token counts --
+  // parse_mention() (backend) only recognizes a mention at the very start
+  // of the message, so autocomplete must not trigger on "cc @Nova"
+  // mid-sentence. resolve_mentioned_agent() also requires an exact,
+  // complete name match -- there's no partial/prefix matching server-side
+  // -- so selecting a suggestion inserts the agent's FULL name, never
+  // leaves a partial one for the parser to guess at. Suggestions are
+  // scoped to this channel's own current agent members, never every
+  // tenant agent -- mentioning one that isn't a member yet is exactly the
+  // dead end slice 6 already built a real error message for; the
+  // autocomplete shouldn't offer a name that's guaranteed to fail.
+  const mentionMatch = channel ? /^@(\S*)$/.exec(draft) : null;
+  const mentionQuery = mentionMatch?.[1] ?? null;
+  const mentionSuggestions = mentionQuery !== null
+    ? (channelAgents ?? []).filter((a) => a.name.toLowerCase().startsWith(mentionQuery.toLowerCase()))
+    : [];
+  const showMentionDropdown = mentionQuery !== null && mentionQuery !== mentionDismissedFor && mentionSuggestions.length > 0;
+
+  const selectMention = (agentName: string) => {
+    onDraftChange(`@${agentName} `);
+    setMentionDismissedFor(null);
+    textareaRef.current?.focus();
+  };
+
+  useEffect(() => {
+    setMentionHighlight(0);
+  }, [mentionQuery]);
+
+  // Escape dismisses the CURRENT autocomplete session, not that exact
+  // query text forever -- without this, dismissing a bare "@" (query "")
+  // would permanently suppress the dropdown on every future bare "@" typed
+  // in this message, since retyping it produces the identical empty query
+  // mentionDismissedFor was compared against. Leaving @-mention mode
+  // entirely (deleting it, sending, completing a mention) clears the
+  // dismissal so the next fresh "@" shows suggestions again.
+  useEffect(() => {
+    if (mentionMatch === null) setMentionDismissedFor(null);
+  }, [mentionMatch === null]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -116,6 +157,28 @@ export function MessageThread({
   }, [draft]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showMentionDropdown) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionHighlight((i) => (i + 1) % mentionSuggestions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionHighlight((i) => (i - 1 + mentionSuggestions.length) % mentionSuggestions.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        selectMention(mentionSuggestions[mentionHighlight].name);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionDismissedFor(mentionQuery);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (draft.trim() && !sending) onSend();
@@ -260,6 +323,23 @@ export function MessageThread({
           <div className="text-xs" style={{ color: "var(--danger)", marginBottom: 6 }}>{sendError}</div>
         )}
         <div className="chat-composer-box">
+          {showMentionDropdown && (
+            <div className="mention-autocomplete" role="listbox">
+              {mentionSuggestions.map((a, i) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  role="option"
+                  aria-selected={i === mentionHighlight}
+                  className={i === mentionHighlight ? "active" : ""}
+                  onMouseEnter={() => setMentionHighlight(i)}
+                  onClick={() => selectMention(a.name)}
+                >
+                  @{a.name}
+                </button>
+              ))}
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             placeholder={

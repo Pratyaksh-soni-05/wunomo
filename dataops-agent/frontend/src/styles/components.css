@@ -801,7 +801,18 @@ tr.selected td:first-child {
 .chat-approval-notice .link-btn { color: var(--accent-text); font-weight: 600; cursor: pointer; text-decoration: underline; background: none; border: none; padding: 0; font-size: inherit; font-family: inherit; }
 
 .chat-composer { padding: 14px 20px; border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
-.chat-composer-box { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; }
+.chat-composer-box { position: relative; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; }
+.mention-autocomplete {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 50; min-width: 200px; max-width: 320px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg); overflow: hidden; animation: modal-in 0.12s ease;
+}
+.mention-autocomplete button {
+  display: block; width: 100%; text-align: left; padding: 8px 12px; min-height: 36px;
+  background: none; border: none; cursor: pointer; font-size: 13px; color: var(--text-primary);
+}
+.mention-autocomplete button.active,
+.mention-autocomplete button:hover { background: var(--accent-subtle-bg); }
 .chat-composer-box textarea { width: 100%; border: none; outline: none; background: transparent; font-family: inherit; font-size: 13px; resize: none; min-height: 40px; max-height: 120px; overflow-y: auto; color: var(--text-primary); }
 .chat-composer-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; gap: 8px; }
 .chat-quick-prompts { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
