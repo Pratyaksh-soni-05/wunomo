@@ -28,6 +28,25 @@ async def resolve_mentioned_agent(db, channel_id: str, name: str) -> AgentInstan
     return r.scalar_one_or_none()
 
 
+async def find_active_agent_in_tenant(db, tenant_id: str, name: str) -> AgentInstance | None:
+    """Tenant-wide (not channel-scoped) case-insensitive name match, ACTIVE
+    only. Exists to let chat.py tell apart two different unmentionable-
+    agent failures that resolve_mentioned_agent's own None can't
+    distinguish by itself: a genuine typo (no such agent anywhere in this
+    tenant) versus a real, active agent that simply hasn't been added to
+    THIS channel yet -- the first needs a spelling fix, the second needs
+    an actual add-member action, and conflating them into one generic
+    message makes a typo indistinguishable from a fixable membership gap
+    (Wunomo Projects Phase 2 frontend, slice 6, explicit user requirement)."""
+    r = await db.execute(
+        select(AgentInstance).where(
+            AgentInstance.tenant_id == tenant_id, func.lower(AgentInstance.name) == name.lower(),
+            AgentInstance.status == AgentInstanceStatus.ACTIVE,
+        )
+    )
+    return r.scalar_one_or_none()
+
+
 async def channel_agent_members(db, channel_id: str) -> list[AgentInstance]:
     """Excludes OFFBOARDED agents -- same reasoning as resolve_mentioned_agent
     above. This also feeds the "exactly one agent in the channel" single-

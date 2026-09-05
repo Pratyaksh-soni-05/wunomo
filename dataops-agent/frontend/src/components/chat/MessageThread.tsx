@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card, Button, Select } from "@/components/ui";
+import { Card, Button, Modal, Select } from "@/components/ui";
 import { ToolCallBlock } from "./ToolCallBlock";
 import type { LocalChatMessage } from "./types";
-import type { ChatContext } from "@/lib/api";
+import type { AgentListItem, ChannelItem, ChannelMemberAgent, ChatContext } from "@/lib/api";
 
 const QUICK_PROMPTS = [
   "List my data sources",
@@ -55,6 +55,10 @@ export function MessageThread({
   onSend,
   onGoToApprovals,
   onStartTask,
+  channel,
+  channelAgents,
+  availableAgents,
+  onAddAgent,
 }: {
   messages: LocalChatMessage[];
   sending: boolean;
@@ -71,10 +75,18 @@ export function MessageThread({
   onSend: () => void;
   onGoToApprovals: () => void;
   onStartTask: () => void;
+  channel?: ChannelItem | null;
+  channelAgents?: ChannelMemberAgent[];
+  availableAgents?: AgentListItem[];
+  onAddAgent?: (agentId: string) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
+  const [addAgentModalOpen, setAddAgentModalOpen] = useState(false);
+
+  const channelAgentIds = new Set((channelAgents ?? []).map((a) => a.id));
+  const addableAgents = (availableAgents ?? []).filter((a) => !channelAgentIds.has(a.id));
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -104,16 +116,23 @@ export function MessageThread({
             </svg>
           </div>
           <div>
-            <div className="font-semibold" style={{ fontSize: 13 }}>AXIOM DataOps Agent</div>
+            <div className="font-semibold" style={{ fontSize: 13 }}>
+              {channel ? `# ${channel.name}` : "AXIOM DataOps Agent"}
+            </div>
             <div className="flex items-center gap-2" style={{ gap: 6 }}>
               <span className={["status-dot", sending ? "warning pulse" : "success"].join(" ")} />
               <span className="text-xs text-muted">
-                {sending ? "Working…" : provider ? `Ready · last reply via ${provider}` : "Ready"}
+                {channel
+                  ? `${channelAgents?.length ?? 0} agent${(channelAgents?.length ?? 0) === 1 ? "" : "s"}`
+                  : sending ? "Working…" : provider ? `Ready · last reply via ${provider}` : "Ready"}
               </span>
             </div>
           </div>
         </div>
         <div className="chat-header-controls">
+          {channel && (
+            <Button size="sm" variant="secondary" onClick={() => setAddAgentModalOpen(true)}>+ Add Agent</Button>
+          )}
           <Button size="sm" variant="secondary" onClick={onStartTask}>+ Start a Task</Button>
           <Select
             aria-label="Personality mode"
@@ -137,10 +156,18 @@ export function MessageThread({
       <div className="chat-messages">
         {messages.length === 0 && !sending && (
           <div className="empty-state" style={{ minHeight: "auto", padding: "40px 20px" }}>
-            <h2 className="font-display text-xl">Ask AXIOM anything</h2>
+            <h2 className="font-display text-xl">
+              {channel ? `Start the conversation in #${channel.name}` : "Ask AXIOM anything"}
+            </h2>
             <p className="text-muted text-sm" style={{ maxWidth: 360 }}>
-              Query your data, check pipeline health, run quality checks, or investigate an incident —
-              AXIOM has real tool access to your tenant&apos;s data.
+              {channel
+                ? (channelAgents?.length ?? 0) === 0
+                  ? "No agents are in this channel yet — use \"+ Add Agent\" above before sending a message."
+                  : (channelAgents?.length ?? 0) > 1
+                    ? "Multiple agents are in this channel — @mention who you're talking to."
+                    : `Message ${channelAgents?.[0]?.name} directly, no @mention needed.`
+                : "Query your data, check pipeline health, run quality checks, or investigate an incident — " +
+                  "AXIOM has real tool access to your tenant's data."}
             </p>
           </div>
         )}
@@ -166,6 +193,17 @@ export function MessageThread({
           ) : m.role === "user" ? (
             <div className="chat-bubble-user" key={i}>
               <div className="chat-bubble-user-inner">{m.content}</div>
+            </div>
+          ) : m.isSystemNotice ? (
+            // A channel routing failure (unknown @mention, not a channel
+            // member, ambiguous/no mention) -- rendered distinctly from a
+            // real agent reply so it never reads as if an agent said it.
+            <div className="chat-bubble-assistant" key={i}>
+              <div className="chat-bubble-assistant-inner">
+                <Card className="chat-bubble-assistant-text text-muted text-sm" style={{ fontStyle: "italic" }}>
+                  {m.content}
+                </Card>
+              </div>
             </div>
           ) : (
             <div className="chat-bubble-assistant" key={i}>
@@ -208,7 +246,13 @@ export function MessageThread({
         <div className="chat-composer-box">
           <textarea
             ref={textareaRef}
-            placeholder="Ask AXIOM anything about your data... (↵ to send, Shift+↵ for newline)"
+            placeholder={
+              channel
+                ? (channelAgents?.length ?? 0) > 1
+                  ? "@mention who you're talking to... (↵ to send, Shift+↵ for newline)"
+                  : `Message #${channel.name}... (↵ to send, Shift+↵ for newline)`
+                : "Ask AXIOM anything about your data... (↵ to send, Shift+↵ for newline)"
+            }
             rows={1}
             value={draft}
             disabled={sending}
@@ -234,6 +278,39 @@ export function MessageThread({
           ))}
         </div>
       </div>
+
+      {channel && (
+        <Modal
+          open={addAgentModalOpen}
+          onClose={() => setAddAgentModalOpen(false)}
+          title={`Add an agent to #${channel.name}`}
+        >
+          {addableAgents.length === 0 ? (
+            <p className="text-muted text-sm">
+              {(availableAgents ?? []).length === 0
+                ? "No active agents exist yet — hire one first."
+                : "Every active agent is already a member of this channel."}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {addableAgents.map((a) => (
+                <div key={a.id} className="flex items-center justify-between text-sm" style={{ padding: "4px 0" }}>
+                  <span>{a.name}</span>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      onAddAgent?.(a.id);
+                      setAddAgentModalOpen(false);
+                    }}
+                  >
+                    Add
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }

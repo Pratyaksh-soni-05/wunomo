@@ -1,8 +1,8 @@
 "use client";
 
-import { Button } from "@/components/ui";
-import { Skeleton } from "@/components/ui";
-import type { ChatSessionSummary } from "@/lib/api";
+import { useState } from "react";
+import { Badge, Button, Input, Modal, Skeleton } from "@/components/ui";
+import type { AgentListItem, ChannelItem, ChatSessionSummary } from "@/lib/api";
 import { useSavedPrompts } from "./useSavedPrompts";
 import { parseApiDate } from "@/lib/dates";
 
@@ -22,9 +22,13 @@ export function SessionList({
   tenantId,
   sessions,
   loading,
+  channels,
+  channelsLoading,
+  availableAgents,
   activeSessionId,
   onSelectSession,
   onNewChat,
+  onCreateChannel,
   onInsertPrompt,
   onDeleteSession,
   draft,
@@ -32,14 +36,31 @@ export function SessionList({
   tenantId: string | null;
   sessions: ChatSessionSummary[];
   loading: boolean;
+  channels: ChannelItem[];
+  channelsLoading: boolean;
+  availableAgents: AgentListItem[];
   activeSessionId: string | null;
   onSelectSession: (id: string) => void;
   onNewChat: () => void;
+  onCreateChannel: (name: string, agentIds: string[]) => void;
   onInsertPrompt: (text: string) => void;
   onDeleteSession: (id: string) => void;
   draft: string;
 }) {
   const { prompts, addPrompt, removePrompt } = useSavedPrompts(tenantId);
+  const [channelModalOpen, setChannelModalOpen] = useState(false);
+  const [channelName, setChannelName] = useState("");
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
+
+  const resetChannelModal = () => {
+    setChannelModalOpen(false);
+    setChannelName("");
+    setSelectedAgentIds([]);
+  };
+
+  const toggleAgent = (id: string) => {
+    setSelectedAgentIds((prev) => (prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]));
+  };
 
   return (
     <div className="chat-sidebar-left">
@@ -49,7 +70,7 @@ export function SessionList({
         </Button>
       </div>
 
-      <div className="chat-section-label">Recent</div>
+      <div className="chat-section-label">AXIOM Direct</div>
       <div className="chat-session-list">
         {loading ? (
           <div style={{ padding: "0 12px" }}>
@@ -81,6 +102,93 @@ export function SessionList({
           ))
         )}
       </div>
+
+      <div className="chat-section-label flex items-center justify-between" style={{ paddingRight: 8 }}>
+        <span>Channels</span>
+        <button className="chat-session-delete" title="New channel" onClick={() => setChannelModalOpen(true)}>+</button>
+      </div>
+      <div className="chat-session-list">
+        {channelsLoading ? (
+          <div style={{ padding: "0 12px" }}>
+            <Skeleton height={40} style={{ borderRadius: 6 }} />
+          </div>
+        ) : channels.length === 0 ? (
+          <div className="chat-empty-note" style={{ padding: "8px 12px" }}>
+            No channels yet. Channels let multiple agents (and people) share one conversation.
+          </div>
+        ) : (
+          channels.map((c) => (
+            <div
+              key={c.id}
+              className={["chat-session-item", c.id === activeSessionId ? "active" : ""].join(" ")}
+              onClick={() => onSelectSession(c.id)}
+            >
+              <div className="chat-session-row">
+                <div className="chat-session-title">
+                  # {c.name}
+                  {c.agent_count === 0 && (
+                    <Badge variant="warning" style={{ marginLeft: 6 }}>needs an agent</Badge>
+                  )}
+                </div>
+              </div>
+              <div className="chat-session-meta">
+                {c.agent_count} agent{c.agent_count === 1 ? "" : "s"}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <Modal
+        open={channelModalOpen}
+        onClose={resetChannelModal}
+        title="New Channel"
+        footer={
+          <>
+            <Button variant="secondary" onClick={resetChannelModal}>Cancel</Button>
+            <Button
+              disabled={!channelName.trim() || selectedAgentIds.length === 0}
+              onClick={() => {
+                onCreateChannel(channelName.trim(), selectedAgentIds);
+                resetChannelModal();
+              }}
+            >
+              Create
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <Input
+            id="channel-name" label="Name" value={channelName}
+            onChange={(e) => setChannelName(e.target.value)}
+            placeholder="e.g. pipeline-incidents"
+            required
+          />
+          <div className="input-group">
+            <label className="input-label">Agents (at least one required)</label>
+            {availableAgents.length === 0 ? (
+              <p className="text-muted text-sm">No active agents to add yet — hire one first.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {availableAgents.map((a) => (
+                  <label key={a.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={selectedAgentIds.includes(a.id)}
+                      onChange={() => toggleAgent(a.id)}
+                    />
+                    {a.name}
+                  </label>
+                ))}
+              </div>
+            )}
+            <p className="text-muted text-xs" style={{ marginTop: 4 }}>
+              A channel with no agents can&apos;t be talked to — pick at least one now; more can be added later.
+            </p>
+          </div>
+        </div>
+      </Modal>
 
       <div className="chat-saved-prompts">
         <div className="chat-section-label" style={{ padding: "0 0 6px" }}>Saved Prompts</div>

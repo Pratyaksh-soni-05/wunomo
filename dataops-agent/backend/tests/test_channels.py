@@ -133,6 +133,46 @@ async def test_non_member_cannot_manage_or_view_a_channel(client):
 
 
 @pytest.mark.asyncio
+async def test_list_channels_reports_agent_count(client):
+    """Slice 6: agent_count on GET /api/v1/channels/ lets the sidebar flag
+    a channel that can't be talked to yet, without opening it first."""
+    token, tenant_id, _ = await _register(client, "chanF")
+    nova_id = await _hire_agent(client, token, "Nova")
+    r = await client.post("/api/v1/channels/", headers=_auth(token), json={"name": "Empty"})
+    empty_channel_id = r.json()["id"]
+    r = await client.post("/api/v1/channels/", headers=_auth(token), json={"name": "Staffed"})
+    staffed_channel_id = r.json()["id"]
+    await client.post(f"/api/v1/channels/{staffed_channel_id}/members/agents/{nova_id}", headers=_auth(token))
+
+    r = await client.get("/api/v1/channels/", headers=_auth(token))
+    by_id = {c["id"]: c["agent_count"] for c in r.json()["channels"]}
+    assert by_id[empty_channel_id] == 0
+    assert by_id[staffed_channel_id] == 1
+
+
+@pytest.mark.asyncio
+async def test_offboarding_a_channels_only_agent_drops_its_agent_count_to_zero(client):
+    """The exact scenario slice 6 was built to handle without leaving the
+    channel silently unusable: offboarding is never blocked by channel
+    membership (explicit design decision), but the resulting state must be
+    visible via agent_count, not just discovered by hitting a dead message."""
+    token, tenant_id, _ = await _register(client, "chanG")
+    nova_id = await _hire_agent(client, token, "Nova")
+    r = await client.post("/api/v1/channels/", headers=_auth(token), json={"name": "General"})
+    channel_id = r.json()["id"]
+    await client.post(f"/api/v1/channels/{channel_id}/members/agents/{nova_id}", headers=_auth(token))
+
+    r = await client.get("/api/v1/channels/", headers=_auth(token))
+    assert r.json()["channels"][0]["agent_count"] == 1
+
+    offboard = await client.post(f"/api/v1/agents/{nova_id}/offboard", headers=_auth(token))
+    assert offboard.status_code == 200, "offboarding must not be blocked by sole channel membership"
+
+    r = await client.get("/api/v1/channels/", headers=_auth(token))
+    assert r.json()["channels"][0]["agent_count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_channel_management_rejects_cross_tenant_agent_and_user(client):
     token_a, tenant_a, _ = await _register(client, "chanE1")
     token_b, tenant_b, _ = await _register(client, "chanE2")
@@ -189,9 +229,13 @@ async def test_mention_routes_to_the_tagged_agent_and_nobody_else(client, monkey
 
 
 @pytest.mark.asyncio
-async def test_mentioning_an_agent_not_in_the_channel_is_refused(client, monkeypatch):
+async def test_mentioning_a_real_agent_not_in_the_channel_names_the_membership_gap(client, monkeypatch):
     """An agent not in channel_agents cannot be mentioned -- resolved
-    against real membership, never a bare string match on the name."""
+    against real membership, never a bare string match on the name.
+    Slice 6 explicit requirement: this must read differently from a plain
+    typo, since the fix (add them) is different from the fix for a typo
+    (spell it correctly) -- a single generic message would make the two
+    indistinguishable."""
     token, tenant_id, _ = await _register(client, "mentionB")
     await _hire_agent(client, token, "Nova")  # exists, but never added to the channel
     r = await client.post("/api/v1/channels/", headers=_auth(token), json={"name": "General"})
@@ -204,8 +248,56 @@ async def test_mentioning_an_agent_not_in_the_channel_is_refused(client, monkeyp
         "message": "@Nova sync it", "session_id": channel_id,
     })
     assert r.status_code == 200
-    assert "don't see anyone named 'Nova'" in r.json()["response"]
+    body = r.json()["response"]
+    assert "Nova exists but isn't a member of this channel yet" in body
+    assert "Add them from this channel's members" in body
     assert captured == {}, "run_agent must never be called for an unresolved mention"
+
+
+@pytest.mark.asyncio
+async def test_mentioning_a_name_with_no_such_agent_in_the_tenant_at_all(client, monkeypatch):
+    """The other half of the same disambiguation: a genuine typo (no agent
+    by this name anywhere in the tenant) must read differently from the
+    membership-gap case above."""
+    token, tenant_id, _ = await _register(client, "mentionH")
+    await _hire_agent(client, token, "Nova")
+    r = await client.post("/api/v1/channels/", headers=_auth(token), json={"name": "General"})
+    channel_id = r.json()["id"]
+
+    captured = {}
+    monkeypatch.setattr(chat_module, "run_agent", _fake_run_agent(captured))
+
+    r = await client.post("/api/v1/chat/", headers=_auth(token), json={
+        "message": "@Nvoa sync it", "session_id": channel_id,
+    })
+    assert r.status_code == 200
+    body = r.json()["response"]
+    assert "'Nvoa' doesn't match any agent in your workspace" in body
+    assert "isn't a member" not in body
+    assert captured == {}
+
+
+@pytest.mark.asyncio
+async def test_mentioning_an_offboarded_agents_name_reads_as_no_such_agent(client, monkeypatch):
+    """An offboarded agent can't be added back (no reactivation endpoint) --
+    from the mentioning user's perspective this is the same dead end as a
+    typo, not a fixable membership gap, so it must not claim "isn't a
+    member yet" (which implies adding them would work)."""
+    token, tenant_id, _ = await _register(client, "mentionI")
+    nova_id = await _hire_agent(client, token, "Nova")
+    r = await client.post("/api/v1/channels/", headers=_auth(token), json={"name": "General"})
+    channel_id = r.json()["id"]
+    await client.post(f"/api/v1/agents/{nova_id}/offboard", headers=_auth(token))
+
+    captured = {}
+    monkeypatch.setattr(chat_module, "run_agent", _fake_run_agent(captured))
+
+    r = await client.post("/api/v1/chat/", headers=_auth(token), json={
+        "message": "@Nova sync it", "session_id": channel_id,
+    })
+    assert r.status_code == 200
+    assert "'Nova' doesn't match any agent in your workspace" in r.json()["response"]
+    assert captured == {}
 
 
 @pytest.mark.asyncio

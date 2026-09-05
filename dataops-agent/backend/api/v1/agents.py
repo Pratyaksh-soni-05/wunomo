@@ -23,9 +23,10 @@ permission-boundary/org-structural action, not an operational one.
 import uuid
 from typing import Optional
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from .auth import require_permission
 from database import AsyncSessionLocal
@@ -36,6 +37,8 @@ from models.all_models import (
 from services.llm_service import SUPPORTED_MODEL_OVERRIDES
 from services.quota_service import get_agent_quota_status
 from services.settings_service import get_ai_model_override
+
+log = structlog.get_logger()
 
 router = APIRouter()
 
@@ -179,7 +182,21 @@ async def offboard_agent(agent_id: str, user=Depends(require_permission("agents.
     layer regardless of what's granted), and the agent's name stays
     blocked from reuse (hire_agent()'s duplicate-name check has no status
     filter) so a new unrelated agent can never inherit an offboarded
-    one's name in old channel history."""
+    one's name in old channel history.
+
+    Deliberate design choice (Wunomo Projects Phase 2 frontend, slice 6,
+    explicit user decision): offboarding is never BLOCKED by a channel
+    where this agent is the sole member -- that would risk making
+    offboarding a heavily-used agent effectively impossible, and breaks
+    from every other precedent this build already set (agent_sources,
+    channel history, project membership are all preserved through
+    offboarding, never used to gate it). Instead: a channel left with zero
+    active agents is a normal, recoverable state (the same shape as a
+    project with zero agents), surfaced to the user via
+    GET /api/v1/channels/'s agent_count field and a real, actionable
+    message in chat.py rather than a bare "please @mention" that would be
+    misleading with nobody left to mention. Logged here (channel_left_
+    without_agent) purely for operator visibility, not as a gate."""
     tenant_id = user["tenant_id"]
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(AgentInstance).where(
@@ -206,6 +223,25 @@ async def offboard_agent(agent_id: str, user=Depends(require_permission("agents.
                     "task_id": blocking_task.id,
                 },
             )
+
+        r = await db.execute(select(ChannelAgent.channel_id).where(ChannelAgent.agent_id == agent_id))
+        member_channel_ids = [row[0] for row in r.all()]
+        if member_channel_ids:
+            r = await db.execute(
+                select(ChannelAgent.channel_id, func.count(ChannelAgent.id))
+                .join(AgentInstance, AgentInstance.id == ChannelAgent.agent_id)
+                .where(
+                    ChannelAgent.channel_id.in_(member_channel_ids),
+                    AgentInstance.status == AgentInstanceStatus.ACTIVE,
+                )
+                .group_by(ChannelAgent.channel_id)
+            )
+            for left_channel_id, active_count in r.all():
+                if active_count == 1:
+                    log.warning(
+                        "channel_left_without_agent", channel_id=left_channel_id,
+                        offboarded_agent_id=agent_id, offboarded_agent_name=agent.name,
+                    )
 
         await db.execute(delete(ChannelAgent).where(ChannelAgent.agent_id == agent_id))
         agent.status = AgentInstanceStatus.OFFBOARDED

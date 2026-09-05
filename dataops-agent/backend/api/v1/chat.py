@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 import uuid
 from models.approval_model import ApprovalRequest, ApprovalStatus
 from schemas.chat_schema import ChatRequest
-from services.channel_routing import channel_agent_members, load_agent_channel_context, resolve_mentioned_agent
+from services.channel_routing import (
+    channel_agent_members, find_active_agent_in_tenant, load_agent_channel_context, resolve_mentioned_agent,
+)
 from services.mentions import parse_mention
 from langchain_core.messages import AIMessage as LCAIMessage, ToolMessage as LCToolMessage, SystemMessage as LCSystemMessage
 
@@ -110,8 +112,22 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
             if mentioned_name is not None:
                 target_agent = await resolve_mentioned_agent(db, channel.id, mentioned_name)
                 if target_agent is None:
+                    # Two distinct failures, not one generic message
+                    # (Wunomo Projects Phase 2 frontend, slice 6, explicit
+                    # requirement): a typo (no such agent anywhere in this
+                    # tenant) needs a spelling fix; a real, active agent
+                    # that just isn't a member of THIS channel needs an
+                    # actual add-member action. Conflating them makes a
+                    # typo indistinguishable from a fixable membership gap.
+                    tenant_agent = await find_active_agent_in_tenant(db, tenant_id, mentioned_name)
+                    if tenant_agent is None:
+                        return _no_route_response(
+                            session_id, f"'{mentioned_name}' doesn't match any agent in your workspace.",
+                        )
                     return _no_route_response(
-                        session_id, f"I don't see anyone named '{mentioned_name}' in this channel.",
+                        session_id,
+                        f"{tenant_agent.name} exists but isn't a member of this channel yet. "
+                        f"Add them from this channel's members, then @mention them again.",
                     )
                 agent_id = target_agent.id
                 mentioned_agent_id = target_agent.id
@@ -123,10 +139,20 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
                 if len(members) == 1:
                     agent_id = members[0].id
                     mentioned_agent_id = agent_id
-                else:
-                    who = "No agents are" if not members else "More than one agent is"
+                elif not members:
+                    # Reachable by offboarding a channel's only agent
+                    # (slice 4 removes channel_agents membership on
+                    # offboard) as much as by never having added one --
+                    # either way, the fix is the same real action, named
+                    # here rather than a bare "please @mention" that would
+                    # be actively misleading with nobody left to mention.
                     return _no_route_response(
-                        session_id, f"{who} in this channel — please @mention who you're talking to.",
+                        session_id,
+                        "No agents are in this channel — add one from this channel's members to start talking here.",
+                    )
+                else:
+                    return _no_route_response(
+                        session_id, "More than one agent is in this channel — please @mention who you're talking to.",
                     )
 
             # Context filtering, reading (a) (Wunomo Projects Phase 2):

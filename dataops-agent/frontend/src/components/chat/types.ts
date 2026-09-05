@@ -11,4 +11,13 @@ export interface LocalChatMessage extends ChatMessageItem {
   // doesn't survive a session switch/reload, same as the rest of this
   // client-only message array.
   taskCard?: { id: string; goal: string };
+  // Wunomo Projects Phase 2 frontend, slice 6: a channel routing failure
+  // (no such agent, not a channel member, ambiguous/no mention) comes
+  // back as a normal assistant turn with provider: null -- flagged here,
+  // computed at send time, so it renders distinctly from a real agent
+  // reply instead of looking like AXIOM's own voice. Not reconstructable
+  // from GET .../history (which carries no per-message provider field),
+  // so this doesn't survive a session switch/reload -- an acceptable,
+  // cosmetic-only gap; the message text itself is still self-explanatory.
+  isSystemNotice?: boolean;
 }

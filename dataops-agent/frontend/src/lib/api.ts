@@ -1382,6 +1382,60 @@ export function offboardAgent(token: string, agentId: string): Promise<{ agent_i
   });
 }
 
+// ---------- Channels (Wunomo Projects Phase 2 frontend, slice 6) ----------
+
+export interface ChannelItem {
+  id: string;
+  name: string;
+  project_id: string | null;
+  created_at: string;
+  // 0 means unusable right now -- never had an agent added, or its only
+  // agent was offboarded (offboarding removes channel_agents membership
+  // but never the channel itself). Lets the sidebar flag this before a
+  // human opens the channel and hits a routing failure.
+  agent_count: number;
+}
+
+export interface ChannelMemberUser {
+  id: string;
+  email: string;
+}
+
+export interface ChannelMemberAgent {
+  id: string;
+  name: string;
+}
+
+export interface ChannelDetail {
+  id: string;
+  name: string;
+  project_id: string | null;
+  users: ChannelMemberUser[];
+  agents: ChannelMemberAgent[];
+}
+
+export function listChannels(token: string): Promise<{ channels: ChannelItem[] }> {
+  return authedRequest("/api/v1/channels/", token);
+}
+
+export function createChannel(token: string, params: { name: string; project_id?: string | null }): Promise<ChannelItem> {
+  return request("/api/v1/channels/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
+export function getChannel(token: string, channelId: string): Promise<ChannelDetail> {
+  return authedRequest(`/api/v1/channels/${channelId}`, token);
+}
+
+export function addChannelAgent(
+  token: string, channelId: string, agentId: string
+): Promise<{ channel_id: string; agent_id: string; agent_name: string; added: boolean }> {
+  return request(`/api/v1/channels/${channelId}/members/agents/${agentId}`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 // ---------- Local session storage ----------
 
 const TOKEN_KEY = "axiom_token";

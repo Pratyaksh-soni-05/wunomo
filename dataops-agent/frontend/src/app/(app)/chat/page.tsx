@@ -8,7 +8,8 @@ import { SessionList, MessageThread, ContextPanel, type LocalChatMessage } from 
 import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
 import {
   getToken, decodeUserFromToken, getChatSessions, getChatHistory, sendChatMessage, getSources,
-  deleteChatSession, ApiError, type ChatContext, type TaskItem,
+  deleteChatSession, listChannels, createChannel, getChannel, addChannelAgent, listAgents,
+  ApiError, type ChatContext, type TaskItem,
 } from "@/lib/api";
 
 export default function ChatPage() {
@@ -36,6 +37,16 @@ export default function ChatPage() {
 
   const sessionsQuery = useQuery({ queryKey: ["chat-sessions"], queryFn: () => getChatSessions(token) });
   const sourcesQuery = useQuery({ queryKey: ["sources"], queryFn: () => getSources(token) });
+  const channelsQuery = useQuery({ queryKey: ["channels"], queryFn: () => listChannels(token) });
+  const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: () => listAgents(token) });
+
+  const activeChannel = channelsQuery.data?.channels.find((c) => c.id === activeSessionId) ?? null;
+  const channelDetailQuery = useQuery({
+    queryKey: ["channel-detail", activeSessionId],
+    queryFn: () => getChannel(token, activeSessionId as string),
+    enabled: !!activeChannel,
+  });
+  const activeAgents = agentsQuery.data?.agents.filter((a) => a.status !== "offboarded") ?? [];
 
   const selectSession = async (id: string) => {
     // Same stale-response hazard newChat() guards against: switching
@@ -116,6 +127,39 @@ export default function ChatPage() {
     toast.push(alreadyEmpty ? "Already a new chat." : "Started a new chat.", "success");
   };
 
+  // A channel with zero agents is a guaranteed dead end (resolve_mentioned_
+  // agent/channel_agent_members both refuse to route into one) -- creation
+  // and adding at least one agent happen as one flow, never a bare
+  // name-only create that leaves a channel unusable until a separate step.
+  const createChannelWithAgents = async (name: string, agentIds: string[]) => {
+    try {
+      const channel = await createChannel(token, { name });
+      for (const agentId of agentIds) {
+        await addChannelAgent(token, channel.id, agentId);
+      }
+      qc.invalidateQueries({ queryKey: ["channels"] });
+      chatGenerationRef.current += 1;
+      setActiveSessionId(channel.id);
+      setMessages([]);
+      setSendError(null);
+      toast.push(`Channel "${channel.name}" created.`, "success");
+    } catch {
+      toast.push("Failed to create channel.", "danger");
+    }
+  };
+
+  const addAgentToActiveChannel = async (agentId: string) => {
+    if (!activeSessionId) return;
+    try {
+      const result = await addChannelAgent(token, activeSessionId, agentId);
+      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
+      toast.push(`${result.agent_name} added to the channel.`, "success");
+    } catch {
+      toast.push("Failed to add agent.", "danger");
+    }
+  };
+
   const send = async () => {
     const text = draft.trim();
     if (!text || sending) return;
@@ -145,6 +189,10 @@ export default function ChatPage() {
       const assistantMsg: LocalChatMessage = {
         role: "assistant", content: res.response, tool_calls: res.tool_calls,
         timestamp: res.timestamp, approvals: res.pending_approvals,
+        // provider: null is exclusively how a channel routing failure
+        // (unknown mention, not-a-member, ambiguous/no mention) comes
+        // back -- a real reply always carries a real provider string.
+        isSystemNotice: res.provider === null,
       };
       setMessages((prev) => [...prev, assistantMsg]);
       setProvider(res.provider);
@@ -169,9 +217,13 @@ export default function ChatPage() {
         tenantId={tenantId}
         sessions={sessionsQuery.data?.sessions ?? []}
         loading={sessionsQuery.isLoading}
+        channels={channelsQuery.data?.channels ?? []}
+        channelsLoading={channelsQuery.isLoading}
+        availableAgents={activeAgents}
         activeSessionId={activeSessionId}
         onSelectSession={selectSession}
         onNewChat={newChat}
+        onCreateChannel={createChannelWithAgents}
         onInsertPrompt={setDraft}
         onDeleteSession={deleteSession}
         draft={draft}
@@ -192,6 +244,10 @@ export default function ChatPage() {
         onSend={send}
         onGoToApprovals={() => router.push("/approvals")}
         onStartTask={() => setTaskModalOpen(true)}
+        channel={activeChannel}
+        channelAgents={channelDetailQuery.data?.agents ?? []}
+        availableAgents={activeAgents}
+        onAddAgent={addAgentToActiveChannel}
       />
       <ContextPanel
         messages={messages}

@@ -16,11 +16,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .auth import get_current_user
 from database import AsyncSessionLocal
-from models.all_models import AgentInstance, Channel, ChannelAgent, ChannelUser, Project, User
+from models.all_models import AgentInstance, AgentInstanceStatus, Channel, ChannelAgent, ChannelUser, Project, User
 
 router = APIRouter()
 
@@ -67,17 +67,31 @@ async def create_channel(body: ChannelCreate, user=Depends(get_current_user)):
 
 @router.get("/")
 async def list_channels(user=Depends(get_current_user)):
+    """agent_count (Wunomo Projects Phase 2 frontend, slice 6): lets the
+    sidebar flag a channel that currently has zero active agent members --
+    reachable either by never having added one, or by offboarding a
+    channel's only agent (offboard_agent removes its channel_agents rows)
+    -- without a human having to open it first and hit a dead message.
+    Offboarded agents don't count, matching channel_agent_members'/
+    resolve_mentioned_agent's own convention."""
     tenant_id = user["tenant_id"]
     async with AsyncSessionLocal() as db:
         r = await db.execute(
-            select(Channel).join(ChannelUser, ChannelUser.channel_id == Channel.id)
+            select(
+                Channel,
+                func.count(ChannelAgent.id).filter(AgentInstance.status == AgentInstanceStatus.ACTIVE),
+            )
+            .join(ChannelUser, ChannelUser.channel_id == Channel.id)
+            .outerjoin(ChannelAgent, ChannelAgent.channel_id == Channel.id)
+            .outerjoin(AgentInstance, AgentInstance.id == ChannelAgent.agent_id)
             .where(Channel.tenant_id == tenant_id, ChannelUser.user_id == user["sub"])
+            .group_by(Channel.id)
             .order_by(Channel.created_at.desc())
         )
-        channels = r.scalars().all()
+        rows = r.all()
     return {"channels": [
-        {"id": c.id, "name": c.name, "project_id": c.project_id, "created_at": c.created_at}
-        for c in channels
+        {"id": c.id, "name": c.name, "project_id": c.project_id, "created_at": c.created_at, "agent_count": count}
+        for c, count in rows
     ]}
 
 
