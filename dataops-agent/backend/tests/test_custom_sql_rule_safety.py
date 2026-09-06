@@ -158,7 +158,17 @@ async def test_destructive_custom_sql_is_rejected_not_executed(client):
 
     assert rule_result["passed"] is False
     assert "rejected" in rule_result["message"].lower()
-    assert "drop" in rule_result["message"].lower()
+    # This used to assert `"drop" in message` -- that the rejection echoed the
+    # offending keyword back. Item #5 deliberately stopped doing that: this
+    # message is returned over the API and fed into the LLM's context, and a
+    # rejection that names the token it tripped on hands an attacker the rule
+    # set one probe at a time. So the assertion is inverted rather than
+    # dropped. The security property this test exists for is untouched -- it
+    # is the "tenants table still exists" check below, not the wording.
+    assert "drop" not in rule_result["message"].lower(), (
+        "rejection message should not echo the blocked construct: "
+        f"{rule_result['message']!r}"
+    )
 
     # The real proof: the tenants table was never actually touched.
     async with tenant_session(tenant_id) as db:
