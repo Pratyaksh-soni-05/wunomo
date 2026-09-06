@@ -259,6 +259,11 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         # already correct) -- Wunomo Projects Phase 4 frontend, slice 11
         # is the read side: this was simply never in the API response.
         "originating_session_id": task.originating_session_id,
+        # Wunomo Projects Phase 4, slice 14: which ScheduledAgentTask (if
+        # any) created this task -- backend-only for now, exposed so a
+        # future rail/detail-page UI slice doesn't need another backend
+        # round trip just to add a "Scheduled" badge.
+        "originating_schedule_id": task.originating_schedule_id,
         "pause_reason": pause_reason,
         "scope_denial": _scope_denial_grant_ids(pause_reason),
         "plan_invalid_reason": _plan_invalid_reason(task, steps),
@@ -459,6 +464,7 @@ async def list_active_tasks(current_user: dict = Depends(get_current_user)):
             "agent_id": task.agent_id,
             "agent_name": agent_name,
             "originating_session_id": task.originating_session_id,
+            "originating_schedule_id": task.originating_schedule_id,
             "current_step": _current_step_summary(steps_by_task[task.id]),
             "needs_attention": tier is not None,
             "attention_tier": tier,

@@ -53,6 +53,14 @@ celery_app.conf.beat_schedule = {
         "task": "services.tasks.advance_active_tasks",
         "schedule": 60.0,
     },
+    # Per-agent scheduled work (Wunomo Projects Phase 4, slice 14) -- same
+    # 60s cadence and same reasoning as check-scheduled-pipelines-1min
+    # above: polls every ACTIVE ScheduledAgentTask directly against the DB
+    # each tick, cron-matched via croniter.
+    "check-scheduled-agent-tasks-1min": {
+        "task": "services.tasks.check_scheduled_agent_tasks",
+        "schedule": 60.0,
+    },
     "daily-reports-24hr": {
         "task": "services.tasks.generate_daily_reports",
         "schedule": 86400.0,

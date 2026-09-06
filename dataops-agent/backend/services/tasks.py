@@ -375,6 +375,90 @@ def advance_one_task(self, task_id: str):
     log.info("advance_active_tasks_complete", checked=len(task_ids), advanced=advanced)
 
 
+# Wunomo Projects Phase 4, slice 14 (per-agent scheduled work). Same
+# poll-real-DB-state-every-60s shape as check_scheduled_pipelines above --
+# one static beat entry, croniter-matched against every ACTIVE schedule,
+# dispatching one fire_scheduled_agent_task.delay(...) per due schedule
+# rather than doing the real work inline (item 74's own lesson: an early
+# version of advance_active_tasks that ran inline hung past two minutes
+# against this dev DB's real backlog -- dispatch, don't loop-and-execute
+# in the scheduler process).
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def check_scheduled_agent_tasks(self):
+    import asyncio
+    from database import engine
+
+    async def _run():
+        await engine.dispose()
+        return await _check_scheduled_agent_tasks()
+
+    try:
+        fired = asyncio.run(_run())
+    except Exception as exc:
+        log.error("scheduled_agent_task_check_failed", error=str(exc))
+        raise self.retry(exc=exc)
+
+    log.info("check_scheduled_agent_tasks_complete", dispatched=fired)
+
+
+async def _check_scheduled_agent_tasks() -> int:
+    from sqlalchemy import select
+    from database import AsyncSessionLocal
+    from models.all_models import ScheduledAgentTask
+    from croniter import croniter
+
+    now = utcnow().replace(second=0, microsecond=0)
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(ScheduledAgentTask).where(ScheduledAgentTask.active.is_(True)))
+        schedules = r.scalars().all()
+
+    fired = 0
+    for s in schedules:
+        cron = (s.schedule_cron or "").strip()
+        if not cron:
+            continue
+        try:
+            is_due = croniter.match(cron, now)
+        except (ValueError, KeyError):
+            log.warning("scheduled_agent_task_invalid_cron", schedule_id=s.id, cron=cron)
+            continue
+        if not is_due:
+            continue
+        fire_scheduled_agent_task.delay(s.id)
+        fired += 1
+        log.info("scheduled_agent_task_dispatched", schedule_id=s.id, agent_id=s.agent_id, cron=cron)
+
+    return fired
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def fire_scheduled_agent_task(self, schedule_id: str):
+    """The real per-schedule work, dispatched by check_scheduled_agent_tasks
+    above -- never run inline in the beat/scheduling process, same
+    dispatch-per-item convention as advance_one_task/
+    execute_scheduled_pipeline_run."""
+    import asyncio
+    from database import engine
+    from modules.orchestration.scheduled_tasks import fire_scheduled_task
+
+    async def _run():
+        await engine.dispose()
+        return await fire_scheduled_task(schedule_id)
+
+    try:
+        outcome = asyncio.run(_run())
+    except Exception as exc:
+        log.error("fire_scheduled_agent_task_failed", schedule_id=schedule_id, error=str(exc))
+        raise self.retry(exc=exc)
+
+    # skipped_overlap is an expected, silent outcome (see fire_scheduled_
+    # task's own docstring) -- a daily schedule with an approval gate
+    # still pending from yesterday would otherwise log every single tick.
+    if outcome.get("outcome") != "skipped_overlap":
+        log.info("fire_scheduled_agent_task_outcome", schedule_id=schedule_id, outcome=outcome.get("outcome"))
+
+
 @celery_app.task
 def check_all_freshness():
     import asyncio

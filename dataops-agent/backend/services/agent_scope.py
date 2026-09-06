@@ -239,3 +239,32 @@ async def agent_scope_denial_reason(db, agent_id: str | None, tool_name: str, ar
             "source_id": source_id, "source_name": source_name, "tool_name": tool_name,
         }
     return None
+
+
+async def missing_sources_for_tool_call(db, tool_name: str, tool_args: dict) -> list[str]:
+    """Which of tool_args' resolvable arg names reference a source that no
+    longer exists. Distinct from agent_scope_denial_reason() above, which
+    explicitly treats a nonexistent id as nothing to check (a domain error
+    the tool itself should surface, not a scope denial) -- correct there
+    because a human/LLM-driven task's args come from live discovery data
+    or a live dropdown, so a stale id "just doesn't happen" in that flow.
+
+    A ScheduledAgentTask's tool_args (Wunomo Projects Phase 4, slice 14)
+    are typed once at creation and reused unchanged for months, so a
+    source can be deleted after creation and before the next firing --
+    this existence check exists specifically for schedule validation
+    (modules/orchestration/scheduled_tasks.py). No other caller has ever
+    needed this and shouldn't start relying on it for anything but that;
+    agent_scope_denial_reason's own "not a denial" behavior for every
+    other call site is unchanged."""
+    candidates = TOOL_SCOPE_RESOLUTION.get(tool_name)
+    if candidates is None or candidates == NOT_SOURCE_SCOPED:
+        return []
+    missing = []
+    for arg_name, kind in candidates:
+        value = tool_args.get(arg_name)
+        if not value or not isinstance(value, str):
+            continue
+        if await _resolve_source_id(db, kind, value) is None:
+            missing.append(arg_name)
+    return missing

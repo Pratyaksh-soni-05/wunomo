@@ -696,6 +696,14 @@ class TaskStepSource(str, enum.Enum):
     LLM_PLANNED = "llm_planned"
     HUMAN_EDITED = "human_edited"
     SYSTEM_INSERTED = "system_inserted"
+    # Wunomo Projects Phase 4, slice 14: a ScheduledAgentTask's fixed step,
+    # created directly by the beat tick with no LLM plan generated and no
+    # human editing it in the moment -- neither LLM_PLANNED nor HUMAN_EDITED
+    # is honest here, and SYSTEM_INSERTED already has an established,
+    # different meaning (a verify step appended to an EXISTING plan), not
+    # "the entire, only step of a task." A genuinely new provenance value
+    # rather than overloading one of the three above.
+    SCHEDULED = "scheduled"
 
 
 class Task(Base):
@@ -725,6 +733,24 @@ class Task(Base):
     # columns above, matching this table's own established convention.
     agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=True)
     originating_session_id = Column(String, nullable=True)  # the chat session this task was spawned from, if any
+    # Wunomo Projects Phase 4, slice 14: the ScheduledAgentTask that created
+    # this Task, if any -- a real FK (unlike originating_session_id's
+    # FK-less, log-shaped convention), matching Task's own established
+    # pattern for its other identity columns (tenant_id, user_id, agent_id
+    # are all real FKs) and ScheduledAgentTask being a real, joinable row
+    # (like AgentInstance), not a log-shaped table. Forward reference to a
+    # class defined later in this same module -- SQLAlchemy resolves
+    # ForeignKey string targets at mapper-configuration time, not at class
+    # body evaluation time, so declaration order here doesn't matter.
+    # ondelete="SET NULL": a schedule CAN be deleted (the real fix a
+    # deactivation notification points at for two of its three causes --
+    # delete and recreate is the only option with no edit endpoint), and a
+    # task's own record/goal/steps must survive that unchanged, only
+    # losing the back-reference -- the same "a task is never touched by
+    # cleanup elsewhere" precedent as originating_session_id.
+    originating_schedule_id = Column(
+        String, ForeignKey("scheduled_agent_tasks.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
     goal = Column(Text, nullable=False)
     task_shape = Column(SAEnum(TaskShape), nullable=False)
     status = Column(SAEnum(TaskStatus), nullable=False, default=TaskStatus.DRAFT_PLAN)
@@ -798,3 +824,65 @@ class TaskStep(Base):
     approval_request_id = Column(String, ForeignKey("approval_requests.id"), nullable=True)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
+
+
+class ScheduledAgentTask(Base):
+    """Wunomo Projects Phase 4, slice 14: a standing, recurring instruction
+    for one agent to run one fixed tool call on a cron schedule -- fixed,
+    never replanned. task_shape/tool_name/tool_args are set once at
+    creation and never touch generate_plan() again: a natural-language
+    goal replanned every firing would mean a real LLM call every night,
+    forever, for a schedule nobody's watching to notice if the plan
+    drifted -- a materially different cost/risk profile from a fixed
+    tool call, and out of scope for this slice by explicit decision.
+
+    created_by_user_id is this schedule's real owner, never a synthetic
+    "system" role -- Task.user_id is NOT NULL and every per-step
+    authorization check re-reads that user's CURRENT role live (see
+    Task's own docstring); a scheduled run is attributed to the real
+    person who configured it so that existing re-check keeps governing
+    unchanged. The cost: if that person is later deactivated or demoted
+    out of the permission this schedule's tool_name needs, the schedule
+    can no longer run -- see active/deactivation_reason below for how
+    that's surfaced, not left to fail silently, night after night.
+
+    active=False means this will never fire again until something
+    explicit reactivates it. Set automatically (never by a human
+    directly) the moment validate_schedule_can_run() (modules/
+    orchestration/scheduled_tasks.py) finds a cause it can't run for
+    anymore -- the owner losing access, this agent being offboarded, or
+    a referenced source being deleted -- with deactivation_reason storing
+    exactly which, in prose, plus the real fix. Reactivating re-runs that
+    identical validation; if the cause is still true, reactivation fails
+    the same way it would have at the next firing, not silently a second
+    time. Deactivation always fires a one-time notification (services/
+    reporting/notification_service.py) -- a schedule whose failure
+    symptom is "nothing happens, ever" is the invisible-failure pattern
+    this whole build keeps having to close, not reproduce a seventh time.
+
+    No edit endpoint exists (backend-first per explicit scope; the
+    schedule-management UI is its own later slice) -- tool_name/tool_args
+    are immutable once created. The real fix for a stale reference today
+    is delete this schedule and create a new one; deactivation messages
+    say so plainly rather than pointing at an edit action that doesn't
+    exist."""
+    __tablename__ = "scheduled_agent_tasks"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=False, index=True)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    task_shape = Column(SAEnum(TaskShape), nullable=False)
+    # The single fixed step's human-readable description -- also reused
+    # verbatim as the Task.goal of every Task this schedule creates, since
+    # a single-fixed-step schedule has no separate "high-level goal vs.
+    # this specific step" distinction the way a multi-step LLM plan does.
+    description = Column(Text, nullable=False)
+    tool_name = Column(String(100), nullable=False)
+    tool_args = Column(JSON, nullable=False, default=dict)
+    schedule_cron = Column(String(100), nullable=False)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    deactivation_reason = Column(Text, nullable=True)
+    last_fired_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
