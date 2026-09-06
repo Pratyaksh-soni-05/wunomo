@@ -372,8 +372,6 @@ def advance_one_task(self, task_id: str):
     if outcome.get("outcome") not in ("not_runnable", "task_busy"):
         log.info("advance_one_task_outcome", task_id=task_id, outcome=outcome.get("outcome"))
 
-    log.info("advance_active_tasks_complete", checked=len(task_ids), advanced=advanced)
-
 
 # Wunomo Projects Phase 4, slice 14 (per-agent scheduled work). Same
 # poll-real-DB-state-every-60s shape as check_scheduled_pipelines above --
