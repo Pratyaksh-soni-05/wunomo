@@ -9,6 +9,7 @@ import asyncpg
 from database import AsyncSessionLocal
 from models.all_models import DataSource
 from modules.governance.audit_trail import AuditTrail
+from modules.transformation import sql_guard
 from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
@@ -21,11 +22,15 @@ def utcnow() -> datetime:
 MAX_ROWS_HARD_CAP = 100_000
 DEFAULT_ROW_LIMIT = 10_000
 
-BLOCKED_KEYWORDS = frozenset([
-    "DROP", "TRUNCATE", "DELETE", "ALTER", "GRANT", "REVOKE",
-    "CREATE", "INSERT", "UPDATE", "REPLACE", "EXEC", "EXECUTE",
-    "CALL", "LOAD", "OUTFILE", "DUMPFILE",
-])
+# How long a single query may run on the remote server, in seconds. The
+# `timeout=30` already passed to asyncpg.connect() is the CONNECTION timeout —
+# it bounds how long establishing the socket may take and then stops applying,
+# so a query that connects instantly and then runs forever was never bounded by
+# it. This is the one that bounds execution, and it is the backstop for the
+# resource-exhaustion cases the parser cannot see: the parser can reject
+# `pg_sleep(30)` and a cartesian join, but it cannot tell that a legitimately
+# shaped aggregate over a billion rows will never finish.
+STATEMENT_TIMEOUT_SECONDS = 30
 
 
 @tenant_scoped
@@ -34,11 +39,17 @@ class SqlRunner:
     Executes SQL against a registered DataSource with full safety controls.
 
     Safety layers:
-      1. Keyword blocklist  — rejects DDL/DML mutations
-      2. SELECT-only        — only SELECT / WITH ... SELECT allowed
-      3. LIMIT injection    — added automatically if missing
+      1. Parse-tree guard   — single read-only SELECT, no catalog access, no
+                              timing/IO/egress functions, no cartesian joins
+                              (modules/transformation/sql_guard.py)
+      2. LIMIT injection    — added when the query's ROOT does not bound itself
+      3. Statement timeout  — bounds execution, not just connection
       4. Hard row cap       — slices result to MAX_ROWS_HARD_CAP
       5. Audit trail        — every execution is logged
+
+    Layer 1 replaced a keyword blocklist that allowed all 17 payloads in the
+    adversarial battery in tests/test_sql_sandbox.py while rejecting three
+    ordinary queries. It narrows, but does not eliminate, the caveat below.
 
     All methods are tenant-isolated.
     """
@@ -66,7 +77,7 @@ class SqlRunner:
             return safety
 
         effective_limit = min(row_limit, MAX_ROWS_HARD_CAP)
-        sql_with_limit = self._inject_limit(sql, effective_limit)
+        sql_with_limit = self._inject_limit(sql, effective_limit, safety["has_root_limit"])
 
         source_result = await self._load_source(source_id)
         if "error" in source_result:
@@ -147,7 +158,7 @@ class SqlRunner:
             return safety
 
         effective_limit = min(row_limit, MAX_ROWS_HARD_CAP)
-        sql_with_limit = self._inject_limit(sql, effective_limit)
+        sql_with_limit = self._inject_limit(sql, effective_limit, safety["has_root_limit"])
 
         start = time.monotonic()
         try:
@@ -188,6 +199,13 @@ class SqlRunner:
             else str(source.source_type)
         )
 
+        # EXPLAIN is prepended HERE, by us, and never accepted from the caller —
+        # the guard rejects any EXPLAIN in the submitted SQL (it parses as an
+        # unrecognised Command). That is what makes this a real dry run: a
+        # caller can no longer supply `EXPLAIN ANALYZE ...`, which asks the
+        # planner to genuinely execute the query it claims to only be
+        # explaining. The old check listed EXPLAIN as an allowed leading token,
+        # so that costume worked.
         explain_sql = f"EXPLAIN {sql}"
 
         try:
@@ -235,6 +253,7 @@ class SqlRunner:
             user=user,
             password=password,
             timeout=30,
+            command_timeout=STATEMENT_TIMEOUT_SECONDS,
         )
         try:
             if params:
@@ -299,27 +318,37 @@ class SqlRunner:
             conn.close()
 
     def _check_safety(self, sql: str) -> dict:
-        clean = sql.strip().upper()
-        tokens = re.split(r"\W+", clean)
+        """Parse-tree validation. See modules/transformation/sql_guard.py for
+        what is enforced and why the keyword blocklist that used to live here
+        was removed rather than extended."""
+        verdict = sql_guard.validate(sql)
+        if not verdict.ok:
+            return {"error": verdict.error}
+        return {"ok": True, "has_root_limit": verdict.has_root_limit}
 
-        for token in tokens:
-            if token in BLOCKED_KEYWORDS:
-                return {
-                    "error": f"SQL safety check failed: blocked keyword '{token}' detected. Only SELECT queries are permitted."
-                }
+    def _inject_limit(self, sql: str, limit: int, has_root_limit: bool) -> str:
+        """Bound the row count of any query that does not bound its own.
 
-        first_token = tokens[0] if tokens else ""
-        if first_token not in ("SELECT", "WITH", "EXPLAIN"):
-            return {
-                "error": f"SQL safety check failed: query must start with SELECT or WITH, got '{first_token}'."
-            }
+        `has_root_limit` comes from the parse tree rather than from searching
+        the text for `LIMIT`, which is the whole fix: the old regex matched a
+        LIMIT anywhere, so a bounded subquery inside an unbounded outer scan
+        counted as bounded and nothing was injected.
 
-        return {"ok": True}
-
-    def _inject_limit(self, sql: str, limit: int) -> str:
-        clean = sql.rstrip().rstrip(";")
-        if re.search(r"\bLIMIT\b", clean, re.IGNORECASE):
+        The limit is still appended as text rather than by regenerating the
+        query from the parse tree. Regenerating would discard the author's
+        comments and re-quote every identifier, and `executed_sql` is returned
+        to the caller and logged — a query that comes back looking nothing
+        like what was submitted is a bad thing to hand someone debugging a
+        transformation. Appending to a root that provably has no LIMIT or
+        FETCH is valid in both dialects, including after ORDER BY and across a
+        UNION, where it correctly bounds the whole set operation.
+        """
+        if has_root_limit:
             return sql
+        clean = sql.rstrip().rstrip(";")
+        # The newline matters: a query ending in a `-- comment` would otherwise
+        # swallow the limit. transform_generator's system prompt explicitly
+        # asks the model for inline comments, so this is the normal case.
         return f"{clean}\nLIMIT {limit};"
 
     async def _load_source(self, source_id: str) -> dict:

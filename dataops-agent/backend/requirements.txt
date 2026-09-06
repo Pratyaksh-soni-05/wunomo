@@ -43,6 +43,17 @@ python-docx==1.1.2
 # ─── Database connectors ──────────────────────────────────────────────────────
 pymysql==1.1.1
 
+# ─── SQL parsing ──────────────────────────────────────────────────────────────
+# Parses user- and LLM-supplied SQL into a tree so SqlRunner's safety checks can
+# be structural instead of textual (modules/transformation/sql_guard.py). Pure
+# Python, no build step, no runtime deps of its own — it is a parser, not a
+# database driver, and never connects to anything. Load-bearing: SqlRunner
+# refuses every query if this import fails, which is the correct direction to
+# fail. Pinned exactly, because the guard depends on specific parse-tree shapes
+# (exp.DDL/exp.DML base classes, `into` on Select, Command as the fallback for
+# unrecognised syntax) and a minor bump could change any of them silently.
+sqlglot==30.18.0
+
 # ─── HTTP clients ─────────────────────────────────────────────────────────────
 httpx==0.27.2
 aiohttp==3.11.7
