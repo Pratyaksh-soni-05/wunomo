@@ -11,7 +11,7 @@ from typing import Any
 from database import AsyncSessionLocal
 from models.all_models import DataSource
 from modules.governance.audit_trail import AuditTrail
-from modules.transformation import python_guard
+from modules.transformation import python_guard, python_sandbox
 from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
@@ -27,11 +27,13 @@ def utcnow() -> datetime:
 
 MAX_ROWS_INPUT = 500_000     # max rows loaded into runner
 MAX_ROWS_OUTPUT = 100_000    # max rows in result_df
-EXECUTION_TIMEOUT_SECS = 60  # max runtime before abort
 
-# The static allowlist now lives in its own module; see python_guard.py for
-# what is rejected and why the previous one-level attribute check could not
-# see a sandbox escape.
+# The static allowlist and the execution sandbox now live in their own
+# modules. See python_guard.py for what code is rejected before it runs (and
+# why the previous check let all 14 battery payloads execute), and
+# python_sandbox.py for the process isolation and resource limits that bound
+# what still gets through.
+EXECUTION_TIMEOUT_SECS = python_sandbox.EXECUTION_TIMEOUT_SECS
 MAX_CODE_LENGTH = python_guard.MAX_CODE_LENGTH
 
 
@@ -44,19 +46,28 @@ class PythonRunner:
     """
     Executes Pandas transformation code in a restricted Python environment.
 
-    Isolation approach (in-process, not subprocess):
-      1. Static guard — rejects private attribute access anywhere in the
-         tree, the pandas/numpy I/O surface, and imports outside the
-         allowlist (python_guard.py)
-      2. Restricted exec() namespace — only safe builtins and allowed libs
-      3. Row caps on input and output DataFrames
-      4. Timeout via threading (non-blocking async wrapper)
+    Isolation approach (isolated child process):
+      1. Static guard — rejects private/dunder access anywhere in the tree,
+         the pandas/numpy I/O surface, and imports outside the allowlist
+         (python_guard.py)
+      2. Forked child process with dropped resources — memory, CPU, a
+         zero-byte file-size limit and a cleared environment
+         (python_sandbox.py)
+      3. Wall-clock timeout enforced by KILLING the child, which the previous
+         thread-based timeout could not do
+      4. Row caps on input and output DataFrames
       5. Audit trail for every execution
 
-    Note: For truly untrusted user code, deploy in a gVisor/Firecracker
-    microVM. For AXIOM's LLM-generated code (already validated by
-    TransformGenerator._validate_pandas), this in-process sandbox is
-    sufficient.
+    Note: the previous version of this docstring claimed the in-process
+    sandbox was "sufficient" for LLM-generated code. It was not: a 14-payload
+    battery executed 14 of 14 against it, recovering os, the JWT secret, the
+    admin database URL and the credential encryption key. Layers 1-3 above
+    replaced it.
+
+    The remaining caveat is real and narrower. The child shares the host's
+    filesystem and network namespace, so code that defeats layer 1 can still
+    read a world-readable file or open a socket. For genuinely untrusted code,
+    deploy in a gVisor/Firecracker microVM.
 
     All methods are tenant-isolated.
     """
@@ -241,72 +252,33 @@ class PythonRunner:
     # ------------------------------------------------------------------
 
     def _execute(self, code: str, df: pd.DataFrame) -> dict:
+        """Executes the transformation in an isolated, resource-limited child
+        process. See modules/transformation/python_sandbox.py.
+
+        The previous implementation ran the code in a daemon thread and called
+        join(timeout). That reported a timeout without stopping anything —
+        measured: the call returned at 1.01s under a 1s timeout while the
+        thread kept running. Python cannot kill a thread, so this had to
+        change mechanism rather than parameters.
         """
-        Executes code in a restricted namespace.
-        Times out after EXECUTION_TIMEOUT_SECS using threading.
-
-        Namespace includes:
-          - df (the input DataFrame)
-          - pd, np (safe data libs)
-          - Safe builtins subset
-
-        Output is read from namespace["result_df"].
-        Returns {"result_df": pd.DataFrame, "duration_ms": float} or {"error": ...}
-        """
-        import threading
-
-        safe_builtins = {
-            "len": len, "range": range, "enumerate": enumerate,
-            "zip": zip, "map": map, "filter": filter,
-            "list": list, "dict": dict, "set": set, "tuple": tuple,
-            "str": str, "int": int, "float": float, "bool": bool,
-            "min": min, "max": max, "sum": sum, "abs": abs,
-            "round": round, "sorted": sorted, "reversed": reversed,
-            "isinstance": isinstance, "type": type,
-            "print": lambda *a, **kw: None,  # suppress print output
-            "True": True, "False": False, "None": None,
-        }
-
-        namespace: dict[str, Any] = {
-            "__builtins__": safe_builtins,
-            "pd": pd,
-            "np": np,
-            "df": df.copy(),
-        }
-
-        exec_error: list[str] = []
         start = time.monotonic()
-
-        def _run():
-            try:
-                exec(compile(code, "<axiom_transform>", "exec"), namespace)
-            except Exception:
-                exec_error.append(traceback.format_exc())
-
-        thread = threading.Thread(target=_run, daemon=True)
-        thread.start()
-        thread.join(timeout=EXECUTION_TIMEOUT_SECS)
-
+        result = python_sandbox.run_sandboxed(code, df.copy(), EXECUTION_TIMEOUT_SECS)
         duration_ms = round((time.monotonic() - start) * 1000, 2)
 
-        if thread.is_alive():
-            return {
-                "error": f"Transformation timed out after {EXECUTION_TIMEOUT_SECS}s. "
-                         "Reduce data size or simplify the transformation."
-            }
+        if "error" in result:
+            detail = result.get("detail")
+            if detail:
+                # Kept out of the response on purpose: a traceback from inside
+                # the sandbox carries absolute paths, module names and local
+                # values back to whatever is iterating against it.
+                log.warning(
+                    "python_runner.sandbox_failure",
+                    tenant_id=self.tenant_id,
+                    detail=detail,
+                )
+            return {"error": result["error"]}
 
-        if exec_error:
-            return {"error": f"Transformation runtime error:\n{exec_error[0]}"}
-
-        result_df = namespace.get("result_df")
-        if result_df is None:
-            return {"error": "Transformation code did not assign output to `result_df`"}
-
-        if not isinstance(result_df, pd.DataFrame):
-            return {
-                "error": f"`result_df` must be a pandas DataFrame, "
-                         f"got {type(result_df).__name__}"
-            }
+        result_df = result["result_df"]
 
         warnings = []
         if result_df.empty:
