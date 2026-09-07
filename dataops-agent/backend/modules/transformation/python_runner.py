@@ -1,5 +1,6 @@
 import ast
 import io
+import re
 import time
 import traceback
 import structlog
@@ -35,6 +36,59 @@ MAX_ROWS_OUTPUT = 100_000    # max rows in result_df
 # what still gets through.
 EXECUTION_TIMEOUT_SECS = python_sandbox.EXECUTION_TIMEOUT_SECS
 MAX_CODE_LENGTH = python_guard.MAX_CODE_LENGTH
+
+
+# A Postgres unquoted identifier: a letter or underscore, then letters, digits,
+# underscores or dollars. Optionally schema-qualified with a single dot, which
+# is supported because `connection_config` accepts a free-form dict today and
+# an existing source may legitimately hold "public.orders".
+#
+# There is no constraint anywhere on how a source's table name is SET —
+# `POST /sources` takes `connection_config: dict` and stores it verbatim — so
+# this defines the constraint rather than mirroring one. Deliberately strict:
+# anything a real table name needs is here, and nothing that could terminate
+# an identifier, open a string, start a comment or chain a statement is.
+_TABLE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
+
+
+def _safe_table_identifier(table: str) -> str | None:
+    """Validate a table name and return it quoted, or None if it is not one.
+
+    Two layers, because they fail differently. The regex is the real defence:
+    it admits no character that could escape the identifier. The quoting is
+    what makes the result correct as well as safe — a table legitimately named
+    `order` or `select` is a reserved word and needs the quotes to be
+    addressable at all.
+
+    asyncpg ships `asyncpg.utils._quote_ident`, which would do the escaping
+    properly, but it is private (leading underscore) and this file already
+    pins enough to a specific asyncpg. Since the regex has already excluded
+    every quote character, doubling them adds nothing here, and the visible
+    idiom matches `postgres_connector.preview`, which quotes the same way.
+    """
+    if not isinstance(table, str):
+        return None
+    parts = table.strip().split(".")
+    if len(parts) > 2 or not all(_TABLE_IDENT.match(p) for p in parts):
+        return None
+    return ".".join(f'"{p}"' for p in parts)
+
+
+def _safe_row_limit(row_limit) -> int:
+    """Coerce the row limit to a bounded int.
+
+    `RunPandasRequest.row_limit` is typed `Optional[int]`, so the HTTP path is
+    already validated by pydantic — but `run_on_source` is also called
+    directly by the agent tool and by `preview()`, and a caller that is
+    correct today is not a control. Bounded rather than merely typed: the
+    value is now a bind parameter, so it cannot inject, but an unbounded one
+    could still ask the database for everything.
+    """
+    try:
+        value = int(row_limit)
+    except (TypeError, ValueError):
+        return MAX_ROWS_INPUT
+    return max(1, min(value, MAX_ROWS_INPUT))
 
 
 # ---------------------------------------------------------------------------
@@ -337,12 +391,22 @@ class PythonRunner:
                 table = config.get("table", config.get("default_table", ""))
                 if not table:
                     return {"error": "Postgres source has no 'table' specified in connection_config"}
+                # Validated BEFORE connecting: a config carrying an injection
+                # payload should never cause a database connection to be
+                # opened at all, let alone reach a query.
+                quoted_table = _safe_table_identifier(table)
+                if quoted_table is None:
+                    return {"error": "DataSource has an invalid table name in "
+                                     "connection_config"}
                 conn = await asyncpg.connect(
                     host=host, port=port, database=database,
                     user=user, password=password, timeout=30,
                 )
                 try:
-                    rows_raw = await conn.fetch(f'SELECT * FROM {table} LIMIT {row_limit}')
+                    rows_raw = await conn.fetch(
+                        f"SELECT * FROM {quoted_table} LIMIT $1",
+                        _safe_row_limit(row_limit),
+                    )
                     columns = list(rows_raw[0].keys()) if rows_raw else []
                     df = pd.DataFrame([dict(r) for r in rows_raw], columns=columns)
                 finally:
