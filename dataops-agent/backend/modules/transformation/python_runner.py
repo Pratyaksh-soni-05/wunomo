@@ -11,6 +11,7 @@ from typing import Any
 from database import AsyncSessionLocal
 from models.all_models import DataSource
 from modules.governance.audit_trail import AuditTrail
+from modules.transformation import python_guard
 from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
@@ -26,25 +27,12 @@ def utcnow() -> datetime:
 
 MAX_ROWS_INPUT = 500_000     # max rows loaded into runner
 MAX_ROWS_OUTPUT = 100_000    # max rows in result_df
-MAX_CODE_LENGTH = 32_768     # 32KB max code size
 EXECUTION_TIMEOUT_SECS = 60  # max runtime before abort
 
-# AST node types that are never allowed
-BLOCKED_AST_NODES = frozenset([
-    "Import", "ImportFrom",        # catch dynamic imports beyond whitelist
-])
-
-# Allowed import names (checked after AST validates top-level imports)
-ALLOWED_IMPORTS = frozenset(["pandas", "pd", "numpy", "np", "re", "datetime", "math"])
-
-# Dangerous built-ins and names
-BLOCKED_NAMES = frozenset([
-    "eval", "exec", "compile", "__import__", "open", "input",
-    "breakpoint", "globals", "locals", "vars", "dir",
-    "getattr", "setattr", "delattr", "hasattr",
-    "os", "sys", "subprocess", "socket", "shutil",
-    "importlib", "builtins", "pickle", "shelve",
-])
+# The static allowlist now lives in its own module; see python_guard.py for
+# what is rejected and why the previous one-level attribute check could not
+# see a sandbox escape.
+MAX_CODE_LENGTH = python_guard.MAX_CODE_LENGTH
 
 
 # ---------------------------------------------------------------------------
@@ -57,8 +45,9 @@ class PythonRunner:
     Executes Pandas transformation code in a restricted Python environment.
 
     Isolation approach (in-process, not subprocess):
-      1. AST static analysis — blocks all imports beyond whitelist,
-         all dangerous builtins, and all attribute access to blocked modules
+      1. Static guard — rejects private attribute access anywhere in the
+         tree, the pandas/numpy I/O surface, and imports outside the
+         allowlist (python_guard.py)
       2. Restricted exec() namespace — only safe builtins and allowed libs
       3. Row caps on input and output DataFrames
       4. Timeout via threading (non-blocking async wrapper)
@@ -239,62 +228,12 @@ class PythonRunner:
     # ------------------------------------------------------------------
 
     def _ast_check(self, code: str) -> dict:
-        """
-        Parses code into an AST and checks every node for violations.
-
-        Checks:
-          1. Code length
-          2. Syntax validity
-          3. No blocked AST node types (Import / ImportFrom beyond whitelist)
-          4. No blocked names (eval, exec, os, sys, etc.)
-          5. No attribute access to blocked modules (os.path, sys.argv, etc.)
-
-        Returns {"ok": True} or {"error": "..."}
-        """
-        if len(code) > MAX_CODE_LENGTH:
-            return {"error": f"Code exceeds maximum length ({MAX_CODE_LENGTH} chars)"}
-
-        try:
-            tree = ast.parse(code)
-        except SyntaxError as exc:
-            return {"error": f"Syntax error in generated code: {str(exc)}"}
-
-        for node in ast.walk(tree):
-            node_type = type(node).__name__
-
-            # Check imports
-            if node_type == "Import":
-                for alias in node.names:
-                    if alias.name.split(".")[0] not in ALLOWED_IMPORTS:
-                        return {
-                            "error": f"Blocked import: '{alias.name}'. "
-                                     f"Only {sorted(ALLOWED_IMPORTS)} are allowed."
-                        }
-
-            elif node_type == "ImportFrom":
-                module = (node.module or "").split(".")[0]
-                if module not in ALLOWED_IMPORTS:
-                    return {
-                        "error": f"Blocked import from: '{node.module}'. "
-                                 f"Only {sorted(ALLOWED_IMPORTS)} are allowed."
-                    }
-
-            # Check Name nodes (variable references)
-            elif node_type == "Name":
-                if node.id in BLOCKED_NAMES:
-                    return {
-                        "error": f"Blocked name: '{node.id}'. "
-                                 "This built-in is not permitted in transformation code."
-                    }
-
-            # Check attribute access (e.g. os.path, sys.argv)
-            elif node_type == "Attribute":
-                if isinstance(node.value, ast.Name):
-                    if node.value.id in BLOCKED_NAMES:
-                        return {
-                            "error": f"Blocked attribute access: '{node.value.id}.{node.attr}'"
-                        }
-
+        """Static validation. See modules/transformation/python_guard.py for
+        what is rejected and why the previous one-level attribute check was
+        structurally unable to see a sandbox escape."""
+        verdict = python_guard.validate(code)
+        if not verdict.ok:
+            return {"error": verdict.error}
         return {"ok": True}
 
     # ------------------------------------------------------------------
