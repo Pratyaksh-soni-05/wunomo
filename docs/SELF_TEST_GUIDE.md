@@ -25,6 +25,18 @@ through them. Honestly, all of it together runs well past 90 minutes
 (more like 2–2.5 hours) — if you're short on time, see the "fast path"
 note at the top of Section 13.
 
+**Section 15 (Wunomo Projects) is a later addition too, appended after 13/14
+rather than inserted before them** — that keeps every existing cross-reference
+in this document (`§13`, `§14`, "item N") pointing at what it always pointed
+at, instead of a wholesale renumbering. Treat it as continuing the real
+walkthrough, not as more reference material like 13/14 — it needs **Sections
+1–3 done first** (it hires agents into a project and reuses "Sales Ingestion
+Pipeline"/"Sales Orders"). It covers named agents, channels, real @mentions,
+a task that succeeds, a scope denial that can't be undone by the fix that
+caused it, a source-lock race between two agents, a rejected file type, a
+budget wall, offboarding, and a real scheduled run — the part of the product
+this guide had zero coverage of until now.
+
 ---
 
 ## 1. PRE-FLIGHT — start everything and confirm it's healthy
@@ -1456,3 +1468,525 @@ the kind of thing worth writing down.
   Governance's Audit Log tab — see Section 11's note) are all stub
   pages** — each renders a plain "this screen is a routable stub for now"
   placeholder. Reachable from the sidebar, intentionally not built yet.
+
+---
+
+## 15. WUNOMO PROJECTS — named agents, channels, and scheduled work
+
+*(~45 minutes, real AI cost throughout — see the running total after each
+step. Needs Sections 1–3 done first: this hires agents into a real project
+and reuses "Sales Ingestion Pipeline" and "Sales Orders" from there. Appended
+here as its own section rather than folded into Section 3 because it's a
+genuinely separate part of the product — named, individually-scoped agents
+working together in channels, not one shared AXIOM in a 1:1 chat.)*
+
+### Part A — A project, two named agents, a channel
+
+**15.1** **Projects** lives in the same AXIOM sidebar domain as Data
+Sources/Pipelines/Tasks (see the note in §2.2 if this is your first time
+there this session) — click **AI Employees** in the sidebar, then click
+into **AXIOM**'s card. In the sidebar that appears, click **Projects**.
+
+**What you should see:** heading **Projects**, a short description line, and
+a button **+ New Project** (top right) — or, if this is the very first
+project on this tenant, an empty state instead: heading *"No projects yet,"*
+body *"Create a project, then hire the agents it needs and scope each one to
+the sources it should touch,"* with its own **+ New Project** button.
+
+**15.2** Click **+ New Project**. In the window titled **New Project**, the
+**Name** field has placeholder text `e.g. Q3 Revenue Migration` — type:
+```
+Marketing Ops
+```
+Click **Create**.
+
+**What you should see:** a `` "Marketing Ops" created. `` toast, and you land
+directly on the new project's own page — breadcrumb link **← All Projects**
+at the top, heading **Marketing Ops**, subtitle **0 agents**, and a card
+**Agents in this project** with a **+ Hire Agent** button and the note *"No
+agents yet — agents are assigned to a project when you hire them."*
+
+**15.3** Before hiring, this section's later steps need two data sources
+that don't already belong to any agent. Open a new tab (or just navigate
+away and back) to **AI Employees → AXIOM's card → Data Sources**, and repeat
+Section 2.2's exact upload flow **twice**, reusing the same
+`sales_data.csv` file both times, once under each name:
+- **Marketing Data**
+- **Support Tickets**
+
+**What you should see:** two new rows on the Data Sources table, both type
+`csv`, status **Active**, **Last Profiled: Never** — then repeat Section
+2.3's Profile step (click the magnifying-glass **Profile** icon) on each of
+them, same as you did for Sales Orders. You now have three real CSV sources
+in this tenant: **Sales Orders**, **Marketing Data**, **Support Tickets**.
+
+**15.4** Go back to the **Marketing Ops** project page (§15.2) and click
+**+ Hire Agent**.
+
+**What you should see:** you land on **Hire an agent**, with a breadcrumb
+**← Marketing Ops** at the top (since you arrived from the project page —
+the project is pre-selected for you) and a subtitle *"Only DataOps is
+available today — the rest are shown for context, not selectable."* Above
+the form, a row of employee cards — only the DataOps one is real; the rest
+are shown greyed-out/labeled, not clickable.
+
+**15.5** In the **DataOps Engineer — details** card:
+- **Name**: clear the field and type `Nova`
+- **Project**: already shows **Marketing Ops** — leave it
+- **Data source scope**: check exactly **Marketing Data**, leave **Sales
+  Orders** and **Support Tickets** unchecked
+- **Monthly token budget (optional)**: leave blank
+
+Click **Hire**.
+
+**What you should see:** a `` Hired "Nova". `` toast, and you land back on
+the **Marketing Ops** project page, now showing **1 agent** and a card for
+**Nova** (badge **DataOps Engineer**).
+
+**15.6** Click **+ Hire Agent** again. This time:
+- **Name**: `Atlas`
+- **Project**: **Marketing Ops** (unchanged)
+- **Data source scope**: check exactly **Support Tickets**
+- **Monthly token budget (optional)**: leave blank
+
+Click **Hire**.
+
+**What you should see:** `` Hired "Atlas". ``, and the project page now
+shows **2 agents** — **Nova** and **Atlas**, each its own card. Click
+either card (or click **Agents** in the same sidebar **Projects** lives in
+— a top-level list of every agent on this tenant, regardless of project)
+and confirm on the **Data source scope** card: Nova shows **Marketing
+Data** checked, Atlas shows **Support Tickets** checked, and each has its
+own unchecked box for the other's source. This is the real scope boundary
+the rest of this section leans on — worth actually looking at once before
+moving on.
+
+**15.7** Go to **AI Employees → AXIOM's card → *(chat opens)***, same detour
+as §3.12. In the sidebar's **Channels** section, click the small **+**
+(tooltip **"New channel"** on hover, next to the **Channels** label).
+
+**15.8** In the window titled **New Channel**:
+- **Name**: `marketing-ops` (placeholder shows `e.g. pipeline-incidents`)
+- **Agents (at least one required)**: check both **Nova** and **Atlas**
+
+Click **Create**.
+
+**What you should see:** the modal closes, and a new row **# marketing-ops**
+appears under **Channels** in the sidebar, showing **2 agents**. Click it to
+open the channel.
+
+**What you should see now:** header **# marketing-ops**, a **Members**
+button next to **+ Start a Task**, status line **2 agents**, and an empty
+state: heading *"Start the conversation in #marketing-ops,"* body
+*"Multiple agents are in this channel — @mention who you're talking to."*
+The composer's placeholder reads *"@mention who you're talking to... (↵ to
+send, Shift+↵ for newline)"*.
+
+### Part B — Real replies from each, by name
+
+**15.9** In the message box, type `@` alone.
+
+**What you should see:** a small dropdown appears above the box, listing
+**@Nova** and **@Atlas** — this channel's own real members, not every agent
+in the tenant. Keep typing until it reads `@Nova`, then either click the
+**@Nova** suggestion or just keep typing your message — either way, finish
+the line as:
+```
+@Nova say hello and confirm your name.
+```
+Press **Enter** (or click **Send**).
+
+**Cost: 1 real AI call.**
+
+**What you should see:** your message appears as a plain blue bubble on the
+right. A moment later, a real reply appears on the left, under an AXIOM-style
+avatar — a genuine, real model reply confirming its name is **Nova** (its
+own configured name is baked into its system prompt, not a database lookup
+it could get wrong). This is Nova specifically that replied, not a generic
+AXIOM — the channel's @mention routing resolved to the exact member you
+named.
+
+*(Worth knowing, not something to ask it directly: an agent's own source
+scope is enforced reactively, at the moment it actually tries to touch a
+source — nothing in its prompt tells it up front "here's what you can
+reach," so asking it to describe its own scope wouldn't reliably get a
+correct answer. Part D below shows scope the honest way: by hitting it.)*
+
+**15.10** Type:
+```
+@Atlas say hello and confirm your name.
+```
+Send it.
+
+**Cost: 1 real AI call. Running total for this section: 2.**
+
+**What you should see:** a real reply confirming its name is **Atlas** — a
+different agent, a different real reply, same channel.
+
+**15.11** *(Optional, zero cost — just confirms a real rule rather than
+taking it on faith.)* Type a message with **no** `@mention` at all, e.g.
+`hello` and send it.
+
+**What you should see:** not a reply from either agent — a plain, muted,
+italicized line (visually distinct from a real agent reply, no avatar):
+*"More than one agent is in this channel — please @mention who you're
+talking to."* This is a routing failure, not a broken send — nothing was
+actually asked of either agent.
+
+### Part C — A task that succeeds
+
+**15.12** Click **+ Start a Task** (same button, top right of the channel
+header). In the text box, type exactly:
+```
+Check the health and recent run history of my Sales Ingestion Pipeline.
+```
+Leave **Task type** on **"Diagnose pipeline failure."** Click **Generate
+Plan**.
+
+**Cost: 1 real AI call (occasionally 2). Running total: 3.**
+
+**Worth knowing before you approve it:** the Tasks feature has no agent
+picker anywhere — starting a task from inside this channel doesn't route it
+to Nova or Atlas. Every task on this tenant, regardless of which chat or
+channel it was started from, runs as whichever agent is the tenant's own
+**oldest active agent** — on a fresh account, that's always **AXIOM**, the
+one agent every tenant gets automatically at signup. You'll see this matter
+directly in Part D.
+
+**15.13** Click **View progress**, review the plan (same shape as §3.17),
+click **Approve Plan**, then **Run to completion** (same as §3.21–3.22).
+
+**What you should see:** it lands on **Completed** — this goal only reads
+pipeline metadata (`list_pipelines`, `get_pipeline_run_history`), tools that
+don't touch any specific data source, so it succeeds regardless of which
+agent ran it or what that agent is scoped to.
+
+### Part D — A scope denial, and the grant that doesn't save it
+
+**15.14** Click **+ Start a Task** again. Type:
+```
+Sync my Marketing Data source and check for schema drift.
+```
+Pick task type **"Sync, profile & quality-check a source."** Click
+**Generate Plan**, then **View progress**.
+
+**Cost: 1 real AI call (occasionally 2). Running total: 4.**
+
+**15.15** Approve the plan, then **Run to completion**.
+
+**What you should see:** it runs briefly, then stops on **Paused Failed
+Step** — not the clean approval-gate pause from §3.29. A banner names the
+real step and a real, specific reason: something like *"'AXIOM' isn't
+scoped to access 'Marketing Data' — this source hasn't been assigned to
+this agent, so 'sync_source' can't run against it. An Owner or Admin can
+grant it: POST /api/v1/agents/.../sources/.... This task can't be resumed —
+start a new one once the underlying problem is fixed."* Exactly as
+explained in §15.12: this task ran as **AXIOM**, and AXIOM was never scoped
+to Marketing Data — only Nova was.
+
+Right under that banner, since you're an Owner: a real button, **Grant
+access**, pre-linked to the exact agent and source named in the message
+(not a generic link to the Agents list).
+
+**15.16** Click **Grant access**.
+
+**What you should see:** you land on **AXIOM's** own agent detail page,
+with the **Marketing Data** row visibly highlighted and an inline **← needs
+access** hint next to it. Check that box.
+
+**What you should see:** the checkbox fills in — no page reload, no toast
+(granting is a plain, quiet state change here). AXIOM is now genuinely
+scoped to Marketing Data.
+
+**15.17** Go back to the task you just ran (via **Tasks** in the sidebar, or
+your browser's back button). Look at its action buttons.
+
+**What you should see — read the banner text again if you skipped past it:**
+there are none. No **Advance one step**, no **Run to completion**, nothing.
+The fix you just made is completely real — AXIOM can now touch Marketing
+Data — but it does not resurrect this specific task. The message told you
+this plainly (*"start a new one"*), and this is that instruction's literal
+consequence, not a UI glitch. If you want to see the same goal actually
+succeed now that the scope gap is closed, use **Re-run** (§3's own note on
+this button) or start a fresh task with the identical goal — it'll run as
+AXIOM again, and this time it'll get past the step that just failed.
+
+### Part E — A source lock: two agents, one source, real contention
+
+**15.18** Grant **Atlas** access to **Marketing Data** too, so both agents
+can genuinely race for it: go to Atlas's agent detail page (click **Atlas**
+from the **Marketing Ops** project page, or from **AI Employees** if you
+navigated away) and check the **Marketing Data** box on its own **Data
+source scope** card.
+
+**15.19** Open a **second browser tab** to the same **# marketing-ops**
+channel (same login — a second regular tab is fine here, unlike §4.4's
+Incognito requirement, since both tabs are meant to share your session).
+In each tab, type a message ready to send but don't send it yet:
+- Tab 1: `@Nova sync my Marketing Data source right now.`
+- Tab 2: `@Atlas sync my Marketing Data source right now.`
+
+Send Tab 1, then switch to Tab 2 and send it as fast as you can right after.
+
+**Cost: up to 2 real AI calls (one per agent's turn). Running total: up to
+6.**
+
+**What you should see, if the timing lands:** one tab's tool call shows a
+green **Completed** badge; the other shows an amber badge, **Blocked —
+source in use**, with the note *"This call failed and won't retry
+automatically — unlike a paused task, a chat message fails fast. Try again
+in a moment once the source frees up."* This is a real Redis-backed lock,
+not a simulated one — whichever agent's sync call reaches it a moment later
+loses the race honestly.
+
+**If nothing looks blocked:** this is a genuine, honest race — a CSV sync
+finishes in well under a second, so two human hands clicking two tabs a
+beat apart can easily both land outside the collision window. That's not a
+failure of the feature, just of manual timing. A guaranteed way to force it,
+if you want to see the denial message for certain: open a terminal, get
+your JWT the same way §4.5 does (`localStorage.getItem("axiom_token")` in
+devtools), and fire two real sync calls back-to-back with no human delay
+between them:
+```
+curl -X POST "http://localhost:8000/api/v1/sources/<Marketing Data's source id>/sync" -H "Authorization: Bearer <token>" &
+curl -X POST "http://localhost:8000/api/v1/sources/<Marketing Data's source id>/sync" -H "Authorization: Bearer <token>"
+```
+(the trailing `&` on the first line backgrounds it so both fire together;
+this uses the plain sync endpoint directly, not chat, so it costs 0 AI
+calls — a cleaner way to isolate the lock itself from any LLM variability).
+One of the two JSON responses will carry `"lock_conflict": true` and the
+same "in use by ... since HH:MM" shape — worth knowing exactly what it'll
+say here: this plain endpoint calls the sync method with no agent context
+at all, and the holder-naming code has exactly one fallback for that case —
+it reads "in use by **a scheduled pipeline run** since HH:MM," not "by the
+other curl call." That's not wrong or broken, just a real label meant for a
+different caller (a background Celery job) showing up here because this
+particular path is the one caller it was never written to describe
+accurately. The chat version above, when it lands, correctly names the
+actual agent instead.
+
+### Part F — A file type the product won't register
+
+**15.20** Go to **Data Sources** and click **+ Add Source** again. Leave
+**Type** on its default (**CSV file**) — this doesn't actually matter for
+what you're about to see; the real check happens against the file itself,
+not the dropdown. Click the **File** field, and this time pick **any real
+PDF** you already have on your computer (a saved receipt, a downloaded
+document, anything — override the file browser's CSV filter if it tries to
+hide PDFs from you). Give it any **Name**, e.g. `Random PDF`. Click
+**Upload & Create**.
+
+**What you should see:** not a success message — a red toast with the exact
+real backend text: *"pdf has no working connector yet — its text can be
+extracted (see ingest_file), but there's no destination data model to sync
+or profile it into. Registering it as a source would succeed now and only
+fail later, the first time anything tries to sync or profile it."* No row
+is added to the table. This is a real, deliberate rejection, not a crash —
+the product knows exactly why it's saying no.
+
+### Part G — Per-agent budget exhaustion
+
+**15.21** This needs a disposable agent with a deliberately tiny budget —
+Nova and Atlas already had at least one real, successful reply each (§15.9–
+15.10), and there's no way to edit an existing agent's budget after hiring,
+so reusing either would just make this step's outcome ambiguous (did it fail
+because of budget, or something else?). From the **Marketing Ops** project
+page, click **+ Hire Agent** once more:
+- **Name**: `Budget Test`
+- **Project**: **Marketing Ops**
+- **Data source scope**: leave every box unchecked — irrelevant to this test
+- **Monthly token budget (optional)**: type `1`
+
+Click **Hire**.
+
+**15.22** Create one more channel (§15.7–15.8's exact flow) named
+`budget-test`, with only **Budget Test** checked as its member. Open it and
+send any message, e.g. `hello`.
+
+**Cost: 0 real AI calls — this is denied before any model is ever called.
+Running total unaffected.**
+
+**What you should see:** not a reply — a red inline line above the composer
+and a matching toast: *"This agent's own monthly token budget (0/1 tokens)
+is exhausted."* with an action button **Go to agent**, linking straight to
+**Budget Test**'s own detail page. Click it — the **Token budget** card
+shows a full (or near-full) red progress bar, real numbers, not a
+placeholder. **1 token** is far below what a single real turn ever costs,
+so this fires on literally the first message, deterministically — nothing
+flaky about this one, unlike Part E's timing.
+
+### Part H — Offboarding
+
+**15.23** On **Atlas's** agent detail page, scroll to the **Danger zone**
+card. Read its text: *"Offboarding removes this agent from every channel
+it's in and stops it from answering chat, channel, or task work. Its
+history and source scope are kept. This can't be undone from this
+screen."* Click **Offboard agent**.
+
+**15.24** In the modal titled **Offboard this agent?**, read the body text
+(names Atlas specifically, repeats the same consequences, adds: *"If Atlas
+has a task still in progress, offboarding will be blocked until it's
+resolved."*). Click **Offboard**.
+
+**What you should see:** a `` "Atlas" has been offboarded. `` toast, and you
+land back on **Agents**, where Atlas now shows badge **Offboarded** instead
+of **Active**. Click into Atlas again — a plain notice replaces the Danger
+Zone card: *"This agent has been offboarded — it can no longer be reached
+from chat, channels, or new tasks. Its history and source scope are
+preserved."* Go back to **# marketing-ops** — Atlas no longer appears in
+the channel's member count, and `@Atlas` no longer resolves to anything (it
+would now read as "doesn't match any agent," the same as a typo, since an
+offboarded agent isn't an active tenant member anymore).
+
+### Part I — A schedule that fires on its own, no click required
+
+**Backend only — this feature has no UI yet, same shape as §4.5's two
+no-permission-check endpoints.** There is a real, working per-agent
+scheduler (fixed tool call, cron-based, no AI cost per firing at all — it
+never calls `generate_plan()`), but nothing in the product lets you create
+or view one by clicking anything. This is the one part of this section you
+drive from a terminal, not the browser.
+
+**15.25** Open devtools (F12) → **Console**, same as §4.5's own step 2, and run:
+```
+localStorage.getItem("axiom_token")
+```
+Copy the string it returns — every command below reuses this same token.
+
+**15.26** Neither Nova's agent id nor Marketing Data's source id is printed
+anywhere in the UI itself, so pull both from the real API directly. In a
+terminal:
+```
+curl http://localhost:8000/api/v1/agents/ -H "Authorization: Bearer <paste your token here>"
+```
+**What you should see:** real JSON, `{"agents": [...]}` — find the entry
+where `"name": "Nova"` and copy its `"id"`. Then:
+```
+curl http://localhost:8000/api/v1/sources/ -H "Authorization: Bearer <paste your token here>"
+```
+**What you should see:** `{"sources": [...], "count": N}` — find the entry
+where `"name": "Marketing Data"` and copy its `"id"` too.
+
+**15.27** In a terminal:
+```
+curl -X POST http://localhost:8000/api/v1/agents/<Nova's agent id>/schedules \
+  -H "Authorization: Bearer <paste your token here>" \
+  -H "Content-Type: application/json" \
+  -d "{\"task_shape\": \"sync_profile_quality\", \"description\": \"Sync Marketing Data every minute\", \"tool_name\": \"sync_source\", \"tool_args\": {\"source_id\": \"<Marketing Data's source id>\"}, \"schedule_cron\": \"* * * * *\"}"
+```
+
+**What you should see:** a real `200` JSON response — the new schedule's
+own id, `"active": true`, `"deactivation_reason": null`, and your real
+cron string echoed back.
+
+**15.28** Wait about a minute — this runs on a real 60-second beat tick, not
+on demand — then click **Tasks** in the sidebar.
+
+**What you should see:** a new task in the list you didn't click "Start a
+Task" for, goal **"Sync Marketing Data every minute,"** owned by you,
+running as **Nova** (not AXIOM — a schedule's owner is whoever created it,
+and the agent is whichever one you named in the curl body; unlike the Tasks
+feature's own "oldest active agent" default from Part C, a schedule always
+runs the exact agent you configured it for). Wait another minute and
+refresh — you should **not** see a second identical task appear yet if the
+first one is still sitting in a non-terminal status (**Queued**, waiting on
+the auto-advance tick, or further along) — a schedule skips its own next
+firing while a previous run from it hasn't finished, on purpose, so a daily
+schedule can't stack up several pending decisions before you've dealt with
+the first one.
+
+**If you want it to stop firing every minute:** there's no delete button
+anywhere in the UI for this yet either — leave it running (it's harmless
+and cheap, real DB rows only) or delete it directly:
+```
+curl -X DELETE http://localhost:8000/api/v1/agents/<Nova's agent id>/schedules/<the schedule id from 15.27's response> \
+  -H "Authorization: Bearer <paste your token here>"
+```
+
+### Part J — The rail, showing everything you just did
+
+**15.29** Look at the topbar, between the search bar and the **AXIOM
+Online** status — a small button reading **N active** (a calendar-ish icon
+next to it). By now, **N** should be a real, non-zero number reflecting:
+the schedule-created task from Part I (if still non-terminal), and possibly
+others depending on timing. Click it.
+
+**What you should see:** a panel titled **Active Tasks**, with a badge in
+the header reading **N need you** if anything in the list needs a decision.
+Rows are sorted with the most urgent first, not creation order. If Part D's
+scope-denied task is still sitting there (it will be — it can never leave
+**Paused Failed Step** on its own, per §15.17), it's one of the top rows,
+shown with **Nova** or **AXIOM**'s name, a **Blocked — out of scope**-style
+status, and, in bold beneath it, the exact same short instruction the task
+detail page gave you: *"Can't be resumed — start a new task."* Rows further
+down (an in-progress schedule-created task, still auto-advancing on its
+own) show their current step instead, with no action text — nothing is
+asked of you for those, they're moving on their own. At the bottom, a link:
+**View all tasks**, taking you to the full **Tasks** list (§3.23).
+
+**15.30** If you're still in the **# marketing-ops** channel from earlier,
+look at its own right-hand sidebar (the **Tool Calls This Session** panel).
+Above it: a section titled **Active Tasks In This Conversation** — the same
+underlying data as §15.29's topbar panel, filtered down to just the tasks
+that trace back to *this* conversation's `originating_session_id`. If you
+started any task from inside this channel (Parts C/D did), it shows up
+here too; the schedule-created task from Part I does **not** (it has no
+originating session — it came from a curl call, not a chat turn), which is
+the correct, honest distinction, not a bug.
+
+You've now seen this feature's whole real shape: named agents with real,
+independent scope; a channel routing @mentions to the right one; a task
+that runs as whichever agent is actually "oldest," not whichever you were
+just talking to; a scope gap that's fixable going forward but not
+retroactively; a real lock two agents can genuinely collide on; a file type
+the product knows it can't use; a hard budget wall; a clean offboarding;
+and a schedule that keeps running with nobody watching it, correctly
+surfaced in one place when you come back.
+
+### Known issues — Wunomo Projects
+
+Same rule as Section 14: these are already known, confirmed by reading the
+real source, not guessed. Don't report them fresh if you notice them here.
+
+- **A task denied on scope is permanently dead, even after the exact grant
+  its own error message asked for** — you saw this directly in §15.17.
+  `PAUSED_FAILED_STEP` has no resume path anywhere in the code, for any of
+  its causes; the fix genuinely takes effect (the agent really is scoped
+  now), but only a brand-new task benefits from it. **Ranked high** in this
+  build's own findings list — of every reachable dead end found so far,
+  it's the one that survives being "fixed."
+- **An agent addressed in a channel sees the full text of every message it's
+  allowed to see, never a redacted version** — the real filtering rule
+  (`load_agent_channel_context()`) decides *which* messages an agent's
+  context includes (only ones it authored or was mentioned in), but any
+  message that passes that filter is included in full, including tool call
+  arguments that might name a source outside that agent's own scope. If you
+  ever put something in a shared channel you wouldn't want a specific
+  agent's own model context to see verbatim, mentioning that agent later in
+  the same thread doesn't protect it.
+- **The Tasks feature has no agent picker, ever** — confirmed directly in
+  Part C/D above. Every task, from any chat or channel, runs as the
+  tenant's own oldest active agent (always AXIOM on a fresh signup, since
+  it's auto-created before you can hire anyone else). If you want a
+  specific named agent to run something, that only works through chat
+  (a direct message or an @mention), never through "Start a Task."
+- **An existing agent's monthly token budget can't be edited or removed
+  after hiring** — confirmed directly in Part G above (no PATCH endpoint
+  exists). The only way to change it is offboard and re-hire under a new
+  name, or hire a fresh disposable agent for a specific test, as this
+  section itself had to do.
+- **Section 3 Part D's original "Paused Needs Approval" walkthrough may no
+  longer reproduce exactly as written on a brand-new signup.** That section
+  predates this build's scope-enforcement system; a fresh tenant's AXIOM
+  starts scoped to nothing (confirmed: the only place an `AgentSource` row
+  is ever created is a manual grant or a checkbox at hire time — nothing
+  auto-grants a newly-created source to any existing agent). Running
+  Section 3's own "sync/profile/quality-check Sales Orders" task today may
+  hit the same scope denial this section's Part D deliberately demonstrates,
+  before ever reaching the approval-gate pause Section 3 describes. Not
+  fixed here — flagged so it doesn't read as a new discovery if you notice
+  the mismatch running through Section 3 fresh.
+- **There is no "delete schedule" or "list my schedules" button anywhere in
+  the UI** — Part I's curl commands are the only way to create, inspect, or
+  remove one today; a schedule-management screen is real, tracked future
+  work, not an oversight this guide is the first to notice.
