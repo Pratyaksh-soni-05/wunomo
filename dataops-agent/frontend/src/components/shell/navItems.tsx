@@ -61,6 +61,42 @@ export const NAV_SECTIONS: NavSection[] = [
           </>
         ),
       },
+      {
+        // Moved out of AXIOM's own domain (was here alongside AXIOM/Tasks
+        // below, both domain: "axiom") on explicit instruction: a project
+        // groups agents of ANY type, so nesting it behind one specific
+        // employee's own sidebar was backwards -- it implied Projects was
+        // an AXIOM feature, not a tenant-wide one. Lives in Workspace,
+        // next to AI Employees (the hiring entry point), not under Data or
+        // Admin -- a project's whole job is grouping the agents doing the
+        // work, not the data itself.
+        slug: "projects",
+        label: "Projects",
+        domain: "workspace",
+        icon: icon(
+          <>
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </>
+        ),
+      },
+      {
+        // Same move, same reasoning as Projects above -- a hired agent
+        // doesn't always belong to a project (project is optional at hire
+        // time) and isn't always AXIOM, so it needs a tenant-wide home,
+        // not a spot inside one employee's own domain (finding 75 -- an
+        // unassigned agent previously had no screen to be found on at all).
+        slug: "agents",
+        label: "Agents",
+        domain: "workspace",
+        icon: icon(
+          <>
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+          </>
+        ),
+      },
     ],
   },
   {
@@ -68,7 +104,9 @@ export const NAV_SECTIONS: NavSection[] = [
     // this is AXIOM's own domain (2026-08 IA restructure), only ever shown
     // by the AXIOM-mode sidebar (see AXIOM_NAV_SECTIONS below), where the
     // back-link header already establishes the context. A visible "AXIOM"
-    // label here would be redundant with that header.
+    // label here would be redundant with that header. Projects/Agents used
+    // to live here too -- moved to the Workspace section above, since
+    // neither is actually an AXIOM-specific concept (see their own comments).
     label: null,
     items: [
       {
@@ -90,37 +128,6 @@ export const NAV_SECTIONS: NavSection[] = [
             <line x1="8" y1="2" x2="8" y2="6" />
             <line x1="3" y1="10" x2="21" y2="10" />
             <path d="m9 16 2 2 4-4" />
-          </>
-        ),
-      },
-      {
-        // Wunomo Projects Phase 1, part two -- lives alongside AXIOM/Tasks,
-        // not under Data or Admin, since a project's whole job is grouping
-        // the agents doing the work, not the data itself.
-        slug: "projects",
-        label: "Projects",
-        domain: "axiom",
-        icon: icon(
-          <>
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-          </>
-        ),
-      },
-      {
-        // Slice 4: a hired agent doesn't always belong to a project (see
-        // GOTCHAS.md -- project is optional at hire time), so it needs a
-        // top-level home of its own, not just a link buried inside each
-        // project's page (finding 75 -- an unassigned agent previously had
-        // no screen to be found on at all).
-        slug: "agents",
-        label: "Agents",
-        domain: "axiom",
-        icon: icon(
-          <>
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
           </>
         ),
       },
@@ -354,9 +361,14 @@ export const AXIOM_NAV_SECTIONS: NavSection[] = sectionsForDomain("axiom");
  * on its own item) - CI/CD deployment approvals are webhook-driven, not
  * AXIOM-initiated, and burying them behind an AI employee would make them
  * unreachable for their main use case.
+ *
+ * /projects and /agents removed (Wunomo Projects Phase 4) -- moved to
+ * domain: "workspace" above, same reasoning: neither is AXIOM-specific.
+ * Prefix match means their own sub-routes (/projects/[id], /agents/hire,
+ * /agents/[id]) move with them automatically, no separate entry needed.
  */
 const AXIOM_DOMAIN_PREFIXES = [
-  "/chat", "/tasks", "/projects", "/agents", "/sources", "/catalog", "/pipelines", "/transforms",
+  "/chat", "/tasks", "/sources", "/catalog", "/pipelines", "/transforms",
   "/quality", "/incidents", "/governance", "/automations", "/cicd",
 ];
 
