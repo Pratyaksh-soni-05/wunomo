@@ -71,14 +71,17 @@ export default function HireAgentPage() {
       </div>
 
       <div style={{ padding: "20px 24px" }}>
-        <div className="grid grid-3" style={{ gap: 16, marginBottom: 20 }}>
+        <div className="text-muted text-xs" style={{ textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, fontWeight: 600 }}>
+          Employee types — reference only, not clickable
+        </div>
+        <div className="grid grid-3" style={{ gap: 16, marginBottom: 24 }}>
           {EMPLOYEES.map((e) => (
-            <EmployeeCard key={e.id} employee={e} />
+            <EmployeeCard key={e.id} employee={e} interactive={false} />
           ))}
         </div>
 
-        <Card>
-          <CardHeader><span className="font-medium text-sm">DataOps Engineer — details</span></CardHeader>
+        <Card style={{ borderLeft: "3px solid var(--accent-fill)" }}>
+          <CardHeader><span className="font-medium text-sm">Hire a DataOps Engineer — fill this in</span></CardHeader>
           <CardBody className="flex flex-col gap-4">
             <Input
               id="agent-name" label="Name" value={name} onChange={(e) => setName(e.target.value)}
