@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 
-from .auth import require_permission
+from .auth import get_current_user, require_permission
 from database import AsyncSessionLocal
 from models.all_models import (
     AgentEmployeeType, AgentInstance, AgentInstanceStatus, AgentSource, ChannelAgent,
@@ -561,6 +561,51 @@ async def hire_agent(body: AgentHire, user=Depends(require_permission("agents.ma
         "monthly_token_budget": agent.monthly_token_budget,
         "status": agent.status.value,
     }
+
+
+@router.get("/selectable")
+async def list_selectable_agents(user=Depends(get_current_user)):
+    """Any authenticated tenant member, not agents.manage -- deliberately
+    lighter than GET / below. The module docstring's reasoning for the
+    agents.manage gate is about EDITING (which sources an agent can reach,
+    hiring a new one) being a permission-boundary/org-structural action;
+    reading who exists, to pick one for a task or a channel, isn't that --
+    anyone can already start a task or create a channel with no capability
+    gate at all, so gating the picker that populates those actions more
+    strictly than the actions themselves is a mismatch, not a deliberate
+    boundary. Confirmed live (Wunomo Projects Phase 4): a data_analyst
+    calling GET / gets a real 403, which meant the channel-creation
+    modal's own agent picker (chat/page.tsx's agentsQuery) has been coming
+    up empty for every non-Owner/Admin role since channels shipped --
+    fixed here by repointing that query at this endpoint instead of
+    loosening GET /'s own gate. Excludes monthly_token_budget (stays
+    behind agents.manage) and OFFBOARDED agents (picking one to run new
+    work makes no sense). Sources are included, not just a count -- two
+    bulk queries total (agents, then one AgentSource+DataSource join
+    batched by agent_id IN (...)), not one per agent, same no-N+1 shape as
+    the task rail's own list_active_tasks()."""
+    tenant_id = user["tenant_id"]
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(AgentInstance).where(
+            AgentInstance.tenant_id == tenant_id, AgentInstance.status == AgentInstanceStatus.ACTIVE,
+        ).order_by(AgentInstance.created_at.asc()))
+        agents = r.scalars().all()
+        agent_ids = [a.id for a in agents]
+
+        sources_by_agent: dict[str, list[dict]] = {aid: [] for aid in agent_ids}
+        if agent_ids:
+            r = await db.execute(
+                select(AgentSource.agent_id, DataSource.id, DataSource.name)
+                .join(DataSource, DataSource.id == AgentSource.source_id)
+                .where(AgentSource.agent_id.in_(agent_ids))
+            )
+            for agent_id, source_id, source_name in r.all():
+                sources_by_agent[agent_id].append({"id": source_id, "name": source_name})
+
+    return {"agents": [
+        {"id": a.id, "name": a.name, "sources": sources_by_agent[a.id]}
+        for a in agents
+    ]}
 
 
 @router.get("/")

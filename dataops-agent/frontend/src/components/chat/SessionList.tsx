@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Badge, Button, Input, Modal, Skeleton } from "@/components/ui";
-import type { AgentListItem, ChannelItem, ChatSessionSummary } from "@/lib/api";
+import type { SelectableAgent, ChannelItem, ChatSessionSummary } from "@/lib/api";
 import { useSavedPrompts } from "./useSavedPrompts";
 import { parseApiDate } from "@/lib/dates";
 
@@ -38,7 +38,7 @@ export function SessionList({
   loading: boolean;
   channels: ChannelItem[];
   channelsLoading: boolean;
-  availableAgents: AgentListItem[];
+  availableAgents: SelectableAgent[];
   activeSessionId: string | null;
   onSelectSession: (id: string) => void;
   onNewChat: () => void;

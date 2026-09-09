@@ -654,26 +654,55 @@ Some actions are riskier than just *looking at* things — syncing a real
 data source, for example. AXIOM is required to pause and ask a human
 before doing those, no matter what. Let's trigger that on purpose.
 
-**3.24** Go back to **AXIOM** in the sidebar, click **+ Start a Task**
+**Correction, 2026-09-09 (confirmed live): this Part previously ended at what
+is now step 3.32 with a clean success, and didn't have step 3.24 below at
+all.** That was accurate when written, before this build's per-agent
+source-scope system existed. Today, every agent — including AXIOM, the one
+agent every tenant gets automatically at signup — starts scoped to
+**nothing**, on purpose (a newly-created agent shouldn't reach data nobody
+explicitly gave it), and nothing auto-grants a newly-created source to any
+existing agent. Reproduced directly: on a brand-new signup, skipping the
+step below and going straight to what used to be 3.24 no longer ends in a
+clean success at 3.32 — it ends on **Paused Failed Step**, permanently, the
+moment you approve the one risky step this Part is about. Step 3.24 below
+is the fix, added so this Part still demonstrates what it's named for (a
+real approval gate, then a real, successful resume) instead of the
+different lesson (a scope denial you can't undo) Section 15 already covers
+on purpose.
+
+**3.24** Before AXIOM can actually touch a real data source, it needs to be
+scoped to it. In the sidebar, click **Agents** (same AXIOM domain as Data
+Sources/Pipelines/Tasks — see the note in §2.2 if this is your first time
+there this session), then click into **AXIOM**'s own card.
+
+**What you should see:** AXIOM's own agent detail page, with a **Data
+source scope** card listing every source in this tenant — **Sales
+Orders** among them, unchecked. Check that box.
+
+**What you should see:** the checkbox fills in immediately — no toast, no
+page reload, just a quiet state change. AXIOM can now actually reach Sales
+Orders.
+
+**3.25** Go back to **AXIOM** in the sidebar, click **+ Start a Task**
 again.
 
-**3.25** In the text box, type:
+**3.26** In the text box, type:
 ```
 Sync and profile my Sales Orders source, then run quality checks on it.
 ```
 
-**3.26** Open the **Task type** dropdown and pick **"Sync, profile &
+**3.27** Open the **Task type** dropdown and pick **"Sync, profile &
 quality-check a source."**
 
-**3.27** Click **Generate Plan**, then click **View progress** on the new
+**3.28** Click **Generate Plan**, then click **View progress** on the new
 chat card, same as before.
 
 **Cost: 1 real AI call** (occasionally 2, same rule as 3.16).
 
-**3.28** Review the plan (same as 3.17 — no need to edit this one), then
+**3.29** Review the plan (same as 3.17 — no need to edit this one), then
 click **Approve Plan**.
 
-**3.29** Click **Run to completion**.
+**3.30** Click **Run to completion**.
 
 **What you should see:** it runs for a moment, then **stops itself** with
 a new status badge: **Paused Needs Approval**. A banner explains exactly
@@ -692,22 +721,27 @@ full; this is the one point in the guide where it'll actually have
 something real in it without you having to manufacture a second approval
 just to see it populated.)*
 
-**3.30** Click **Approve & Resume**.
+**3.31** Click **Approve & Resume**.
 
 **What you should see:** a "Step approved — resuming." message. The
 status flips back to **Running**, and the step's row in the timeline now
 shows **succeeded** with a real outcome (e.g. real row counts from the
 sync). The **Advance one step** / **Run to completion** buttons come back.
+**If it instead lands on Paused Failed Step with a scope-denial banner**,
+step 3.24 above was skipped or undone — go do it now, then start a fresh
+task from 3.25 (per finding 76, this exact task can't be resumed once it's
+hit that state; see Section 15 Part D if you want to see that dead end on
+purpose instead of by accident).
 
 ![After approving — the step ran for real and succeeded](self_test_assets/07-after-approve-and-resume.png)
 
-**3.31** Click **Run to completion** again.
+**3.32** Click **Run to completion** again.
 
 **What you should see:** this plan has more than one step that needs
 approval (`sync_source`, `profile_schema`, and `run_quality_checks` are
 all in this "riskier" category) — so it will likely **pause again**,
 asking for approval a second (or third) time. That's expected, not a
-bug. **Repeat step 3.30** (click **Approve & Resume**) each time it
+bug. **Repeat step 3.31** (click **Approve & Resume**) each time it
 pauses, until it reaches a final state (Completed, Completed With
 Unconfirmed Steps, or Paused Failed Step). Every pause is real — you're
 approving one genuinely new action each time, not clicking through the
@@ -717,9 +751,9 @@ You've now seen the entire arc the Tasks feature is built around: a real
 plan, a human edit, approval, real execution, a real safety stop, and a
 real resume.
 
-**3.32** *(Optional — seeing the other half of an approval decision.)*
+**3.33** *(Optional — seeing the other half of an approval decision.)*
 Everything above showed you **Approve & Resume**. To see its sibling:
-start one more small task (repeat 3.24–3.28 with the same
+start one more small task (repeat 3.25–3.29 with the same
 "Sync, profile & quality-check" goal/type — this costs one more AI call,
 see Section 5), and when it pauses on **Paused Needs Approval** this time,
 type anything into the optional notes field (e.g. `Not needed right now`)
@@ -728,7 +762,7 @@ and click **Reject Step** instead of Approve & Resume.
 **What you should see:** the step is marked rejected with your notes
 attached, and the task does not proceed past that point — it does not
 silently continue as if nothing happened. This is the deliberate opposite
-of 3.30: a real "no," not just a real "yes."
+of 3.31: a real "no," not just a real "yes."
 
 ---
 
@@ -921,9 +955,9 @@ actually did:
 | Where | What | Cost |
 |---|---|---|
 | §3.16 | Generate Plan — diagnose pipeline failure | 1 (rarely 2) |
-| §3.22/3.31 | Any step that hits a real domain error during execution | +1 per such step (capped, not guaranteed) |
-| §3.26 | Generate Plan — sync/profile/quality | 1 (rarely 2) |
-| §3.32 *(optional)* | Generate Plan — second sync/profile/quality task, for the Reject Step test | 1 (rarely 2) |
+| §3.22/3.32 | Any step that hits a real domain error during execution | +1 per such step (capped, not guaranteed) |
+| §3.28 | Generate Plan — sync/profile/quality | 1 (rarely 2) |
+| §3.33 *(optional)* | Generate Plan — second sync/profile/quality task, for the Reject Step test | 1 (rarely 2) |
 | §4.1 *(optional)* | Generate Plan — vague goal test | 1 (rarely 2) |
 | §4.4 | Generate Plan — as the Viewer | 1 (rarely 2) |
 | §8.2 | Transforms: Generate (NL tab) | 1 |
@@ -1263,7 +1297,7 @@ testing the CRUD lifecycle, not a real credential.
 ## 10. APPROVALS — as its own screen, not just the inline card
 
 *(~4 minutes. Click* **Approvals** *in the sidebar. If you did the
-optional aside at §3.29, you may already have seen this screen with a
+optional aside at §3.30, you may already have seen this screen with a
 real pending item on it — this section documents it either way.)*
 
 This screen is deliberately simple: a title, a table, no filters, no
@@ -1283,7 +1317,7 @@ Reject buttons, even though they dispatch to different underlying
 endpoints. Functionally fine, just worth knowing they're not the same
 kind of thing under the hood.
 
-**Empty state** (the likely state unless you timed §3.29's aside):
+**Empty state** (the likely state unless you timed §3.30's aside):
 heading *"Nothing pending approval,"* body *"Agent actions and CI/CD
 deployments that need a human sign-off will show up here."*
 
@@ -1675,7 +1709,7 @@ Pick task type **"Sync, profile & quality-check a source."** Click
 **15.15** Approve the plan, then **Run to completion**.
 
 **What you should see:** it runs briefly, then stops on **Paused Failed
-Step** — not the clean approval-gate pause from §3.29. A banner names the
+Step** — not the clean approval-gate pause from §3.30. A banner names the
 real step and a real, specific reason: something like *"'AXIOM' isn't
 scoped to access 'Marketing Data' — this source hasn't been assigned to
 this agent, so 'sync_source' can't run against it. An Owner or Admin can
@@ -1975,17 +2009,15 @@ real source, not guessed. Don't report them fresh if you notice them here.
   exists). The only way to change it is offboard and re-hire under a new
   name, or hire a fresh disposable agent for a specific test, as this
   section itself had to do.
-- **Section 3 Part D's original "Paused Needs Approval" walkthrough may no
-  longer reproduce exactly as written on a brand-new signup.** That section
-  predates this build's scope-enforcement system; a fresh tenant's AXIOM
-  starts scoped to nothing (confirmed: the only place an `AgentSource` row
-  is ever created is a manual grant or a checkbox at hire time — nothing
-  auto-grants a newly-created source to any existing agent). Running
-  Section 3's own "sync/profile/quality-check Sales Orders" task today may
-  hit the same scope denial this section's Part D deliberately demonstrates,
-  before ever reaching the approval-gate pause Section 3 describes. Not
-  fixed here — flagged so it doesn't read as a new discovery if you notice
-  the mismatch running through Section 3 fresh.
+- **Section 3 Part D needed a real fix, not just a flag — done, 2026-09-09.**
+  That section predates this build's scope-enforcement system; a fresh
+  tenant's AXIOM starts scoped to nothing, and running its original
+  "sync/profile/quality-check Sales Orders" task on a brand-new signup was
+  confirmed live to hit a scope denial on approval and die permanently,
+  never reaching the clean success the walkthrough described. Section 3
+  now has a real step 3.24 granting AXIOM access to Sales Orders before
+  that task ever runs, which restores the original arc; the correction
+  note at the top of Section 3 Part D explains why it's there.
 - **There is no "delete schedule" or "list my schedules" button anywhere in
   the UI** — Part I's curl commands are the only way to create, inspect, or
   remove one today; a schedule-management screen is real, tracked future

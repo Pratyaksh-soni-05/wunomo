@@ -1282,7 +1282,13 @@ export function getTask(token: string, id: string): Promise<TaskItem> {
 
 export function createTask(
   token: string,
-  params: { goal: string; task_shape: TaskShapeValue; originating_session_id?: string }
+  params: {
+    goal: string; task_shape: TaskShapeValue; originating_session_id?: string;
+    // Wunomo Projects Phase 4: omitted keeps the backend's own "oldest
+    // active agent" fallback (unchanged default) -- provided, it's who
+    // actually runs this task, not just who you were talking to.
+    agent_id?: string;
+  }
 ): Promise<TaskItem> {
   return request("/api/v1/tasks/", {
     method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
@@ -1406,6 +1412,21 @@ export interface AgentQuota {
 
 export function listAgents(token: string): Promise<{ agents: AgentListItem[] }> {
   return authedRequest("/api/v1/agents/", token);
+}
+
+// Wunomo Projects Phase 4: any authenticated tenant member, not
+// agents.manage -- for populating an agent picker (task creation, channel
+// creation), not editing scope/hiring. ACTIVE agents only, with their real
+// source scope (not just a count) so a picker can show what each one can
+// actually reach, not just its name.
+export interface SelectableAgent {
+  id: string;
+  name: string;
+  sources: { id: string; name: string }[];
+}
+
+export function listSelectableAgents(token: string): Promise<{ agents: SelectableAgent[] }> {
+  return authedRequest("/api/v1/agents/selectable", token);
 }
 
 export function getAgentSources(token: string, agentId: string): Promise<{ agent_id: string; sources: { id: string; name: string }[] }> {

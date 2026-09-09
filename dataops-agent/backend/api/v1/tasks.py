@@ -48,6 +48,13 @@ class CreateTaskRequest(BaseModel):
     # Optional because "+ New Task" on the bare Tasks list genuinely has
     # no session to attribute.
     originating_session_id: Optional[str] = None
+    # Explicit agent selection (Wunomo Projects Phase 4): omitted keeps the
+    # exact pre-existing "oldest active agent" fallback below, so every
+    # caller that predates this field keeps working identically. Provided,
+    # it's validated fresh against this tenant's real, ACTIVE agents --
+    # never trusted blindly, same as every other caller-supplied id in
+    # this codebase.
+    agent_id: Optional[str] = None
 
 
 class StepInput(BaseModel):
@@ -541,15 +548,33 @@ async def create_task(body: CreateTaskRequest, current_user: dict = Depends(enfo
     # authorized, the pre-_call_tool() check) is also keyed off this
     # same agent_id on the persisted Task row below -- without either,
     # every task keeps agent_id=None and both stay permanently inert.
-    # Same "oldest ACTIVE agent for the tenant" convention chat.py's own
-    # resolution uses, for the same reason: exactly one agent exists per
-    # tenant until Phase 1's hiring ships.
+    #
+    # Wunomo Projects Phase 4: body.agent_id, when the caller supplies one,
+    # is who actually runs this task -- the "oldest ACTIVE agent" fallback
+    # below now only fires when it's omitted. That fallback made sense when
+    # written (exactly one agent existed per tenant, pre-Phase-0 hiring);
+    # kept as the default for every caller that doesn't think about agent
+    # selection, but no longer the only option now that a tenant can have
+    # several named, differently-scoped agents -- see finding 76's own
+    # lesson: picking the wrong one here is a scope denial that kills this
+    # task permanently, not something to leave to chance.
     async with AsyncSessionLocal() as agent_db:
-        r = await agent_db.execute(select(AgentInstance).where(
-            AgentInstance.tenant_id == tenant_id, AgentInstance.status == AgentInstanceStatus.ACTIVE,
-        ).order_by(AgentInstance.created_at.asc()).limit(1))
-        agent_row = r.scalar_one_or_none()
-    agent_id = agent_row.id if agent_row is not None else None
+        if body.agent_id is not None:
+            r = await agent_db.execute(select(AgentInstance).where(
+                AgentInstance.id == body.agent_id, AgentInstance.tenant_id == tenant_id,
+            ))
+            chosen = r.scalar_one_or_none()
+            if chosen is None:
+                raise HTTPException(status_code=404, detail="Agent not found.")
+            if chosen.status != AgentInstanceStatus.ACTIVE:
+                raise HTTPException(status_code=409, detail=f"'{chosen.name}' has been offboarded and can't run a new task.")
+            agent_id = chosen.id
+        else:
+            r = await agent_db.execute(select(AgentInstance).where(
+                AgentInstance.tenant_id == tenant_id, AgentInstance.status == AgentInstanceStatus.ACTIVE,
+            ).order_by(AgentInstance.created_at.asc()).limit(1))
+            agent_row = r.scalar_one_or_none()
+            agent_id = agent_row.id if agent_row is not None else None
 
     # Gate 2 of the two-gate token-budget path (Wunomo Projects Phase 1,
     # part two) - before the real planning LLM call, same reasoning as

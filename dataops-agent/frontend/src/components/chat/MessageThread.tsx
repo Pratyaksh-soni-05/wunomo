@@ -6,7 +6,7 @@ import { Card, Button, Modal, Select } from "@/components/ui";
 import { ToolCallBlock } from "./ToolCallBlock";
 import type { LocalChatMessage } from "./types";
 import type {
-  AgentListItem, ChannelItem, ChannelMemberAgent, ChannelMemberUser, ChatContext, TeamMember,
+  SelectableAgent, ChannelItem, ChannelMemberAgent, ChannelMemberUser, ChatContext, TeamMember,
 } from "@/lib/api";
 
 const QUICK_PROMPTS = [
@@ -87,7 +87,7 @@ export function MessageThread({
   channel?: ChannelItem | null;
   channelAgents?: ChannelMemberAgent[];
   channelUsers?: ChannelMemberUser[];
-  availableAgents?: AgentListItem[];
+  availableAgents?: SelectableAgent[];
   availablePeople?: TeamMember[];
   currentUserId?: string | null;
   onAddAgent?: (agentId: string) => void;

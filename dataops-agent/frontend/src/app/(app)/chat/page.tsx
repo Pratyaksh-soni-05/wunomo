@@ -9,7 +9,7 @@ import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
 import {
   getToken, decodeUserFromToken, getChatSessions, getChatHistory, sendChatMessage, getSources,
   deleteChatSession, listChannels, createChannel, getChannel, addChannelAgent, removeChannelAgent,
-  addChannelUser, removeChannelUser, listAgents, getTeamMembers,
+  addChannelUser, removeChannelUser, listSelectableAgents, getTeamMembers,
   ApiError, type ChatContext, type TaskItem,
 } from "@/lib/api";
 
@@ -42,7 +42,15 @@ export default function ChatPage() {
   const sessionsQuery = useQuery({ queryKey: ["chat-sessions"], queryFn: () => getChatSessions(token) });
   const sourcesQuery = useQuery({ queryKey: ["sources"], queryFn: () => getSources(token) });
   const channelsQuery = useQuery({ queryKey: ["channels"], queryFn: () => listChannels(token) });
-  const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: () => listAgents(token) });
+  // Wunomo Projects Phase 4: was listAgents() (agents.manage-gated) --
+  // confirmed live that gave a data_analyst (or any non-Owner/Admin role)
+  // a real 403 here, so this channel-creation picker came up empty for
+  // every such role since channels shipped. listSelectableAgents() is the
+  // fix (any authenticated member, ACTIVE agents only -- already excludes
+  // offboarded ones, so no separate filter is needed below anymore); same
+  // queryKey the task-create modal's own agent picker uses, so the two
+  // share one cached fetch instead of two independent ones.
+  const agentsQuery = useQuery({ queryKey: ["selectable-agents"], queryFn: () => listSelectableAgents(token) });
   const teamQuery = useQuery({ queryKey: ["team-members"], queryFn: () => getTeamMembers(token) });
 
   const activeChannel = channelsQuery.data?.channels.find((c) => c.id === activeSessionId) ?? null;
@@ -51,7 +59,7 @@ export default function ChatPage() {
     queryFn: () => getChannel(token, activeSessionId as string),
     enabled: !!activeChannel,
   });
-  const activeAgents = agentsQuery.data?.agents.filter((a) => a.status !== "offboarded") ?? [];
+  const activeAgents = agentsQuery.data?.agents ?? [];
 
   const selectSession = async (id: string) => {
     // Same stale-response hazard newChat() guards against: switching
@@ -353,6 +361,7 @@ export default function ChatPage() {
         open={taskModalOpen}
         onClose={() => setTaskModalOpen(false)}
         sessionId={activeSessionId ?? undefined}
+        channelAgentIds={channelDetailQuery.data?.agents.map((a) => a.id)}
         onCreated={(task: TaskItem) => {
           const taskCardMsg: LocalChatMessage = {
             role: "assistant", content: "", tool_calls: [], timestamp: new Date().toISOString(),
