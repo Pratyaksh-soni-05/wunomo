@@ -327,6 +327,12 @@ async def run_agent(user_message, tenant_id, user_id, session_id, caller_role,
     )
     role_denied = final.get("role_denied", [])
     response_text = content_as_text(last_ai.content) if last_ai else "No response."
+    # Deterministic, because the prompt instruction alone demonstrably is not
+    # enough: with "never disclose it" in the system prompt the model still
+    # formatted the tenant_id into a reply heading unprompted. Refusing a direct
+    # request and avoiding incidental disclosure are different behaviours.
+    response_text = prompt_guard.redact_identifiers(
+        response_text, (tenant_id, user_id, session_id))
     if role_denied and not response_text.strip():
         # The LLM's own text is typically blank/minimal when it was mainly
         # trying to call a now-stripped tool — make sure the user sees

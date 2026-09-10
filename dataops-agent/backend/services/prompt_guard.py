@@ -183,6 +183,32 @@ def sanitize_identifier(name) -> str:
     return text
 
 
+# ── Identity redaction on the way out ────────────────────────────────────────
+
+def redact_identifiers(text: str, values) -> str:
+    """Remove authenticated identifiers from model output.
+
+    Prompt language alone is not sufficient here, and that is measured rather
+    than assumed. After the confidentiality instruction was added, the model
+    correctly refused to disclose its instructions when asked (battery B1/B2
+    both defended) — and then volunteered the tenant_id unprompted in ordinary
+    replies, formatting it into a heading:
+    "**Configured Data Sources (Tenant 764530c3-b45e-...)**".
+
+    Refusing a direct request and avoiding incidental disclosure are different
+    behaviours, and only the first is reliably promptable. So the identifiers
+    are stripped deterministically on the way out, where compliance is not
+    optional. The prompt language stays as well: defence in depth, and it is
+    what stops the model *reasoning aloud* about the values in the first place.
+    """
+    if not text:
+        return text
+    for value in values:
+        if value and len(str(value)) >= 8:
+            text = text.replace(str(value), "[redacted]")
+    return text
+
+
 # ── Secondary screen on generated code ───────────────────────────────────────
 
 # Deliberately a rule-based check, not a second model — the ranking scopes this
