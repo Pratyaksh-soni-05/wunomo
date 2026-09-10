@@ -9,6 +9,7 @@ into it again just because its name still appears somewhere in scrollback.
 from sqlalchemy import func, or_, select
 
 from models.all_models import AgentInstance, AgentInstanceStatus, ChannelAgent, ChatMessage
+from services.mentions import parse_mention
 
 
 async def resolve_mentioned_agent(db, channel_id: str, name: str) -> AgentInstance | None:
@@ -98,3 +99,44 @@ async def load_agent_channel_context(db, channel_id: str, tenant_id: str, agent_
         query = query.where(ChatMessage.created_at > summary_row.created_at)
     r = await db.execute(query.order_by(ChatMessage.created_at.asc()).limit(200))
     return list(r.scalars().all()), summary_row
+
+
+async def resolve_channel_message_target(
+    db, channel_id: str, tenant_id: str, message: str,
+) -> tuple[str | None, str | None, str]:
+    """Which agent a channel message (or, as of Wunomo Projects Phase 4,
+    a channel file upload) addresses. Returns (agent_id, error_message,
+    remaining_text) -- exactly one of agent_id/error_message is set.
+    Extracted from api/v1/chat.py's own inline routing block (word-for-
+    word identical messages, not a rewrite) so a second caller (the
+    channel-upload endpoint) doesn't get a second, divergently-worded
+    notion of "which agent does this address" -- @mention, or the
+    channel's sole member, is the one real answer everywhere in this
+    product, never a picker or a guess.
+
+    error_message is one of four real cases, same as chat.py always
+    produced: an unresolvable @mention (typo -- no such agent anywhere in
+    the tenant); a real, active agent that exists but isn't a member of
+    THIS channel yet; zero agents in the channel; or more than one agent
+    with no @mention to disambiguate. remaining_text is the message with
+    a leading mention stripped (chat.py's own message_text), or the
+    original message unchanged when there was nothing to strip."""
+    mentioned_name, remaining_text = parse_mention(message)
+    if mentioned_name is not None:
+        target_agent = await resolve_mentioned_agent(db, channel_id, mentioned_name)
+        if target_agent is None:
+            tenant_agent = await find_active_agent_in_tenant(db, tenant_id, mentioned_name)
+            if tenant_agent is None:
+                return None, f"'{mentioned_name}' doesn't match any agent in your workspace.", remaining_text
+            return None, (
+                f"{tenant_agent.name} exists but isn't a member of this channel yet. "
+                f"Add them from this channel's members, then @mention them again."
+            ), remaining_text
+        return target_agent.id, None, remaining_text
+
+    members = await channel_agent_members(db, channel_id)
+    if len(members) == 1:
+        return members[0].id, None, message
+    if not members:
+        return None, "No agents are in this channel — add one from this channel's members to start talking here.", message
+    return None, "More than one agent is in this channel — please @mention who you're talking to.", message

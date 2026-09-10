@@ -1350,6 +1350,11 @@ export interface ProjectAgentItem {
   employee_type: string;
 }
 
+export interface ProjectChannelItem {
+  id: string;
+  name: string;
+}
+
 export function listProjects(token: string): Promise<{ projects: ProjectItem[] }> {
   return authedRequest("/api/v1/projects/", token);
 }
@@ -1360,10 +1365,28 @@ export function createProject(token: string, name: string): Promise<ProjectItem>
   });
 }
 
+export function renameProject(token: string, projectId: string, name: string): Promise<ProjectItem> {
+  return request(`/api/v1/projects/${projectId}`, {
+    method: "PATCH", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ name }),
+  });
+}
+
+export function deleteProject(token: string, projectId: string): Promise<{ id: string; deleted: boolean }> {
+  return request(`/api/v1/projects/${projectId}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 export function getProjectAgents(
   token: string, projectId: string
 ): Promise<{ project_id: string; agents: ProjectAgentItem[] }> {
   return authedRequest(`/api/v1/projects/${projectId}/agents`, token);
+}
+
+export function getProjectChannels(
+  token: string, projectId: string
+): Promise<{ project_id: string; channels: ProjectChannelItem[] }> {
+  return authedRequest(`/api/v1/projects/${projectId}/channels`, token);
 }
 
 // ---------- Hiring (Wunomo Projects Phase 1, part two) ----------
@@ -1530,6 +1553,40 @@ export function removeChannelUser(token: string, channelId: string, userId: stri
   return request(`/api/v1/channels/${channelId}/members/users/${userId}`, {
     method: "DELETE", headers: { Authorization: `Bearer ${token}` },
   });
+}
+
+export interface ChannelUploadResult {
+  channel_id: string;
+  agent_id: string;
+  agent_name: string;
+  source_id: string;
+  source_name: string;
+  profiled: boolean;
+}
+
+// Multipart, same reason uploadAndRegisterSource can't go through
+// request(). `message` carries whatever's in the composer at drop time --
+// used server-side only to resolve which agent the file targets
+// (resolve_channel_message_target, the same @mention/sole-member rule a
+// real text message uses), never stored as a chat message and never
+// reaching the LLM.
+export async function uploadToChannel(
+  token: string, channelId: string, file: File, message: string
+): Promise<ChannelUploadResult> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("message", message);
+  const res = await fetch(`${API_URL}/api/v1/channels/${channelId}/upload`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    if (res.status === 401) handleSessionExpired();
+    throw new ApiError(res.status, body?.detail ?? body);
+  }
+  return body;
 }
 
 // ---------- Local session storage ----------

@@ -330,6 +330,27 @@ export default function TaskDetailPage() {
           </Card>
         )}
 
+        <Card style={{ marginBottom: 16 }}>
+          <CardHeader><span className="font-medium text-sm">Cost</span></CardHeader>
+          <CardBody>
+            {task.cost.llm_calls === 0 ? (
+              <span className="text-sm text-muted">No LLM calls yet — nothing spent.</span>
+            ) : (
+              <div className="flex items-center gap-4 flex-wrap">
+                <span className="text-sm">
+                  <strong>{task.cost.credits.toLocaleString()}</strong> AI Credits
+                </span>
+                <span className="text-xs text-muted">{task.cost.llm_calls} LLM call{task.cost.llm_calls === 1 ? "" : "s"}</span>
+                <span className="text-xs text-muted">{task.cost.input_tokens.toLocaleString()} input tokens</span>
+                <span className="text-xs text-muted">{task.cost.output_tokens.toLocaleString()} output tokens</span>
+                {task.cost.reasoning_tokens > 0 && (
+                  <span className="text-xs text-muted">{task.cost.reasoning_tokens.toLocaleString()} reasoning tokens</span>
+                )}
+              </div>
+            )}
+          </CardBody>
+        </Card>
+
         {task.status === "draft_plan" ? (
           <Card>
             <CardHeader className="flex items-center justify-between">
@@ -411,26 +432,6 @@ export default function TaskDetailPage() {
                 This step needs approval from an Owner or Admin before the task can continue.
               </p>
             )}
-            <Card style={{ marginBottom: 16 }}>
-              <CardHeader><span className="font-medium text-sm">Cost</span></CardHeader>
-              <CardBody>
-                {task.cost.llm_calls === 0 ? (
-                  <span className="text-sm text-muted">No LLM calls yet — nothing spent.</span>
-                ) : (
-                  <div className="flex items-center gap-4 flex-wrap">
-                    <span className="text-sm">
-                      <strong>{task.cost.credits.toLocaleString()}</strong> AI Credits
-                    </span>
-                    <span className="text-xs text-muted">{task.cost.llm_calls} LLM call{task.cost.llm_calls === 1 ? "" : "s"}</span>
-                    <span className="text-xs text-muted">{task.cost.input_tokens.toLocaleString()} input tokens</span>
-                    <span className="text-xs text-muted">{task.cost.output_tokens.toLocaleString()} output tokens</span>
-                    {task.cost.reasoning_tokens > 0 && (
-                      <span className="text-xs text-muted">{task.cost.reasoning_tokens.toLocaleString()} reasoning tokens</span>
-                    )}
-                  </div>
-                )}
-              </CardBody>
-            </Card>
             <Card>
               <CardHeader><span className="font-medium text-sm">Step timeline</span></CardHeader>
               <StepsTable steps={task.steps} editing={false} />

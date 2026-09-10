@@ -802,6 +802,7 @@ tr.selected td:first-child {
 
 .chat-composer { padding: 14px 20px; border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
 .chat-composer-box { position: relative; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; }
+.chat-composer-box.drag-over { border-color: var(--accent-fill); }
 .mention-autocomplete {
   position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 50; min-width: 200px; max-width: 320px;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);

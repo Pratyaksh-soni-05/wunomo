@@ -68,6 +68,9 @@ export function MessageThread({
   onAddPerson,
   onRemovePerson,
   currentUserRole,
+  uploading,
+  uploadError,
+  onUploadFile,
 }: {
   messages: LocalChatMessage[];
   sending: boolean;
@@ -95,13 +98,39 @@ export function MessageThread({
   onAddPerson?: (userId: string) => void;
   onRemovePerson?: (userId: string) => void;
   currentUserRole?: string | null;
+  // Channels only in v1 (finding 80 -- bare 1:1 chat isn't covered yet).
+  // Owned by the parent, same as sending/sendError, so an upload failure
+  // (409 ambiguous target, 422 unsupported type, 400 bad extension, 403
+  // permission) renders inline in the composer exactly like a send failure
+  // does -- never a toast.
+  uploading?: boolean;
+  uploadError?: string | null;
+  onUploadFile?: (file: File) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const [membersModalOpen, setMembersModalOpen] = useState(false);
   const [mentionHighlight, setMentionHighlight] = useState(0);
   const [mentionDismissedFor, setMentionDismissedFor] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [dropRefusedReason, setDropRefusedReason] = useState<string | null>(null);
+
+  const canUpload = !!channel && !!onUploadFile;
+
+  const handleFile = (file: File) => {
+    setDropRefusedReason(null);
+    if (!canUpload) {
+      setDropRefusedReason(
+        channel
+          ? "File uploads aren't available here."
+          : "File uploads are only supported inside a channel right now — open or create one first."
+      );
+      return;
+    }
+    onUploadFile!(file);
+  };
 
   const channelAgentIds = new Set((channelAgents ?? []).map((a) => a.id));
   const addableAgents = (availableAgents ?? []).filter((a) => !channelAgentIds.has(a.id));
@@ -325,7 +354,26 @@ export function MessageThread({
         {sendError && (
           <div className="text-xs" style={{ color: "var(--danger)", marginBottom: 6 }}>{sendError}</div>
         )}
-        <div className="chat-composer-box">
+        {uploadError && (
+          <div className="text-xs" style={{ color: "var(--danger)", marginBottom: 6 }}>{uploadError}</div>
+        )}
+        {dropRefusedReason && (
+          <div className="text-xs text-muted" style={{ marginBottom: 6 }}>{dropRefusedReason}</div>
+        )}
+        {uploading && (
+          <div className="text-xs text-muted" style={{ marginBottom: 6 }}>Uploading…</div>
+        )}
+        <div
+          className={["chat-composer-box", dragOver ? "drag-over" : ""].join(" ")}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) handleFile(file);
+          }}
+        >
           {showMentionDropdown && (
             <div className="mention-autocomplete" role="listbox">
               {mentionSuggestions.map((a, i) => (
@@ -360,13 +408,34 @@ export function MessageThread({
           />
           <div className="chat-composer-actions">
             <span className="text-xs text-muted">Enter to send</span>
-            <button
-              className="btn btn-primary btn-anchored btn-sm"
-              disabled={!draft.trim() || sending}
-              onClick={onSend}
-            >
-              Send
-            </button>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFile(file);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                title={canUpload ? "Attach a file" : "File uploads are only supported inside a channel"}
+                disabled={uploading || sending}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                📎
+              </button>
+              <button
+                className="btn btn-primary btn-anchored btn-sm"
+                disabled={!draft.trim() || sending}
+                onClick={onSend}
+              >
+                Send
+              </button>
+            </div>
           </div>
         </div>
         <div className="chat-quick-prompts">

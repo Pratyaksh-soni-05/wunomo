@@ -9,7 +9,7 @@ import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
 import {
   getToken, decodeUserFromToken, getChatSessions, getChatHistory, sendChatMessage, getSources,
   deleteChatSession, listChannels, createChannel, getChannel, addChannelAgent, removeChannelAgent,
-  addChannelUser, removeChannelUser, listSelectableAgents, getTeamMembers,
+  addChannelUser, removeChannelUser, listSelectableAgents, getTeamMembers, uploadToChannel,
   ApiError, type ChatContext, type TaskItem,
 } from "@/lib/api";
 
@@ -33,6 +33,8 @@ export default function ChatPage() {
   const [operationMode, setOperationMode] = useState("assisted");
   const [attachedContext, setAttachedContext] = useState<ChatContext | null>(null);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Bumped by newChat() so a response from a request sent before "New Chat"
   // was clicked can be detected as stale and dropped instead of silently
@@ -68,6 +70,7 @@ export default function ChatPage() {
     chatGenerationRef.current += 1;
     setActiveSessionId(id);
     setSendError(null);
+    setUploadError(null);
     setSending(false);
     try {
       const history = await getChatHistory(token, id);
@@ -134,6 +137,7 @@ export default function ChatPage() {
     setMessages([]);
     setDraft("");
     setSendError(null);
+    setUploadError(null);
     setAttachedContext(null);
     setSending(false);
     setProvider(null);
@@ -218,6 +222,33 @@ export default function ChatPage() {
     } catch (err) {
       const message = err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Failed to remove person.";
       toast.push(message, "danger");
+    }
+  };
+
+  // Chat-first data upload (Wunomo Projects Phase 4, item 4): channels
+  // only in v1 (finding 80). No LLM call here -- upload/register/profile/
+  // grant is silent; the resolved agent is only "ready" once a real
+  // message is sent, which is why success just populates attachedContext
+  // (the existing "attach this source to my next message" chip) instead
+  // of injecting a synthetic message into the thread. draft is passed
+  // through as the accompanying message so an in-progress "@Nova ..." in
+  // the composer resolves the same target a real send would.
+  const handleUploadFile = async (file: File) => {
+    if (!activeSessionId || !activeChannel) return;
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const result = await uploadToChannel(token, activeSessionId, file, draft);
+      setAttachedContext({ source_id: result.source_id, source_name: result.source_name });
+      toast.push(`${result.agent_name} is ready with "${result.source_name}" on your next message.`, "success");
+      qc.invalidateQueries({ queryKey: ["sources"] });
+    } catch (err) {
+      const message = err instanceof ApiError && typeof err.detail === "string"
+        ? err.detail
+        : "Couldn't upload that file. Try again.";
+      setUploadError(message);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -344,6 +375,9 @@ export default function ChatPage() {
         onAddPerson={addPersonToActiveChannel}
         onRemovePerson={removePersonFromActiveChannel}
         currentUserRole={currentUserRole}
+        uploading={uploading}
+        uploadError={uploadError}
+        onUploadFile={handleUploadFile}
       />
       <ContextPanel
         messages={messages}

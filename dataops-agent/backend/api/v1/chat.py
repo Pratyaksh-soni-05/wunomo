@@ -11,10 +11,7 @@ from datetime import datetime, timezone
 import uuid
 from models.approval_model import ApprovalRequest, ApprovalStatus
 from schemas.chat_schema import ChatRequest
-from services.channel_routing import (
-    channel_agent_members, find_active_agent_in_tenant, load_agent_channel_context, resolve_mentioned_agent,
-)
-from services.mentions import parse_mention
+from services.channel_routing import load_agent_channel_context, resolve_channel_message_target
 from langchain_core.messages import AIMessage as LCAIMessage, ToolMessage as LCToolMessage, SystemMessage as LCSystemMessage
 
 router = APIRouter()
@@ -133,52 +130,18 @@ async def chat(req: ChatRequest, user=Depends(enforce_quota("ai_credits"))):
             # Resolved against real channel_agents membership -- an agent
             # not added to this channel cannot be mentioned into it,
             # regardless of what its name looks like in the message text.
-            mentioned_name, remaining_text = parse_mention(req.message)
-            if mentioned_name is not None:
-                target_agent = await resolve_mentioned_agent(db, channel.id, mentioned_name)
-                if target_agent is None:
-                    # Two distinct failures, not one generic message
-                    # (Wunomo Projects Phase 2 frontend, slice 6, explicit
-                    # requirement): a typo (no such agent anywhere in this
-                    # tenant) needs a spelling fix; a real, active agent
-                    # that just isn't a member of THIS channel needs an
-                    # actual add-member action. Conflating them makes a
-                    # typo indistinguishable from a fixable membership gap.
-                    tenant_agent = await find_active_agent_in_tenant(db, tenant_id, mentioned_name)
-                    if tenant_agent is None:
-                        return _no_route_response(
-                            session_id, f"'{mentioned_name}' doesn't match any agent in your workspace.",
-                        )
-                    return _no_route_response(
-                        session_id,
-                        f"{tenant_agent.name} exists but isn't a member of this channel yet. "
-                        f"Add them from this channel's members, then @mention them again.",
-                    )
-                agent_id = target_agent.id
-                mentioned_agent_id = target_agent.id
-                message_text = remaining_text or req.message
-            else:
-                # No explicit mention: unambiguous only with exactly one
-                # agent in the channel -- never guess among several.
-                members = await channel_agent_members(db, channel.id)
-                if len(members) == 1:
-                    agent_id = members[0].id
-                    mentioned_agent_id = agent_id
-                elif not members:
-                    # Reachable by offboarding a channel's only agent
-                    # (slice 4 removes channel_agents membership on
-                    # offboard) as much as by never having added one --
-                    # either way, the fix is the same real action, named
-                    # here rather than a bare "please @mention" that would
-                    # be actively misleading with nobody left to mention.
-                    return _no_route_response(
-                        session_id,
-                        "No agents are in this channel — add one from this channel's members to start talking here.",
-                    )
-                else:
-                    return _no_route_response(
-                        session_id, "More than one agent is in this channel — please @mention who you're talking to.",
-                    )
+            # Shared with the channel-upload endpoint (Wunomo Projects
+            # Phase 4, api/v1/channels.py) via resolve_channel_message_
+            # target() -- one real implementation of "which agent does
+            # this address," not two that could quietly diverge.
+            resolved_agent_id, route_error, remaining_text = await resolve_channel_message_target(
+                db, channel.id, tenant_id, req.message,
+            )
+            if route_error is not None:
+                return _no_route_response(session_id, route_error)
+            agent_id = resolved_agent_id
+            mentioned_agent_id = resolved_agent_id
+            message_text = remaining_text or req.message
 
             # Context filtering, reading (a) (Wunomo Projects Phase 2):
             # an agent sees only messages it authored or was mentioned

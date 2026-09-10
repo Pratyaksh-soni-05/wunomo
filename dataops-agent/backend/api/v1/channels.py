@@ -11,16 +11,23 @@ whom inside a shared conversation. Managing membership (adding/removing a
 user or agent) requires the caller to already be a member -- a plain
 "you can't manage a room you're not in" rule, not a permission tier.
 """
+import os
+import shutil
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from .auth import get_current_user
+from .agents import _grant_source_within_session
+from .auth import enforce_quota, get_current_user, require_permission
+from .uploads import ALLOWED_EXTS
 from database import AsyncSessionLocal
 from models.all_models import AgentInstance, AgentInstanceStatus, Channel, ChannelAgent, ChannelUser, Project, User
+from modules.ingestion.connector_manager import UPLOAD_DIR, ConnectorManager
+from modules.ingestion.schema_profiler import SchemaProfiler
+from services.channel_routing import resolve_channel_message_target
 
 router = APIRouter()
 
@@ -224,5 +231,83 @@ async def remove_agent_member(channel_id: str, agent_id: str, user=Depends(get_c
             ChannelAgent.channel_id == channel_id, ChannelAgent.agent_id == agent_id,
         ))
         await db.commit()
+
+
+@router.post("/{channel_id}/upload")
+async def upload_to_channel(
+    channel_id: str,
+    file: UploadFile = File(...),
+    message: str = Form(""),
+    _perm=Depends(require_permission("sources.create")),
+    user=Depends(enforce_quota("data_sources")),
+):
+    """Chat-first data upload (Wunomo Projects Phase 4): drop a file into
+    a channel, it registers as a real source, profiles itself, and gets
+    granted to the one agent the accompanying message resolves to --
+    "no manual Add Source flow" for the common case, per explicit
+    requirement. Channels only in v1, not private 1:1 chat -- bare AXIOM
+    chat currently resolves to "oldest active agent" (finding 80, not yet
+    fixed), and this feature needs an unambiguous target to grant to.
+
+    Same sources.create + data_sources-quota gate upload_and_register()
+    (api/v1/uploads.py) already requires for the identical underlying
+    action (creating a real DataSource) -- a new UI entry point must not
+    be an easier path to a privileged action than the one it's shortening.
+
+    Target resolution reuses resolve_channel_message_target() -- the
+    exact same @mention/sole-member rule a real text message uses, not a
+    second one. A channel with two or more agents and no @mention on the
+    accompanying message gets the identical "please @mention who you're
+    talking to" refusal a text message would: requiring the mention
+    (rather than a new "pick an agent" surface) means there is exactly
+    one way to address a specific agent anywhere in this product, not two
+    that could drift apart on what counts as ambiguous.
+
+    Deliberately does NOT reverse c9df6d91: source_type and
+    connection_config are derived from the real uploaded file's own
+    extension inside register_uploaded_file(), the same function the
+    existing upload path already uses -- neither the uploading human nor
+    the resolved agent ever supplies either value. This endpoint only
+    adds two things on top of that existing path: granting the one
+    resolved agent (never every channel member), and profiling
+    immediately (existing sources still require a separate manual
+    Profile click -- see the self-test guide's own §2.3 note on that gap).
+    Both happen silently; nothing here ever calls the LLM."""
+    tenant_id = user["tenant_id"]
+
+    async with AsyncSessionLocal() as db:
+        channel = await _require_membership(db, channel_id, user["sub"])
+
+        agent_id, route_error, _ = await resolve_channel_message_target(db, channel.id, tenant_id, message or "")
+        if route_error is not None:
+            raise HTTPException(status_code=409, detail=route_error)
+
+        ext = file.filename.rsplit(".", 1)[-1].lower()
+        if ext not in ALLOWED_EXTS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+        dest = os.path.join(UPLOAD_DIR, f"{uuid.uuid4()}.{ext}")
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        source_result = await ConnectorManager(tenant_id).register_uploaded_file(file.filename, dest)
+        if "error" in source_result:
+            raise HTTPException(status_code=source_result.get("status_code", 409), detail=source_result["error"])
+
+        source_id = source_result["id"]
+        await _grant_source_within_session(db, agent_id, source_id)
+        await db.commit()
+
+        agent = await db.get(AgentInstance, agent_id)
+        profile_result = await SchemaProfiler(tenant_id, source_id, agent_id).profile()
+
+    return {
+        "channel_id": channel_id,
+        "agent_id": agent_id,
+        "agent_name": agent.name if agent else agent_id,
+        "source_id": source_id,
+        "source_name": source_result["name"],
+        "profiled": "error" not in profile_result,
+    }
 
     return {"channel_id": channel_id, "agent_id": agent_id, "added": False}
