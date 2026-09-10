@@ -35,6 +35,17 @@ async def lifespan(app: FastAPI):
     verify_encryption_key_configured()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Loud, but not fatal. A misconfigured FALLBACK is invisible at rest — it
+    # only surfaces as a 404 at the exact moment the primary is already
+    # failing, which is how `llama-3.3-70b-versatile` sat in config despite not
+    # existing in this Groq account at all. Logged at ERROR rather than raised
+    # because a network blip must not stop the app booting, and a broken
+    # fallback must not stop it serving on a working primary.
+    from services.llm_service import validate_llm_config
+    for problem in validate_llm_config():
+        log.error("llm_config_invalid", problem=problem)
+
     log.info("axiom.startup", env=settings.APP_ENV, version="1.0.0")
     yield
     await engine.dispose()

@@ -28,11 +28,32 @@ log = structlog.get_logger()
 SUPPORTED_MODEL_OVERRIDES = ["gemini-3.5-flash", "llama-3.3-70b-versatile"]
 
 
+# Model-name shapes that identify a Groq-hosted model, used ONLY when a caller
+# supplies a bare model name with no declared provider (a tenant's
+# `ai_model_override`). The configured primary/fallback never reach this path --
+# their provider is declared in settings. Extended well past the original
+# llama/mixtral/gemma guess, which is what broke: this account's actual chat
+# models are `openai/gpt-oss-120b`, `qwen/qwen3.8-27b`, `groq/compound` and
+# `allam-2-7b`, none of which contain any of those three substrings, so every
+# one of them was being sent to Google with a Groq model name.
+_GROQ_MODEL_HINTS = (
+    "llama", "mixtral", "gemma", "qwen", "allam", "whisper",
+    "gpt-oss", "compound", "groq/", "openai/", "meta-llama/",
+)
+
+
 def _provider_for_model(model: str) -> str:
-    """Same routing rule _build_llm() uses, exposed for usage logging."""
-    if "llama" in model or "mixtral" in model or "gemma" in model:
-        return "groq"
-    return "gemini"
+    """Which provider hosts this model.
+
+    Declared configuration wins over inference. Inference is only for a
+    per-tenant model override, which supplies a name and no provider.
+    """
+    if model == settings.PRIMARY_LLM_MODEL:
+        return settings.PRIMARY_LLM_PROVIDER
+    if model == settings.FALLBACK_LLM_MODEL:
+        return settings.FALLBACK_LLM_PROVIDER
+    lowered = (model or "").lower()
+    return "groq" if any(h in lowered for h in _GROQ_MODEL_HINTS) else "gemini"
 
 
 def content_as_text(content) -> str:
@@ -137,9 +158,22 @@ PRIMARY_LLM_TIMEOUT_SECONDS = 30
 GEMINI_THINKING_BUDGET = 0
 
 
-def _build_llm(model: str, temperature: float):
-    """Route to the right provider client based on the model name."""
-    if "llama" in model or "mixtral" in model or "gemma" in model:
+def _build_llm(model: str, temperature: float, provider: str | None = None):
+    """Route to the right provider client.
+
+    `provider`, when given, is the DECLARED provider from settings and is
+    authoritative. Only when it is absent (a per-tenant model override, which
+    carries a name and nothing else) does this fall back to inferring from the
+    model name.
+
+    Hard Rule 2 still holds and is what this preserves: neither
+    get_primary_llm() nor get_fallback_llm() returns ChatGoogleGenerativeAI
+    unconditionally. What changed is the basis of the branch -- declared
+    provider instead of a substring guess -- because the guess was wrong for
+    every Groq chat model this account actually has.
+    """
+    resolved = (provider or _provider_for_model(model) or "").lower()
+    if resolved == "groq":
         return ChatGroq(
             model=model,
             groq_api_key=settings.GROQ_API_KEY,
@@ -154,7 +188,12 @@ def _build_llm(model: str, temperature: float):
 
 
 def get_primary_llm(temperature=0.0, model: str | None = None):
-    return _build_llm(model or settings.PRIMARY_LLM_MODEL, temperature)
+    # An explicit `model` is a per-tenant override with no declared provider,
+    # so let _build_llm infer for that case only.
+    if model and model != settings.PRIMARY_LLM_MODEL:
+        return _build_llm(model, temperature)
+    return _build_llm(settings.PRIMARY_LLM_MODEL, temperature,
+                      provider=settings.PRIMARY_LLM_PROVIDER)
 
 
 def get_fallback_llm(temperature=0.0):
@@ -162,7 +201,8 @@ def get_fallback_llm(temperature=0.0):
     # FALLBACK_LLM_MODEL, so a fallback configured for another provider
     # (e.g. Gemini) would silently be sent through the wrong SDK. Route it
     # the same way the primary model is routed.
-    return _build_llm(settings.FALLBACK_LLM_MODEL, temperature)
+    return _build_llm(settings.FALLBACK_LLM_MODEL, temperature,
+                      provider=settings.FALLBACK_LLM_PROVIDER)
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
@@ -307,3 +347,66 @@ class LLMService:
             tenant_id=tenant_id, user_id=user_id, session_id=session_id,
             request_type=request_type,
         )
+
+# ── Configuration validation ─────────────────────────────────────────────────
+
+_GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
+_GEMINI_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+
+
+def _live_models(provider: str) -> set[str]:
+    """Model ids the configured credentials can actually reach.
+
+    Listing models costs no generation quota with either provider, which is why
+    this is safe to run at startup and in the test suite.
+    """
+    import httpx
+
+    if provider == "groq":
+        r = httpx.get(_GROQ_MODELS_URL,
+                      headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
+                      timeout=15)
+        r.raise_for_status()
+        return {m["id"] for m in r.json().get("data", [])}
+
+    r = httpx.get(_GEMINI_MODELS_URL,
+                  params={"key": settings.GEMINI_API_KEY, "pageSize": 200},
+                  timeout=15)
+    r.raise_for_status()
+    # Gemini returns "models/gemini-3.5-flash"; callers configure the bare name.
+    return {m["name"].split("/", 1)[-1] for m in r.json().get("models", [])}
+
+
+def validate_llm_config() -> list[str]:
+    """Check each configured model against its provider's live catalogue.
+
+    Returns a list of human-readable problems; empty means the configuration is
+    sound. Raises nothing — a network blip must not be able to stop the app
+    booting, and a broken FALLBACK must not stop it serving traffic on a
+    working PRIMARY. Callers decide how loud to be; `main.py` logs at ERROR and
+    tests assert the list is empty.
+
+    This exists because the failure it catches is invisible at rest: the
+    fallback was configured to `llama-3.3-70b-versatile`, which is not in this
+    Groq account at all, so the "fallback" had never once worked and only
+    surfaced as a 404 at the exact moment the primary was already failing.
+    """
+    problems: list[str] = []
+    for label, provider, model in (
+        ("PRIMARY", settings.PRIMARY_LLM_PROVIDER, settings.PRIMARY_LLM_MODEL),
+        ("FALLBACK", settings.FALLBACK_LLM_PROVIDER, settings.FALLBACK_LLM_MODEL),
+    ):
+        if provider not in ("groq", "gemini"):
+            problems.append(f"{label}: unknown provider {provider!r}")
+            continue
+        try:
+            available = _live_models(provider)
+        except Exception as exc:
+            log.warning("llm_config_check_unreachable", provider=provider, error=str(exc))
+            continue
+        if model not in available:
+            problems.append(
+                f"{label}: model {model!r} is not available to the configured "
+                f"{provider} credentials"
+            )
+    return problems

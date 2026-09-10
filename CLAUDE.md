@@ -108,10 +108,21 @@ the actual code on 2026-08-12 — status noted per rule; see `docs/context/WUNOM
    any of those three anyway, consolidating onto `PostgresConnector` closes a real gap.
 
 2. **`get_primary_llm()` (and `get_fallback_llm()`) must never return `ChatGoogleGenerativeAI`
-   unconditionally** — both route through `_build_llm()` in `services/llm_service.py`, which
-   branches on the model name: contains `llama`/`mixtral`/`gemma` → `ChatGroq`, else →
-   `ChatGoogleGenerativeAI`. This still holds as of 2026-08-12. If you ever see a hardcoded
+   unconditionally** — the rule's intent, unchanged. If you ever see a hardcoded
    `ChatGoogleGenerativeAI(...)` construction outside `_build_llm()`, that's a regression.
+   *Mechanism updated 2026-09-10 — the description below replaces the old one.* Both still
+   route through `_build_llm()` in `services/llm_service.py`, but it now branches on the
+   provider **declared** in settings (`PRIMARY_LLM_PROVIDER` / `FALLBACK_LLM_PROVIDER`), not
+   on a substring of the model name. The old rule was `llama`/`mixtral`/`gemma` → `ChatGroq`,
+   else → `ChatGoogleGenerativeAI`, and it was wrong for every Groq chat model this account
+   actually has (`openai/gpt-oss-120b`, `qwen/qwen3.8-27b`, `groq/compound`, `allam-2-7b`
+   contain none of those strings), so any of them would have been sent to Google with a Groq
+   model name. Name-based inference now survives *only* for a per-tenant `ai_model_override`,
+   which supplies a bare model name and no provider. `validate_llm_config()` checks both
+   configured models against their provider's **live catalogue** (listing models costs no
+   generation quota) and `main.py`'s lifespan logs any mismatch at ERROR — deliberately loud
+   rather than fatal, so a network blip can't stop the app booting and a broken fallback can't
+   stop it serving on a working primary. See `tests/test_llm_provider_routing.py`.
 
 3. **Never write a timezone-aware `datetime.now(timezone.utc)` into a naive
    `TIMESTAMP WITHOUT TIME ZONE` column** — use `datetime.utcnow()`, or

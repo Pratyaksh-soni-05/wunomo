@@ -28,9 +28,14 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
     GEMINI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
+    # Provider is DECLARED, not guessed from the model name. PRIMARY_LLM_PROVIDER
+    # already existed here and was read by nothing -- llm_service inferred the
+    # provider from substrings in the model name instead, which silently routed
+    # every Groq model not containing "llama"/"mixtral"/"gemma" to Google.
     PRIMARY_LLM_PROVIDER: str = "gemini"
     PRIMARY_LLM_MODEL: str = "gemini-3.5-flash"
-    FALLBACK_LLM_MODEL: str = "llama-3.3-70b-versatile"
+    FALLBACK_LLM_PROVIDER: str = "groq"
+    FALLBACK_LLM_MODEL: str = "openai/gpt-oss-120b"
     JWT_SECRET: str = "dev-jwt-secret"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60
