@@ -204,3 +204,32 @@ async def test_connect_grant_and_use_source_end_to_end(client, monkeypatch):
     body = r.json()
     assert len(body["tool_calls"]) == 1
     assert body["tool_calls"][0]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_granted_source_revokes_the_grant_instead_of_crashing(client):
+    """Regression test: AgentSource.source_id is a NOT NULL FK with no ON
+    DELETE clause -- DELETE /api/v1/sources/{id} used to attempt a plain
+    db.delete(source) with the grant row still pointing at it, crashing
+    with an unhandled IntegrityError (a generic 500) the moment a source
+    that had ever been granted to any agent was deleted. Found live via
+    demo_reset.mjs on a real demo tenant with a real AgentSource grant.
+    A grant is revocable access metadata, not the source itself -- deleting
+    the source should revoke the grant, the same shape delete_project()
+    already uses for ProjectAgent/Channel: ungroup, don't touch what's on
+    the other side of the join."""
+    token, tenant_id, _ = await _register(client, "delgranted")
+    agent_id = await _real_agent_id(tenant_id)
+    source_id = await _make_source(tenant_id, "Granted Source")
+
+    r = await client.post(f"/api/v1/agents/{agent_id}/sources/{source_id}", headers=_auth(token))
+    assert r.status_code == 200
+
+    r = await client.delete(f"/api/v1/sources/{source_id}", headers=_auth(token))
+    assert r.status_code == 200, r.text
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(AgentSource).where(AgentSource.source_id == source_id))
+        assert r.scalars().all() == [], "the grant row must be cleared, not left dangling at a dead source"
+        r = await db.execute(select(DataSource).where(DataSource.id == source_id))
+        assert r.scalar_one_or_none() is None

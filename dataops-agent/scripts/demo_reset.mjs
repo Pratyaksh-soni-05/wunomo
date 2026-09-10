@@ -178,8 +178,17 @@ async function main() {
     for (const s of Array.isArray(sourceList) ? sourceList : []) {
       await j("DELETE", `/sources/${s.id}`, { token });
     }
+    // task_steps must go first: it's the only table with a live FK onto
+    // either tasks (task_id, NOT NULL) or approval_requests
+    // (approval_request_id, nullable) -- Tasks postdates when this sweep
+    // was written, so it was never added here, and a task_steps row left
+    // behind is exactly what made "DELETE FROM approval_requests" fail
+    // with task_steps_approval_request_id_fkey the moment any walkthrough
+    // on this tenant ever produced an approval-gated task step.
     psql(
-      `DELETE FROM chat_messages WHERE tenant_id = '${tenantId}';
+      `DELETE FROM task_steps WHERE task_id IN (SELECT id FROM tasks WHERE tenant_id = '${tenantId}');
+       DELETE FROM tasks WHERE tenant_id = '${tenantId}';
+       DELETE FROM chat_messages WHERE tenant_id = '${tenantId}';
        DELETE FROM approval_requests WHERE tenant_id = '${tenantId}';
        DELETE FROM transform_runs WHERE tenant_id = '${tenantId}';
        DELETE FROM audit_logs WHERE tenant_id = '${tenantId}';

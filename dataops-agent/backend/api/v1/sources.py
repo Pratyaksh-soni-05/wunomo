@@ -5,10 +5,10 @@ import pymysql
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from .auth import get_current_user, require_permission, enforce_quota
 from database import AsyncSessionLocal
-from models.all_models import DataSource
+from models.all_models import AgentSource, DataSource
 from modules.ingestion.connector_manager import ConnectorManager, _points_at_app_database
 from modules.ingestion.connectors.mysql_connector import MySQLConnector
 from modules.ingestion.connectors.postgres_connector import PostgresConnector
@@ -180,12 +180,20 @@ async def update_source(source_id: str, req: SourceUpdate, user=Depends(require_
 
 @router.delete("/{source_id}")
 async def delete_source(source_id: str, user=Depends(require_permission("sources.delete"))):
+    # AgentSource.source_id is a NOT NULL FK with no ON DELETE clause --
+    # deleting a source ever granted to an agent used to crash here with an
+    # unhandled IntegrityError (masked as a generic 500). A grant is
+    # revocable access metadata, not the source itself: deleting the source
+    # it points at should revoke the grant, the same "ungroup, don't touch
+    # what's on the other side of the join" shape delete_project() already
+    # uses for ProjectAgent/Channel.
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(DataSource).where(
             DataSource.id == source_id, DataSource.tenant_id == user["tenant_id"]))
         source = r.scalars().first()
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
+        await db.execute(delete(AgentSource).where(AgentSource.source_id == source_id))
         await db.delete(source)
         await db.commit()
         return {"message": "Source deleted", "id": source_id}

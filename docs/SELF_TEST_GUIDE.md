@@ -671,9 +671,10 @@ different lesson (a scope denial you can't undo) Section 15 already covers
 on purpose.
 
 **3.24** Before AXIOM can actually touch a real data source, it needs to be
-scoped to it. In the sidebar, click **Agents** (same AXIOM domain as Data
-Sources/Pipelines/Tasks — see the note in §2.2 if this is your first time
-there this session), then click into **AXIOM**'s own card.
+scoped to it. In the sidebar, click **Agents** (in the default Workspace
+sidebar you land on after login, alongside **AI Employees** and
+**Projects** — no AXIOM-domain detour needed for this one), then click
+into **AXIOM**'s own card.
 
 **What you should see:** AXIOM's own agent detail page, with a **Data
 source scope** card listing every source in this tenant — **Sales
@@ -1516,10 +1517,10 @@ working together in channels, not one shared AXIOM in a 1:1 chat.)*
 
 ### Part A — A project, two named agents, a channel
 
-**15.1** **Projects** lives in the same AXIOM sidebar domain as Data
-Sources/Pipelines/Tasks (see the note in §2.2 if this is your first time
-there this session) — click **AI Employees** in the sidebar, then click
-into **AXIOM**'s card. In the sidebar that appears, click **Projects**.
+**15.1** **Projects** lives directly in the default Workspace sidebar you
+land on after login, alongside **AI Employees** and **Agents** — no
+detour through AXIOM's own card needed. Click **Projects** in the
+sidebar.
 
 **What you should see:** heading **Projects**, a short description line, and
 a button **+ New Project** (top right) — or, if this is the very first
