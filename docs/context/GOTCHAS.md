@@ -159,4 +159,18 @@
 
   **The general lesson, which cost two wrong diagnoses:** when a DELETE ordering fails intermittently against a *live* system, check what else writes to the table before concluding your ordering is wrong. Two real ordering defects were found and fixed while chasing this — deleting children only by `tenant_id` when a child can reference a parent across tenants, and computing parent id sets narrower than the deletes that consume them (`pipelines` is deleted by `tenant_id OR source_id`, so `:P` must be too). Both were genuine and are worth keeping. **Neither was the cause of the observed failures.** A failure that moves when you change batch size, and disappears on retry, is a race, not a bug in your predicate.
 
+- **`MessageThread.tsx` renders assistant messages with `dangerouslySetInnerHTML`, and the only thing standing between that and stored XSS is the ORDER of three `.replace()` calls. Do not add a `.replace()` above them, and do not build a second render surface without them.** Found while measuring output handling (OWASP LLM G-6) for Item #6. `src/components/chat/MessageThread.tsx:179` does `<span dangerouslySetInnerHTML={{ __html: formatAssistantText(m.content) }} />`, and there is **no DOMPurify, no `react-markdown`, no sanitizer of any kind anywhere in the frontend** (grepped). `formatAssistantText` is safe *today* purely because it escapes first and inserts markup second:
+
+  ```
+  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")   // escape FIRST
+      .replace(/\\*\\*(.*?)\\*\\*/g, "<strong>$1</strong>")                     // then insert
+      .replace(/\\n/g, "<br>");
+  ```
+
+  **Measured, not assumed:** asked for a SQL query with `<script>alert('xss')</script>` in a trailing comment, AXIOM returned exactly `SELECT 1; -- <script>alert('xss')</script>`. The model will happily emit script tags — the payload reaches the browser and is neutralised only at the escape step, where it renders as literal text. **The LLM is not a trusted content source, and this is a prompt-injection sink**: a poisoned column name or row value in a connected customer database can steer that output (Item #6's E1 payload proved schema metadata reaches and steers the model), so the attacker does not need chat access.
+
+  **Why it is fragile rather than fine:** the safety is invisible and positional. Insert any transformation above the escape line — a link-ifier, a code-fence handler, a markdown table renderer, anything that emits tags from model text — and its output gets escaped into inert text at best, or the escape stops covering the new construct at worst. Add any *other* place that renders assistant content (a task-step detail view, an incident summary, a notification preview) and it starts with no protection at all, because the protection lives in one component rather than in the data path.
+
+  **The durable fix, flagged as a follow-up and deliberately not built in Item #6:** sanitize with DOMPurify (or drop `dangerouslySetInnerHTML` for a real markdown renderer with HTML disabled) so safety comes from a library that is auditable and centrally applied, not from three regexes in the right order in one file. Until then, treat that function as load-bearing security code and review any change to it as such.
+
 ---
