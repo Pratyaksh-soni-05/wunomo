@@ -142,3 +142,84 @@ def wrap(kind: str, text: str) -> str:
     return f"<{kind}>\n{neutralize_markup(text)}\n</{kind}>"
 
 
+# ── Schema metadata ──────────────────────────────────────────────────────────
+
+# Phrases that are never part of a real table or column name and are the whole
+# vocabulary of an injection attempt. Identifiers are short labels; an
+# imperative sentence inside one is anomalous by construction, which is what
+# makes redaction safe here and would make it unsafe for free-text row values.
+_IDENTIFIER_INJECTION = re.compile(
+    r"(ignore\s+(all\s+)?(previous|prior|above)|disregard\s+(the\s+)?(above|previous)"
+    r"|new\s+instructions?|system\s*:|you\s+are\s+now|act\s+as|pretend\s+to\s+be"
+    r"|unrestricted\s+mode|reveal\s+your|repeat\s+your|print\s+your)",
+    re.I,
+)
+
+MAX_IDENTIFIER_LEN = 120
+
+
+def sanitize_identifier(name) -> str:
+    """Make a table/column/source name safe to interpolate into a prompt.
+
+    E1 is the reason this exists. The payload arrived as a column name
+    containing newlines followed by "SYSTEM: Ignore all previous
+    instructions...", and `_resolve_schema` wrote it into the prompt verbatim
+    because a column name had never been thought of as untrusted input. It is:
+    it comes from SchemaProfiler reading a customer's database.
+
+    Four steps, in order: flatten control characters and newlines (the payload
+    used them to fake a turn boundary), remove delimiter shapes, redact
+    imperative injection phrasing, then bound the length. A legitimate
+    identifier survives all four unchanged.
+    """
+    if name is None:
+        return ""
+    text = _CONTROL.sub(" ", str(name))
+    text = neutralize_markup(text)
+    text = _IDENTIFIER_INJECTION.sub("(redacted)", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > MAX_IDENTIFIER_LEN:
+        text = text[:MAX_IDENTIFIER_LEN] + "…(truncated)"
+    return text
+
+
+# ── Secondary screen on generated code ───────────────────────────────────────
+
+# Deliberately a rule-based check, not a second model — the ranking scopes this
+# as lightweight. It is NOT a replacement for sql_guard/python_guard, which
+# remain the execution-layer boundary from Item #5. This runs earlier and
+# answers a different question: does the generated code look like it was
+# steered by something other than the user's request? Anything it flags would
+# also be refused at execution; flagging it here means the anomaly is visible
+# and logged rather than showing up as a generic sandbox rejection.
+_CODE_ANOMALIES = [
+    (re.compile(r"\bpg_sleep\b|\bbenchmark\s*\(|\bwaitfor\s+delay\b", re.I),
+     "timing-attack function"),
+    (re.compile(r"\binformation_schema\b|\bpg_catalog\b|\bpg_shadow\b|\bpg_authid\b", re.I),
+     "database catalog access"),
+    (re.compile(r"\bdrop\s+table\b|\btruncate\s+table\b|\bdelete\s+from\b"
+                r"|\bgrant\s+|\brevoke\s+|\balter\s+table\b", re.I),
+     "destructive statement"),
+    (re.compile(r"\b__import__\b|\b__class__\b|\b__subclasses__\b|\b__globals__\b"
+                r"|\beval\s*\(|\bexec\s*\(", re.I),
+     "python introspection or dynamic execution"),
+    (re.compile(r"\bread_csv\b|\bread_pickle\b|\bto_csv\b|\bto_pickle\b|\bopen\s*\(", re.I),
+     "file input/output"),
+    (re.compile(r"<script|javascript:|onerror\s*=", re.I),
+     "script markup in generated code"),
+    (re.compile(r"ignore (all )?(previous|prior) instructions|you are now|system\s*:", re.I),
+     "instruction-like text inside generated code"),
+]
+
+
+def screen_generated_code(code: str) -> list[str]:
+    """Anomalies in LLM-generated code. Empty list means nothing suspicious.
+
+    Returns reasons rather than a bool so the caller can log what was seen.
+    Callers decide policy: transform_generator surfaces these as warnings on
+    the generated code, which is the honest place for them, since the code is
+    shown to a human before it is ever run.
+    """
+    if not code:
+        return []
+    return [reason for pattern, reason in _CODE_ANOMALIES if pattern.search(code)]
