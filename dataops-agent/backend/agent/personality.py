@@ -49,7 +49,14 @@ OPERATION_MODE_CONTEXT = {
 RISK_ACTIONS = {
     "high": [],
     "medium": [
+        # detect_schema_drift sat in "low" until Item #7, on the strength of its
+        # name. Measured: when drift exists it rewrites schema_snapshot AND
+        # advances last_profiled_at, then commits — the same two columns
+        # profile_schema/sync_source write, and last_profiled_at is what the
+        # freshness sweep reads. A "detect" that resets staleness tracking is
+        # a write, and belongs with the tools that do the same write.
         "register_data_source", "profile_schema", "ingest_file", "sync_source",
+        "detect_schema_drift",
         "create_quality_rule", "run_quality_checks", "validate_business_rule",
         "create_pipeline", "run_pipeline", "pause_pipeline", "set_pipeline_schedule",
         "backfill_pipeline", "triage_incident", "resolve_incident",
@@ -57,7 +64,7 @@ RISK_ACTIONS = {
         "execute_sql_transform", "run_python_transform",
     ],
     "low": [
-        "list_data_sources", "list_pipelines", "preview_source_data", "detect_schema_drift",
+        "list_data_sources", "list_pipelines", "preview_source_data",
         "generate_sql_transform", "get_quality_report", "list_business_rules",
         "get_pipeline_run_history",
         "check_freshness", "detect_anomalies", "list_open_incidents",

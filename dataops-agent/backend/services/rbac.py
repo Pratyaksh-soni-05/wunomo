@@ -133,7 +133,10 @@ TOOL_CAPABILITIES: dict[str, str] = {
     "ingest_file": "sources.profile",
     "sync_source": "sources.profile",
     "preview_source_data": "view",
-    "detect_schema_drift": "view",
+    # Writes schema_snapshot and last_profiled_at when drift is found (measured,
+    # Item #7) — the same columns profile_schema writes, so the same capability.
+    # Was "view", which let every role including Viewer trigger the write.
+    "detect_schema_drift": "sources.profile",
 
     # Transformation
     "generate_sql_transform": "transforms.generate",
