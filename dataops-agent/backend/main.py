@@ -11,6 +11,7 @@ from sqlalchemy import text
 from config import settings
 from database import engine, Base
 from services.encryption_service import verify_encryption_key_configured
+from services.auth_service import verify_jwt_secret_configured
 from api.v1.tenant_middleware import TenantContextMiddleware
 from api.v1.rate_limit_middleware import RateLimitMiddleware
 from api.v1 import (
@@ -33,6 +34,10 @@ async def lifespan(app: FastAPI):
     # CREDENTIAL_ENCRYPTION_KEY when a tenant touched a source — by which point
     # the deploy looks successful.
     verify_encryption_key_configured()
+    # Same shape, same reason: config.py's JWT_SECRET default is a public
+    # string, and a deploy that boots with it signs every session with it —
+    # silently, because nothing about login would look wrong.
+    verify_jwt_secret_configured()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

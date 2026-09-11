@@ -78,6 +78,55 @@ def verify_password(pw: str, hashed: str) -> bool:
     return bcrypt.checkpw(pw[:72].encode("utf-8"), hashed.encode("utf-8"))
 
 
+# The literal default in config.py. It is on GitHub, so a deployment that
+# somehow boots with it is signing every token with a public string.
+_PLACEHOLDER_JWT_SECRET = "dev-jwt-secret"
+# HS256 needs at least as many bytes of secret as the hash width to give the
+# strength it advertises; the value that was actually in .env until Item #8
+# was 9 characters.
+_MIN_JWT_SECRET_LEN = 32
+
+
+class JwtSecretMisconfiguredError(RuntimeError):
+    pass
+
+
+def verify_jwt_secret_configured() -> None:
+    """Fail loudly at app startup rather than on the first login.
+
+    Mirrors encryption_service.verify_encryption_key_configured(), for the
+    same reason and with the same test carve-out. config.py declares
+    `JWT_SECRET: str = "dev-jwt-secret"`, so a fresh clone, a stripped CI
+    environment, or a deploy whose .env never made it across would boot
+    cleanly and then sign every session with a value anyone can read in the
+    repository. Nothing would raise; logins would simply work. That is the
+    failure mode this closes.
+
+    Called from main.py's lifespan hook. Tests set APP_ENV=test (conftest.py
+    line 2) and use whatever the environment provides, exactly as the
+    encryption guard allows them to.
+    """
+    if settings.APP_ENV == "test":
+        return
+    secret = (settings.JWT_SECRET or "").strip()
+    if not secret or secret == _PLACEHOLDER_JWT_SECRET:
+        raise JwtSecretMisconfiguredError(
+            "JWT_SECRET is unset or still the placeholder from config.py. Every "
+            "token would be signed with a publicly known value. Generate one with:\n"
+            '  python -c "import secrets; print(secrets.token_hex(32))"\n'
+            "then set it in dataops-agent/.env (the file Docker actually reads) "
+            "and recreate the backend:\n"
+            "  docker compose up -d --force-recreate backend"
+        )
+    if len(secret) < _MIN_JWT_SECRET_LEN:
+        raise JwtSecretMisconfiguredError(
+            f"JWT_SECRET is only {len(secret)} characters; at least "
+            f"{_MIN_JWT_SECRET_LEN} are required for HS256 to give the strength "
+            f"it advertises. Regenerate with: "
+            f'python -c "import secrets; print(secrets.token_hex(32))"'
+        )
+
+
 def create_token(data: dict) -> str:
     """Every token this app issues is minted here, so `jti` is added here.
 
