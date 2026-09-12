@@ -1,8 +1,9 @@
 import structlog
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, desc, and_
+from sqlalchemy import select, desc, and_, text
 from database import AsyncSessionLocal
-from models.all_models import AuditLog
+from models.all_models import AuditLog, gen_uuid
+from services import audit_chain
 from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
@@ -67,7 +68,28 @@ class AuditTrail:
         )
         try:
             async with AsyncSessionLocal() as db:
+                # Serialise appends PER TENANT for the length of this
+                # transaction. Without this, two concurrent log_action calls
+                # for the same tenant could both read the same "previous" hash
+                # and produce two rows pointing at one parent — a fork, which
+                # the verifier would then report as a link break forever. The
+                # lock is transaction-scoped and keyed on the tenant, so other
+                # tenants are never blocked by it.
+                await db.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtext(:tid))"),
+                    {"tid": self.tenant_id},
+                )
+                prev = (await db.execute(
+                    select(AuditLog.row_hash)
+                    .where(AuditLog.tenant_id == self.tenant_id,
+                           AuditLog.row_hash.isnot(None))
+                    .order_by(desc(AuditLog.chain_seq))
+                    .limit(1)
+                )).scalar_one_or_none()
+                prev_hash = prev or audit_chain.GENESIS
+
                 entry = AuditLog(
+                    id=gen_uuid(),
                     tenant_id=self.tenant_id,
                     actor=actor,
                     action=action,
@@ -76,7 +98,13 @@ class AuditTrail:
                     payload=payload or {},
                     ip_address=ip_address,
                     created_at=utcnow(),
+                    prev_hash=prev_hash,
                 )
+                # The hash covers id and created_at, so both must be fixed
+                # before hashing — hence the explicit id above rather than the
+                # column default, which only fires at flush.
+                entry.row_hash = audit_chain.compute_row_hash(
+                    audit_chain.row_to_dict(entry), prev_hash)
                 db.add(entry)
                 await db.commit()
                 await db.refresh(entry)

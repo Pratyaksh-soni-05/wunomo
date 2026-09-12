@@ -1,7 +1,8 @@
 import uuid, enum
 from datetime import datetime
 from sqlalchemy import (Column, String, Text, Boolean, Integer, Float,
-    DateTime, ForeignKey, JSON, Enum as SAEnum, UniqueConstraint)
+    DateTime, ForeignKey, JSON, Enum as SAEnum, UniqueConstraint,
+    BigInteger, Sequence)
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import TypeDecorator
 from database import Base
@@ -268,6 +269,16 @@ class AuditLog(Base):
     payload = Column(JSON, default=dict)
     ip_address = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Tamper-evidence (Item #9). Rows are append-only at the database level
+    # (trigger, see migration a7c2e9f1b3d4) and hash-chained PER TENANT: each
+    # row's row_hash covers its own content plus the previous row's row_hash,
+    # so altering any row invalidates every row after it. chain_seq is
+    # database-assigned so chain order cannot depend on app-container clocks.
+    # See services/audit_chain.py for the exact hash definition.
+    chain_seq = Column(BigInteger, Sequence("audit_logs_chain_seq"), nullable=True)
+    prev_hash = Column(String(64), nullable=True)
+    row_hash = Column(String(64), nullable=True)
+    __table_args__ = (UniqueConstraint("chain_seq", name="uq_audit_logs_chain_seq"),)
 
 
 class ApprovalRequest(Base):
