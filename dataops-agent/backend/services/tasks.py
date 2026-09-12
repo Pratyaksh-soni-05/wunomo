@@ -438,3 +438,19 @@ def generate_daily_reports():
 async def _daily_reports():
     """Placeholder — full implementation in Phase 3."""
     log.info("daily_reports_generated")
+
+
+@celery_app.task
+def anchor_audit_chains():
+    """Daily: record each tenant's audit-chain tail hash outside the database.
+    See services/audit_anchor.py for why and what. No tenant context is set
+    here on purpose -- the anchor reads every tenant as the maintenance role,
+    exactly like scripts/verify_audit_chain.py."""
+    import asyncio
+    from services.audit_anchor import anchor_audit_chains as _anchor
+
+    async def _run():
+        summary = await _anchor()
+        log.info("audit_anchor.complete", **summary)
+
+    asyncio.run(_run())

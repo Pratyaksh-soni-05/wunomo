@@ -43,6 +43,13 @@ celery_app.conf.beat_schedule = {
         "task": "services.tasks.check_scheduled_pipelines",
         "schedule": 60.0,
     },
+    # Item #9 follow-up: mail every tenant's audit-chain tail hash somewhere
+    # this database cannot reach, once a day. Same static-entry pattern as
+    # everything above; the task body is services/audit_anchor.py.
+    "anchor-audit-chains-24hr": {
+        "task": "services.tasks.anchor_audit_chains",
+        "schedule": 86400.0,
+    },
     "daily-reports-24hr": {
         "task": "services.tasks.generate_daily_reports",
         "schedule": 86400.0,

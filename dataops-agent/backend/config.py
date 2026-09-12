@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     SMTP_FROM: str = "axiom@dataops.ai"
     SMTP_USE_TLS: bool = True
     ALERT_EMAIL: str = ""
+    # Item #9 follow-up: where the daily audit-chain tail hashes are mailed.
+    # Empty means "not anchored" and the task logs an ERROR every run until
+    # it is set -- the local file it also writes is a convenience copy on the
+    # same host, not an anchor.
+    ANCHOR_NOTIFICATION_EMAIL: str = ""
+    AUDIT_ANCHOR_LOG_PATH: str = "audit_chain_anchors.log"
     SLACK_BOT_TOKEN: str = ""
     SLACK_DEFAULT_CHANNEL: str = "#dataops-alerts"
     ENABLE_AUTONOMOUS_MODE: bool = False
