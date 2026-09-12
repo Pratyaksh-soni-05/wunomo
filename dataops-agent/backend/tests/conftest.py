@@ -183,18 +183,38 @@ def delete_tenants(conn, tenant_ids):
         params[key] = [r[0] for r in conn.execute(text(q), params)] or [""]
 
     deleted = {}
-    for table, extra in DELETION_PLAN:
-        where = "tenant_id = ANY(:ids)" + (f" OR {extra}" if extra else "")
-        r = conn.execute(text(f"DELETE FROM {table} WHERE {where}"), params)
+    # audit_logs is append-only at the database level (Item #9): a BEFORE
+    # UPDATE OR DELETE trigger raises for every role, the superuser included
+    # -- measured, not assumed. The ONLY way past it is to disable triggers
+    # for the session, which Postgres restricts to superusers; the app role
+    # cannot do this. This teardown runs as the maintenance role, deletes
+    # whole tenants the run created, and each tenant's audit rows form their
+    # own hash chain -- so removing a tenant removes a complete chain and
+    # breaks nothing.
+    #
+    # Session-level SET with a RESET in finally, NOT `SET LOCAL`: the admin
+    # engine is created with isolation_level="AUTOCOMMIT", under which
+    # engine.begin() opens no real transaction block, and SET LOCAL outside
+    # a transaction block is a silent no-op. The first version of this used
+    # SET LOCAL and every teardown failed with the trigger's error while a
+    # direct call on a transactional engine worked -- that difference was
+    # the whole bug.
+    conn.execute(text("SET session_replication_role = replica"))
+    try:
+        for table, extra in DELETION_PLAN:
+            where = "tenant_id = ANY(:ids)" + (f" OR {extra}" if extra else "")
+            r = conn.execute(text(f"DELETE FROM {table} WHERE {where}"), params)
+            if r.rowcount:
+                deleted[table] = r.rowcount
+        # email_login_codes names the column differently, and tenants goes last.
+        r = conn.execute(text("DELETE FROM email_login_codes WHERE intended_tenant_id = ANY(:ids)"), params)
         if r.rowcount:
-            deleted[table] = r.rowcount
-    # email_login_codes names the column differently, and tenants goes last.
-    r = conn.execute(text("DELETE FROM email_login_codes WHERE intended_tenant_id = ANY(:ids)"), params)
-    if r.rowcount:
-        deleted["email_login_codes"] = r.rowcount
-    r = conn.execute(text("DELETE FROM tenants WHERE id = ANY(:ids)"), params)
-    if r.rowcount:
-        deleted["tenants"] = r.rowcount
+            deleted["email_login_codes"] = r.rowcount
+        r = conn.execute(text("DELETE FROM tenants WHERE id = ANY(:ids)"), params)
+        if r.rowcount:
+            deleted["tenants"] = r.rowcount
+    finally:
+        conn.execute(text("RESET session_replication_role"))
     return deleted
 
 
