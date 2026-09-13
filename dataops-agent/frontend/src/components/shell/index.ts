@@ -4,4 +4,4 @@ export { CommandPalette } from "./CommandPalette";
 export { NotificationsPanel } from "./NotificationsPanel";
 export { ThemeToggle } from "./ThemeToggle";
 export { StubPage } from "./StubPage";
-export { NAV_SECTIONS, ALL_NAV_ITEMS, WORKSPACE_NAV_SECTIONS, AXIOM_NAV_SECTIONS, isAxiomDomain } from "./navItems";
+export { ALL_NAV_ITEMS, RAIL_NAV_ITEMS, RAIL_FOOTER_ITEMS } from "./navItems";

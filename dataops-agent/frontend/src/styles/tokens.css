@@ -135,13 +135,12 @@
   --sidebar-active-border: var(--focus-ring);   /* solid: 3.41:1 vs --deep-ground (light) */
   --sidebar-active-text: var(--on-dark);
 
-  /* Two inline JSX rgba() literals folded into real tokens (Phase 5) —
-     Sidebar.tsx:120's workspace-selector chevron and :167's footer avatar
-     border. Values unchanged, just named. Theme-invariant, same as the
-     rest of the --sidebar-* family — the sidebar's own text/chrome doesn't
-     flip with the app theme, only its base fill does. */
-  --sidebar-chevron: rgba(255, 255, 255, 0.4);
-  --sidebar-avatar-border: rgba(255, 255, 255, 0.2);
+  /* --sidebar-chevron and --sidebar-avatar-border removed 2026-09-14
+     (slice 3) — both fed the old workspace-switcher row and footer avatar
+     border, neither of which exist in the rebuilt sidebar (the workspace
+     switcher moved into the account-row menu; the account row's avatar
+     uses --sidebar-hover-bg-strong, not a bordered circle). Grep-confirmed
+     zero remaining consumers before removing. */
 
   /* ==========================================
      JOB-SCOPED ACCENT TOKENS
@@ -281,16 +280,30 @@
      exception value in the dark blocks below. */
   --focus-ring: #0056FF;
 
-  /* Accent-tinted translucent overlays — still derived from --ocean-500,
-     not yet repointed to the new accent blue. Deferred to Phase 5 along
-     with the sidebar consumers below: .sidebar-item.active and
-     .badge-count.badge-live are both sidebar JSX/CSS, and .input:focus's
-     shadow tracks whatever --accent-border/--focus-ring end up being once
-     that's settled. Left alone on purpose, not forgotten. */
-  --accent-fill-a35: color-mix(in srgb, var(--ocean-500) 35%, transparent);
-  --accent-fill-a50: color-mix(in srgb, var(--ocean-500) 50%, transparent);
-  --accent-border-a15: color-mix(in srgb, var(--ocean-500) 15%, transparent);
-  --chart-accent-fill-a12: color-mix(in srgb, var(--ocean-500) 12%, transparent); /* was: rgba(91,136,178,0.12) — TrendCharts.tsx's QualityTrendChart area fill, the 4th ocean-500 literal */
+  /* Accent-tinted translucent overlays — RESOLVED 2026-09-14 (slice 3, the
+     sidebar rebuild). The comment this replaces named three consumers as
+     "deferred to Phase 5 along with the sidebar" — turned out only one of
+     the four tokens in this block was actually a sidebar token at all;
+     traced every real consumer via grep rather than trusting the old
+     comment (see docs/design/UI_REBUILD_INVENTORY.md §8/slice 3):
+       - --accent-fill-a35 had ZERO consumers, grep-confirmed — dead,
+         removed outright, unrelated to the sidebar.
+       - --accent-fill-a50 fed .sidebar-item .badge-count.badge-live — the
+         old sidebar's "AXIOM · Live" nav-item tag. The new rail (matching
+         wunomo-all-screens.html) has no AXIOM item and no "Live" concept
+         at all, so this consumer is gone with the old sidebar, not
+         migrated. Token and its one CSS rule both removed.
+       - --accent-border-a15 (.input:focus's glow, every form input
+         app-wide) was NEVER a sidebar token despite living in this block —
+         repointed to --focus-ring below so it moves with "focus-ring
+         family" like everything else that's allowed to stay blue.
+       - --chart-accent-fill-a12 (TrendCharts.tsx's chart area fill) also
+         isn't a sidebar token — it's paired with --chart-accent, which
+         slice 2 explicitly exempted (chart-series colour is functional,
+         not brand). Left exactly as is: migrating the fill without its
+         own line color would desync the chart from itself. */
+  --accent-border-a15: color-mix(in srgb, var(--focus-ring) 15%, transparent);
+  --chart-accent-fill-a12: color-mix(in srgb, var(--ocean-500) 12%, transparent); /* was: rgba(91,136,178,0.12) — TrendCharts.tsx's QualityTrendChart area fill, the 4th ocean-500 literal. Exempt, same reasoning as --chart-accent. */
 
   /* Modal/palette scrim — deliberately theme-invariant, see Phase 1's note:
      a scrim dimming the page behind a modal isn't "the text color," it
@@ -331,8 +344,7 @@
   --shadow-xl: 0 16px 48px rgba(22,35,58,0.16), 0 8px 16px rgba(22,35,58,0.08);
 
   /* Layout */
-  --sidebar-w: 220px;
-  --sidebar-w-collapsed: 60px;
+  --sidebar-w: 228px;  /* was 220px — matches wunomo-all-screens.html exactly (slice 3) */
   --topbar-h: 52px;
   --radius-xs: 4px;
   --radius-sm: 6px;

@@ -512,121 +512,108 @@ tr.selected td:first-child {
    ========================================== */
 .app-layout { display: flex; min-height: 100vh; }
 
+/* REBUILT 2026-09-14 (slice 3) to match docs/design/wunomo-all-screens.html
+   exactly — replaces the old ~19-item, multi-section, domain-crossfading
+   sidebar entirely (workspace-switcher row, AXIOM-mode back-link, the
+   crossfade animation between them, and the collapse-to-icons feature are
+   all gone, not hidden — see docs/design/UI_REBUILD_INVENTORY.md, slice 3,
+   and findings item 90 for collapse specifically). Colours are still every
+   existing --sidebar-* token, unchanged — this is a structural rebuild of
+   what sits inside the same dark chrome, not a repaint. */
 .sidebar {
   width: var(--sidebar-w); min-height: 100vh; background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column; flex-shrink: 0;
   position: fixed; top: 0; left: 0; bottom: 0; z-index: 40;
-  transition: width var(--t-slow);
 }
-.sidebar.collapsed { width: var(--sidebar-w-collapsed); }
-.sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 16px 14px; }
-/* The "tiled" treatment — a solid blue square with the mark in white on
-   top, same design as src/app/icon.svg (the favicon). Chosen over a bare
-   WunomoMark because a solid-fill tile stays legible smaller than a
-   transparent-background mark does. Background is --focus-ring, NOT
-   --accent-fill: the monogram is one of dark mode's two allowed blues
-   (#2277FF, same as the focus ring, per the brief) — --accent-fill would
-   have been wrong here, it inverts to near-white in dark mode (Decision 1,
-   a rule for buttons, not the monogram). Caught this exact bug live in the
-   dark-theme screenshot before shipping it. 28px at rest; the collapsed
-   floor below is separate and larger — below 32px the mark stops reading
-   as "w" and looks like "u". */
+.sidebar-logo { display: flex; align-items: center; gap: 8px; padding: 16px 14px 13px; }
+/* Real WunomoMark SVG, not the preview's plain-letter placeholder (a mockup
+   shortcut, not a rebrand decision — confirmed 2026-09-14). Sized to the
+   preview's compact 21px slot; background stays --focus-ring, one of the
+   two colours still allowed to be blue. */
 .sidebar-logo-icon {
-  width: 28px; height: 28px; background: var(--focus-ring); border-radius: var(--radius-sm);
+  width: 21px; height: 21px; background: var(--focus-ring); border-radius: var(--radius-sm);
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 .sidebar-logo-icon svg { width: 60%; height: 60%; color: #FFFFFF; }
-.sidebar.collapsed .sidebar-logo-icon { width: 32px; height: 32px; }
-.sidebar-logo-text { color: var(--on-dark); font-size: 15px; font-weight: 700; letter-spacing: -0.3px; white-space: nowrap; }
-.sidebar-logo-text span { color: var(--midnight-300); }
-.sidebar-workspace { padding: 8px 12px; border-bottom: 1px solid var(--sidebar-hairline); }
-.sidebar-workspace-sel {
-  display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: var(--radius-sm);
-  color: var(--sidebar-text-subtle); font-size: 12px; font-weight: 500; cursor: pointer; transition: background var(--t-fast);
-}
-.sidebar-workspace-sel:hover { background: var(--sidebar-hover-bg-strong); }
-.sidebar-workspace-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* AXIOM-mode escape hatch (2026-08 IA restructure) - occupies the same slot
-   as .sidebar-workspace-sel above, never both at once. Uses --on-dark, not
-   --surface or a bare light color, since this sits on the permanently-dark
-   sidebar background (see the existing --on-dark gotcha in GOTCHAS.md). */
-.sidebar-back-link {
-  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 9px;
-  border-radius: var(--radius-sm); background: none; border: none; cursor: pointer;
-  color: var(--on-dark); font-size: 12px; font-weight: 600; transition: background var(--t-fast);
-}
-.sidebar-back-link:hover { background: var(--sidebar-hover-bg-strong); }
-.sidebar-back-link svg { flex-shrink: 0; }
-.sidebar.collapsed .sidebar-back-link span { display: none; }
-.sidebar.collapsed .sidebar-back-link { justify-content: center; padding: 7px; }
-.sidebar-nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px 0; }
-/* Workspace<->AXIOM crossfade (2026-08 IA restructure). Only ever toggled
-   by Sidebar.tsx's own post-mount domain-change effect - never applied on
-   first render, so a deep link/hard refresh paints at full opacity with no
-   flash. See Sidebar.tsx's FADE_OUT_MS comment for the full sequence. */
-.sidebar-nav-content { opacity: 1; transition: opacity var(--t-fast); }
-.sidebar-nav-content.fading { opacity: 0; }
-.sidebar-section { padding: 16px 12px 4px; }
-.sidebar-section-label { font-size: 10px; font-weight: 600; color: var(--sidebar-text-faint); text-transform: uppercase; letter-spacing: 0.08em; }
-/* Tier 3 (Phase 5, 2026-08-19): ghost at rest, bordered box on hover, same
-   language as .btn-icon/.topbar-icon-btn — border starts transparent so
-   :hover's border doesn't shift layout (:hover still swaps border-color;
-   :active moved to a box-shadow bar instead, see below). min-height matches
-   the 44px floor; collapsed mode (below) adds min-width so the icon-only
-   state is a proper 44x44 target, not just tall. Active state is the
-   near-black-ceiling pattern (§4 of the brief, AMENDED 2026-08-19 per
-   findings item 54 — see tokens.css for the current light/dark values and
-   the amendment detail). .badge-count.badge-live below is NOT part of this
-   pass — still --accent-fill-a50 (ocean-500-derived), left open,
-   see report. */
-.sidebar-item {
-  display: flex; align-items: center; gap: 10px; padding: 8px 14px; margin: 1px 8px;
-  border-radius: var(--radius-sm); color: var(--sidebar-text); font-size: 13px; font-weight: 500;
-  cursor: pointer; white-space: nowrap; min-height: 44px;
-  border: 1px solid transparent;
-  transition: background var(--t-slow), border-color var(--t-slow), color var(--t-slow);
-}
-.sidebar-item:hover { background: var(--sidebar-hover-bg); border-color: var(--sidebar-hairline); color: var(--sidebar-text-hover); }
-/* Near-black-ceiling amendment (§4, findings item 54) — was a full 1px
-   border color-swap (matching :hover's own shape, differentiated only by
-   colour); a left-edge box-shadow bar instead, same mechanism as
-   tr.selected, since a shape reads at any luminance where a colour-only
-   swap on an identically-shaped border doesn't. --sidebar-active-border
-   already carries the right colour per theme (tokens.css). */
-.sidebar-item.active { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); box-shadow: inset 3px 0 0 var(--sidebar-active-border); }
-.sidebar-item .badge-count { background: var(--sidebar-badge-bg); color: var(--sidebar-badge-text); padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; margin-left: auto; }
-.sidebar-item .badge-count.badge-live { background: var(--accent-fill-a50); color: rgba(200,222,240,0.95); }
-.sidebar-item svg { flex-shrink: 0; }
-.sidebar-footer { padding: 10px 12px; border-top: 1px solid var(--sidebar-hairline); display: flex; align-items: center; gap: 8px; }
-.sidebar-footer-info { flex: 1; min-width: 0; overflow: hidden; }
-.sidebar-footer-name { font-size: 12px; font-weight: 600; color: var(--sidebar-footer-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-footer-sub { font-size: 10px; color: var(--sidebar-footer-text-muted); margin-top: 1px; text-transform: capitalize; }
-/* Same Tier 3 treatment as .sidebar-item — an icon-only button, same rules. */
-.sidebar-toggle-btn {
-  background: none; border: 1px solid transparent; cursor: pointer;
-  min-width: 44px; min-height: 44px; padding: 0; border-radius: var(--radius-sm);
-  color: var(--sidebar-icon-muted); display: flex; align-items: center; justify-content: center;
-  transition: background var(--t-slow), border-color var(--t-slow), color var(--t-slow);
-}
-.sidebar-toggle-btn:hover { color: var(--sidebar-icon-muted-hover); background: var(--sidebar-hover-bg); border-color: var(--sidebar-hairline); }
-.sidebar.collapsed .sidebar-logo-text,
-.sidebar.collapsed .sidebar-section-label,
-.sidebar.collapsed .sidebar-item > span,
-.sidebar.collapsed .sidebar-item .badge-count,
-.sidebar.collapsed .sidebar-workspace-name,
-.sidebar.collapsed .sidebar-workspace-sel > svg,
-.sidebar.collapsed .sidebar-footer-info { display: none; }
-.sidebar.collapsed .sidebar-item { min-width: 44px; }
-.sidebar.collapsed .sidebar-workspace { padding: 6px; }
-.sidebar.collapsed .sidebar-workspace-sel { justify-content: center; padding: 7px; }
-.sidebar.collapsed .sidebar-item { justify-content: center; padding: 8px; gap: 0; }
-.sidebar.collapsed .sidebar-logo { justify-content: center; padding: 14px 8px; }
-.sidebar.collapsed .sidebar-section { padding: 10px 6px 2px; }
-.sidebar.collapsed .sidebar-footer { justify-content: center; padding: 8px; }
+/* Serif, no "AI" suffix — matches the preview's actual wordmark treatment,
+   confirmed as the intended copy, not just its layout. */
+.sidebar-logo-text { color: var(--on-dark); font-family: var(--font-display); font-size: 16px; font-weight: 400; white-space: nowrap; }
 
-.main-content { flex: 1; margin-left: var(--sidebar-w); display: flex; flex-direction: column; min-height: 100vh; transition: margin-left var(--t-slow); }
-.main-content.expanded { margin-left: var(--sidebar-w-collapsed); }
+.sidebar-newproject {
+  margin: 0 10px 12px; padding: 7px 10px; border: 1px solid var(--sidebar-hairline); border-radius: var(--radius);
+  display: flex; align-items: center; gap: 8px; color: var(--sidebar-text); font-size: 13px;
+  background: transparent; width: calc(100% - 20px); transition: background var(--t-fast), color var(--t-fast);
+}
+.sidebar-newproject:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-hover); }
+
+.sidebar-nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding-bottom: 8px; }
+
+.sidebar-section { padding: 12px 14px 5px; }
+.sidebar-section-label {
+  font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--sidebar-text-faint);
+}
+.sidebar-section-label-link { background: none; border: none; cursor: pointer; transition: color var(--t-fast); }
+.sidebar-section-label-link:hover { color: var(--sidebar-text-subtle); }
+
+/* Full-width rows stay easy to hit regardless of visual height, so this
+   intentionally sits below the app's usual 44px Tier-3 floor (that floor
+   is about small icon-only controls, not a full-width nav row) — matching
+   the preview's actual compact spacing. */
+.sidebar-item {
+  display: flex; align-items: center; gap: 9px; margin: 1px 8px; padding: 6px 8px;
+  border-radius: var(--radius); color: var(--sidebar-text); font-size: 13px; font-weight: 500;
+  cursor: pointer; white-space: nowrap; text-decoration: none;
+  transition: background var(--t-slow), color var(--t-slow);
+}
+.sidebar-item:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-hover); }
+.sidebar-item.active { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); box-shadow: inset 3px 0 0 var(--sidebar-active-border); }
+.sidebar-item-icon { flex: none; opacity: 0.6; display: flex; }
+.sidebar-item.active .sidebar-item-icon { opacity: 0.9; }
+.sidebar-item .badge-count { margin-left: auto; font-size: 11px; padding: 0 6px; border-radius: var(--radius-xs); line-height: 17px; }
+.sidebar-item .badge-count.badge-attention { color: var(--warning); background: var(--warning-bg); }
+.sidebar-item-skeleton { height: 30px; margin: 1px 8px; border-radius: var(--radius); background: var(--sidebar-hover-bg); }
+
+/* Nested under whichever project is currently open — the preview only ever
+   shows these for the screen's own active project, never for every
+   project at once (see slice 3's disagreement log). Real data
+   (getProjectChannels), not placeholder text. */
+.sidebar-rsub {
+  display: block; margin: 0 8px 0 30px; padding: 4px 8px; border-radius: var(--radius-sm);
+  color: var(--sidebar-text-faint); font-size: 12.5px; text-decoration: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.sidebar-rsub:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-subtle); }
+
+.sidebar-footer { margin-top: auto; border-top: 1px solid var(--sidebar-hairline); padding: 8px 0 6px; }
+.sidebar-account { position: relative; margin: 2px 8px 0; }
+.sidebar-account-trigger {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 8px;
+  border-radius: var(--radius); background: none; border: none; cursor: pointer; text-align: left;
+  transition: background var(--t-fast);
+}
+.sidebar-account-trigger:hover { background: var(--sidebar-hover-bg); }
+.sidebar-account-avatar {
+  width: 22px; height: 22px; border-radius: var(--radius-sm); background: var(--sidebar-hover-bg-strong);
+  display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600;
+  color: var(--sidebar-text-hover); flex-shrink: 0;
+}
+.sidebar-account-name { font-size: 12.5px; color: var(--sidebar-text-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-account-menu {
+  position: absolute; bottom: calc(100% + 4px); left: 0; right: 0; z-index: 60;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl); overflow: hidden; animation: modal-in 0.12s ease;
+}
+.sidebar-account-menu-item {
+  display: block; width: 100%; padding: 10px 14px; font-size: 13px; text-align: left;
+  background: none; border: none; cursor: pointer; color: var(--text-primary);
+  transition: background var(--t-fast);
+}
+.sidebar-account-menu-item:hover { background: var(--surface-hover); }
+.sidebar-account-menu-item + .sidebar-account-menu-item { border-top: 1px solid var(--border); }
+
+.main-content { flex: 1; margin-left: var(--sidebar-w); display: flex; flex-direction: column; min-height: 100vh; }
 .page-content { flex: 1; overflow-y: auto; min-height: calc(100vh - var(--topbar-h)); }
 
 .topbar {
@@ -666,15 +653,11 @@ tr.selected td:first-child {
    background (--accent-subtle-bg) flips to an opaque grey in dark mode, so
    a fixed dark-navy text color would go dark-on-dark. */
 .credits-badge { display: flex; align-items: center; gap: 5px; background: var(--accent-subtle-bg); border: 1px solid var(--accent-subtle-border); border-radius: var(--radius-sm); padding: 4px 10px; font-size: 12px; font-weight: 600; color: var(--text-primary); }
-/* 44px (Phase 5, 2026-08-19) — was 30px, out of step with every other
-   topbar icon button since Phase 2. Colour unchanged, only the target size
-   and the real-button conversion (item 51) were asked for here. */
-.topbar-avatar {
-  width: 44px; height: 44px; background: var(--midnight-600); border-radius: 50%;
-  display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;
-  color: var(--on-dark); cursor: pointer; border: 2px solid var(--midnight-200); flex-shrink: 0; transition: border-color var(--t-slow);
-}
-.topbar-avatar:hover { border-color: var(--ocean-300); }
+/* .topbar-avatar removed 2026-09-14 (slice 3) — the account menu (avatar,
+   switch workspace, log out) moved to the sidebar's own account row;
+   Topbar no longer shows an avatar at all, matching
+   wunomo-all-screens.html's PHEAD exactly (no identity element in its
+   topbar either). */
 .ai-status { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .ai-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: pulse-dot 2s ease infinite; flex-shrink: 0; }
 .notif-dot { position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; background: var(--danger); border-radius: 50%; border: 2px solid var(--surface); }

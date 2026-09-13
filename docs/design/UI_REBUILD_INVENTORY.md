@@ -300,9 +300,20 @@ it reviews as one self-contained diff instead of riding along inside feature sli
    before/after, cascade audit, and contrast table). `--chart-accent` exemption re-confirmed and
    annotated as a decision; `--accent-fill-a35/-a50` etc. overlays deferred to slice 3 as planned;
    `.badge-midnight`'s pre-existing missing dark-mode override fixed and logged as finding 88.
-3. **Global shell rebuild.** New 6-item icon rail (Home, Scheduled, Needs you, Projects, Settings,
-   Team) replacing `Sidebar`/`navItems.tsx`'s domain-crossfade model; Topbar breadcrumb updated to
-   match. **Size: M.**
+3. ✅ **SHIPPED 2026-09-14.** Global shell rebuild — sidebar rebuilt to match
+   `wunomo-all-screens.html` exactly (real WunomoMark, serif wordmark, no "AI" suffix; collapse-to-
+   icons retired, findings item 90; icons redrawn to the preview's 7 glyphs; workspace switcher
+   folded into a new account-row menu alongside Log out, which moved out of Topbar). Interim
+   navigation resolved by pointing every rail item at what's real (Home→`/dashboard`, Needs
+   you→`/approvals`, Projects→existing pages, Scheduled→`StubPage`, the one genuinely new route);
+   every route the old sidebar carried stays reachable via the command palette
+   (`ALL_NAV_ITEMS`, now a superset). Nested project chats use real `getProjectChannels` data,
+   deep-linking through the existing `/chat?session=` mechanism. `--accent-fill-a50`/`.badge-live`
+   and the dead `--accent-fill-a35` removed (only one of the four deferred overlays was ever
+   actually a sidebar token); `--accent-border-a15` repointed to `--focus-ring`;
+   `--chart-accent-fill-a12` confirmed exempt, same reasoning as `--chart-accent`. Findings 89
+   (slice 2's colour audit missed `rgba()` literals) and 91 (`WorkspacePicker`'s disabled "current"
+   row is unreadable in dark mode, pre-existing, newly exercised) logged during this slice.
 4. **Home screen.** Restyle current Dashboard content under the new shell; de-AXIOM-ify copy/CTAs
    that assume a single agent. Nearly pure reuse of `KpiCard`/`TrendCharts`/`RecentRunsCard`/
    `ApprovalsCard`/`AxiomActivityCard`. **Size: S.**

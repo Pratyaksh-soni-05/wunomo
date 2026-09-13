@@ -7,7 +7,7 @@ import { ALL_NAV_ITEMS } from "./navItems";
 import { ThemeToggle } from "./ThemeToggle";
 import { Badge } from "@/components/ui";
 import { taskStatusVariant, taskStatusLabel } from "@/components/tasks/taskDisplay";
-import { clearSession, checkDbHealth, getToken, getActiveTasks, type DecodedUser } from "@/lib/api";
+import { checkDbHealth, getToken, getActiveTasks } from "@/lib/api";
 
 const HEALTH_POLL_MS = 30000;
 // Wunomo Projects Phase 4 frontend, slice 12: 20s matches the old
@@ -21,16 +21,12 @@ const ACTIVE_TASKS_IDLE_POLL_MS = 60000;
 export function Topbar({
   onToggleSidebar,
   onOpenCommandPalette,
-  user,
 }: {
   onToggleSidebar: () => void;
   onOpenCommandPalette: () => void;
-  user: DecodedUser | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [accountOpen, setAccountOpen] = useState(false);
-  const accountRef = useRef<HTMLDivElement>(null);
   const [railOpen, setRailOpen] = useState(false);
   const railRef = useRef<HTMLDivElement>(null);
   const [dbHealthy, setDbHealthy] = useState<boolean | null>(null);
@@ -38,7 +34,6 @@ export function Topbar({
 
   const activeSlug = pathname.split("/")[1];
   const activeItem = ALL_NAV_ITEMS.find((i) => i.slug === activeSlug);
-  const initials = user?.email ? user.email.slice(0, 2).toUpperCase() : "?";
 
   useEffect(() => {
     let cancelled = false;
@@ -67,18 +62,6 @@ export function Topbar({
   const activeTasks = activeTasksQuery.data ?? [];
   const attentionTasks = activeTasks.filter((t) => t.needs_attention);
   const otherTasks = activeTasks.filter((t) => !t.needs_attention);
-
-  useEffect(() => {
-    if (!accountOpen) return;
-    const onClick = (e: MouseEvent) => {
-      if (accountRef.current && !accountRef.current.contains(e.target as Node)) setAccountOpen(false);
-    };
-    const t = setTimeout(() => document.addEventListener("click", onClick), 0);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener("click", onClick);
-    };
-  }, [accountOpen]);
 
   useEffect(() => {
     if (!railOpen) return;
@@ -131,10 +114,7 @@ export function Topbar({
                 fontSize: 12, fontWeight: 600,
                 color: attentionTasks.length > 0 ? "var(--warning)" : "var(--text-secondary)",
               }}
-              onClick={() => {
-                setRailOpen((v) => !v);
-                setAccountOpen(false);
-              }}
+              onClick={() => setRailOpen((v) => !v)}
               title="Tasks not yet in a terminal state - running, queued, or waiting on you"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -212,51 +192,6 @@ export function Topbar({
         </div>
         <div style={{ height: 16, width: 1, background: "var(--border)" }} />
         <ThemeToggle />
-        <div style={{ position: "relative" }} ref={accountRef}>
-          {/* Item 51 (2026-08-19): was a <div onClick> — no role, no
-              accessible name, not keyboard-reachable. Real button now,
-              same 44px target its neighboring topbar icon buttons already
-              got in Phase 2. */}
-          <button
-            className="topbar-avatar"
-            onClick={() => {
-              setAccountOpen((v) => !v);
-              setRailOpen(false);
-            }}
-            title={user?.email ?? "Account"}
-            aria-label={user?.email ? `Account menu for ${user.email}` : "Account menu"}
-            aria-haspopup="menu"
-            aria-expanded={accountOpen}
-          >
-            {initials}
-          </button>
-          {accountOpen && (
-            <div className="notif-panel" style={{ width: 220 }}>
-              <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}>
-                <div className="text-sm font-medium truncate">{user?.email ?? "Not signed in"}</div>
-                <div className="text-xs text-muted" style={{ textTransform: "capitalize" }}>{user?.role ?? ""}</div>
-              </div>
-              <button
-                className="flex items-center gap-2"
-                style={{
-                  color: "var(--text-secondary)", width: "100%", minHeight: 44, padding: "0 16px",
-                  fontSize: 13, textAlign: "left", background: "none", border: "none", cursor: "pointer",
-                }}
-                onClick={() => {
-                  clearSession();
-                  router.push("/login");
-                }}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                  <polyline points="16 17 21 12 16 7" />
-                  <line x1="21" y1="12" x2="9" y2="12" />
-                </svg>
-                <span>Log out</span>
-              </button>
-            </div>
-          )}
-        </div>
       </div>
     </header>
   );

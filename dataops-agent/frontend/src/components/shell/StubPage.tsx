@@ -10,7 +10,7 @@ export function StubPage({ title, phase }: { title: string; phase?: number }) {
       <h2 className="font-display text-xl">{title}</h2>
       <p className="text-muted text-sm" style={{ maxWidth: 360 }}>
         {phase
-          ? `This screen is wired to real data in Phase ${phase} — for now it's just a routable stub, part of Phase 7's app shell.`
+          ? `This screen is wired to real data in Phase ${phase} — for now it's just a routable stub.`
           : "This screen is a routable stub for now — real content lands in a later phase."}
       </p>
     </div>

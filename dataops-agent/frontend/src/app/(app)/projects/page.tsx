@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -60,6 +60,20 @@ export default function ProjectsPage() {
   const [renameTarget, setRenameTarget] = useState<ProjectItem | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ProjectItem | null>(null);
+
+  // The sidebar's "New project" button (slice 3) links here with ?new=1
+  // rather than duplicating this page's own create-modal/mutation logic —
+  // same window.location.search + router.replace pattern chat's ?session=
+  // and the agent detail page's ?highlight_source= already use, for the
+  // same reason: useSearchParams() needs a <Suspense> boundary this app's
+  // shell doesn't set up, and this only ever runs client-side anyway.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("new") === "1") {
+      setModalOpen(true);
+      router.replace("/projects");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const projects = useQuery({ queryKey: ["projects"], queryFn: () => listProjects(token) });
 
