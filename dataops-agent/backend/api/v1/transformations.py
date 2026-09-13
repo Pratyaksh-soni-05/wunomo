@@ -11,6 +11,7 @@ from modules.transformation.transform_generator import TransformGenerator
 from modules.transformation.sql_runner import SqlRunner
 from modules.transformation.python_runner import PythonRunner
 from modules.transformation.transform_run_log import log_transform_run
+from services.pii_classifier import enforce_for_source
 from modules.governance.audit_trail import AuditTrail
 
 log = structlog.get_logger()
@@ -121,6 +122,10 @@ async def run_sql(body: RunSqlRequest, user=Depends(require_permission("transfor
         row_limit=body.row_limit or 10_000,
         actor=user["email"],
     )
+    # Item #10: mask pii/phi columns BEFORE the run log, which persists a row
+    # preview into transform_runs -- otherwise the app's own database becomes
+    # a second place the values live.
+    result = await enforce_for_source(user["tenant_id"], body.source_id, result)
     await log_transform_run(
         tenant_id=user["tenant_id"], user_id=user["sub"], session_id=None,
         source_id=body.source_id, transform_type="sql", origin="manual",
@@ -154,6 +159,7 @@ async def run_pandas(body: RunPandasRequest, user=Depends(require_permission("tr
         row_limit=body.row_limit or 50_000,
         actor=user["email"],
     )
+    result = await enforce_for_source(user["tenant_id"], body.source_id, result)  # Item #10
     await log_transform_run(
         tenant_id=user["tenant_id"], user_id=user["sub"], session_id=None,
         source_id=body.source_id, transform_type="pandas", origin="manual",
@@ -169,6 +175,7 @@ async def preview_pandas(body: RunPandasRequest, user=Depends(get_current_user))
     """Runs a Pandas transformation and returns only the first 100 rows. No audit trail."""
     runner = PythonRunner(user["tenant_id"])
     result = await runner.preview(source_id=body.source_id, code=body.code)
+    result = await enforce_for_source(user["tenant_id"], body.source_id, result)  # Item #10
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result

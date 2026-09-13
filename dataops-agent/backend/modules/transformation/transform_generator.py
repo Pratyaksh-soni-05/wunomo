@@ -7,7 +7,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from database import AsyncSessionLocal
 from models.all_models import DataSource, Pipeline
 from services.llm_service import invoke_llm
-from services import prompt_guard
+from services import prompt_guard, pii_classifier
 from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
@@ -275,6 +275,13 @@ class TransformGenerator:
             # written into the prompt verbatim because a column name had never
             # been thought of that way.
             sid = prompt_guard.sanitize_identifier
+            # Item #10: columns classified pii/phi are removed from the prompt
+            # ENTIRELY -- name and type, not just values -- before Item #6's
+            # sanitiser ever sees them. The two compose in that order on
+            # purpose: sensitivity is decided from the snapshot's own
+            # metadata, then whatever survives is neutralised for injection.
+            # Neither knows about the other, and neither needs to.
+            flagged = pii_classifier.sensitive_columns(snapshot)
             lines = [f"Table/source: {sid(source.name)} ({sid(source.source_type.value)})"]
             any_columns = False
             for table_name, table_info in snapshot.items():
@@ -282,13 +289,22 @@ class TransformGenerator:
                 if not columns:
                     continue
                 any_columns = True
+                hidden = flagged.get(table_name, {})
                 lines.append(f"Table: {sid(table_name)}")
                 lines.append(f"  Row count (approx): {sid(table_info.get('row_count', 'unknown'))}")
                 lines.append("  Columns:")
                 for col in columns:
+                    if col.get("column_name") in hidden:
+                        continue
                     nullable = " (nullable)" if col.get("is_nullable") in ("YES", True) else ""
                     lines.append(
                         f"    - {sid(col.get('column_name'))}: {sid(col.get('data_type'))}{nullable}")
+                if hidden:
+                    # The model is told a count, never a name: it should not
+                    # invent columns it cannot see, and "some columns are
+                    # withheld" explains a partial schema without leaking
+                    # what was withheld.
+                    lines.append(f"  ({len(hidden)} column(s) withheld: classified as sensitive)")
 
             if not any_columns:
                 return None, resolved_id

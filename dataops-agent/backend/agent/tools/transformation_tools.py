@@ -1,6 +1,7 @@
 from langchain_core.tools import tool
 from typing import Optional
 from agent.tools._utils import cap_tool_result
+from services.pii_classifier import enforce_for_source
 
 
 @tool
@@ -25,6 +26,9 @@ async def execute_sql_transform(tenant_id: str, user_id: str, session_id: str,
     if dry_run:
         return cap_tool_result(await runner.dry_run(source_id, sql))
     result = await runner.run_on_source(source_id, sql)
+    # Item #10: strip pii/phi columns -- names and values -- before this
+    # result is logged and before it becomes a ToolMessage the model reads.
+    result = await enforce_for_source(tenant_id, source_id, result, strip=True)
     await log_transform_run(
         tenant_id=tenant_id, user_id=user_id, session_id=session_id,
         source_id=source_id, transform_type="sql", origin="chat_agent",
@@ -41,6 +45,7 @@ async def run_python_transform(tenant_id: str, user_id: str, session_id: str,
     from modules.transformation.python_runner import PythonRunner
     from modules.transformation.transform_run_log import log_transform_run
     result = await PythonRunner(tenant_id).run_on_source(source_id, script)
+    result = await enforce_for_source(tenant_id, source_id, result, strip=True)  # Item #10
     await log_transform_run(
         tenant_id=tenant_id, user_id=user_id, session_id=session_id,
         source_id=source_id, transform_type="pandas", origin="chat_agent",

@@ -36,7 +36,10 @@ async def sync_source(tenant_id: str, source_id: str, mode: str = "incremental")
 async def preview_source_data(tenant_id: str, source_id: str, table: str, limit: int = 50) -> dict:
     """Preview sample rows from a source table or file."""
     from modules.ingestion.connector_manager import ConnectorManager
-    return cap_tool_result(await ConnectorManager(tenant_id).preview(source_id, table, limit))
+    # for_llm=True: pii/phi columns are removed outright, name and values,
+    # before this result becomes a ToolMessage the model reads (Item #10).
+    return cap_tool_result(await ConnectorManager(tenant_id).preview(
+        source_id, table, limit, for_llm=True))
 
 @tool
 async def detect_schema_drift(tenant_id: str, source_id: str) -> dict:

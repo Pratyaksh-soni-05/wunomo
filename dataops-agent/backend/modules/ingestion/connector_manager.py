@@ -7,6 +7,7 @@ from sqlalchemy import select, text
 import structlog
 
 from database import AsyncSessionLocal
+from services import pii_classifier
 from models.all_models import DataSource, SourceType
 from config import settings
 from services.tenant_context import tenant_scoped
@@ -133,11 +134,19 @@ class ConnectorManager:
         # Replace NaN/Infinity with None before serialization
         preview_df = df.head(10).where(df.head(10).notna(), other=None)
         null_counts = {c: int(v) for c, v in df.isnull().sum().items()}
+        # Item #10: this preview is produced at ingest time, before any
+        # snapshot exists to consult, so the frame is classified on the spot
+        # and sensitive values are masked. Names remain visible here -- this
+        # is the one LLM-reachable path where they do, because the ingest
+        # result IS the schema discovery and hiding names would defeat it.
+        masked_preview, flagged = pii_classifier.classify_and_mask_frame_preview(
+            df, preview_df.to_dict("records"))
         return {
             "rows": len(df),
             "columns": list(df.columns),
             "dtypes": {c: str(t) for c, t in df.dtypes.items()},
-            "preview": preview_df.to_dict("records"),
+            "preview": masked_preview,
+            "masked_columns": flagged,
             "null_counts": null_counts,
             "null_pct": {c: round(int(v) / len(df) * 100, 2) if len(df) > 0 else 0
                          for c, v in null_counts.items()},
@@ -176,16 +185,33 @@ class ConnectorManager:
             return {"file": file_path, "type": "docx", "status": "error", "error": str(e)}
 
     # ── PREVIEW ───────────────────────────────────────────────────────────────
-    async def preview(self, source_id: str, table: str = "main", limit: int = 50) -> dict:
+    async def preview(self, source_id: str, table: str = "main", limit: int = 50,
+                      for_llm: bool = False) -> dict:
+        """Sample rows, with sensitive columns enforced (Item #10).
+
+        This is the one choke point both consumers of row data pass through:
+        GET /sources/{id}/preview (a person) and the preview_source_data agent
+        tool (the model). They get different treatment, and the difference
+        is the whole design:
+
+          for_llm=False  values in pii/phi columns replaced with "***"; the
+                         column stays, because a person needs to know it
+                         exists to reason about the source.
+          for_llm=True   pii/phi columns REMOVED -- name and values. Nothing
+                         classified sensitive travels to an LLM provider at
+                         all, which is what the request-spy test asserts.
+        """
         async with AsyncSessionLocal() as db:
             source = await db.get(DataSource, source_id)
             if not source or source.tenant_id != self.tenant_id:
                 return {"error": "Source not found"}
+            snapshot = source.schema_snapshot
         try:
             connector = self._get_connector(source)
-            return await connector.preview(table, limit)
+            result = await connector.preview(table, limit)
         except Exception as e:
             return {"error": str(e), "source_id": source_id}
+        return pii_classifier.enforce_on_result(result, snapshot, table, strip=for_llm)
 
     # ── SYNC ──────────────────────────────────────────────────────────────────
     async def sync(self, source_id: str, mode: str = "incremental") -> dict:
