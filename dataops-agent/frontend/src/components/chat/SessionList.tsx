@@ -105,7 +105,7 @@ export function SessionList({
 
       <div className="chat-section-label flex items-center justify-between" style={{ paddingRight: 8 }}>
         <span>Channels</span>
-        <button className="chat-session-delete" title="New channel" onClick={() => setChannelModalOpen(true)}>+</button>
+        <button className="chat-section-action" title="New channel" onClick={() => setChannelModalOpen(true)}>+</button>
       </div>
       <div className="chat-session-list">
         {channelsLoading ? (
