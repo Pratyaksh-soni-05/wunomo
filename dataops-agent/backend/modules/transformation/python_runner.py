@@ -14,6 +14,7 @@ from models.all_models import DataSource
 from modules.governance.audit_trail import AuditTrail
 from modules.transformation import python_guard, python_sandbox
 from services.tenant_context import tenant_scoped
+from services import pii_classifier
 
 log = structlog.get_logger()
 
@@ -95,6 +96,79 @@ def _safe_row_limit(row_limit) -> int:
 # PythonRunner
 # ---------------------------------------------------------------------------
 
+# ── Item #12: column-level access control ───────────────────────────────────
+#
+# What is enforced: a DataFrame given to the sandbox never contains a column
+# classified pii/phi. Not "the script must not print it" -- the column is not
+# there. Enforcement is in THIS process, before pickle.dumps(); the child only
+# ever unpickles the stripped frame (see python_sandbox.run_sandboxed, Item
+# #5, not modified).
+#
+# Where the list comes from:
+#   run_on_source     Item #10's stored classification for the source's table
+#                     (flagged_for_table: the table's own flags, or the union
+#                     when the table is unknown), PLUS on-the-spot
+#                     classification of any column the snapshot has never
+#                     seen -- a column added to the warehouse since the last
+#                     profile is not an unclassified one. A column an admin
+#                     has manually set to `none` IS in the snapshot, so it is
+#                     not re-flagged.
+#   run_on_dataframe  no source, so on-the-spot only, plus whatever the caller
+#                     passes as sensitive_columns.
+
+_KEYERROR_LINE = re.compile(r"^KeyError: (.*)$", re.M)
+
+
+def _classify_frame(df: pd.DataFrame, known) -> set:
+    known = set(known)
+    flagged = set()
+    for c in df.columns:
+        if c in known:
+            continue
+        values = df[c].dropna().head(pii_classifier.VALUE_SAMPLE_SIZE).tolist()
+        level, _ = pii_classifier.classify_column(str(c), str(df[c].dtype), values)
+        if level in ("pii", "phi"):
+            flagged.add(c)
+    return flagged
+
+
+def _sensitive_for_frame(snapshot, table, df: pd.DataFrame) -> set:
+    snapshot = snapshot or {}
+    flagged = set(pii_classifier.flagged_for_table(snapshot, table))
+    # Columns the profiler has classified (auto or manual). Same scoping as
+    # flagged_for_table: the table's own list when known, else every table.
+    tables = [snapshot[table]] if table in snapshot else list(snapshot.values())
+    known = {col.get("column_name")
+             for info in tables if isinstance(info, dict)
+             for col in (info.get("columns") or [])}
+    return flagged | _classify_frame(df, known)
+
+
+def _strip_columns(df: pd.DataFrame, flagged) -> tuple[pd.DataFrame, list]:
+    present = [c for c in df.columns if c in set(flagged)]
+    if not present:
+        return df, []
+    return df.drop(columns=present), present
+
+
+def _withheld_warning(withheld) -> str:
+    return f"{len(withheld)} column(s) withheld from df: classified as sensitive (pii/phi)"
+
+
+def _withheld_key_error(detail: str, withheld) -> str | None:
+    if not detail or not withheld:
+        return None
+    # pandas phrases the error differently for df['x'] (KeyError: 'x') and
+    # df[['x']] (KeyError: "None of [Index(['x'], ...)] are in the [columns]");
+    # match the quoted name anywhere on the KeyError line rather than its shape.
+    for m in _KEYERROR_LINE.finditer(detail):
+        line = m.group(1)
+        for w in withheld:
+            if f"'{w}'" in line or f'"{w}"' in line:
+                return str(w)
+    return None
+
+
 @tenant_scoped
 class PythonRunner:
     """
@@ -111,6 +185,11 @@ class PythonRunner:
          thread-based timeout could not do
       4. Row caps on input and output DataFrames
       5. Audit trail for every execution
+      0. (Item #12, runs before any of the above touches data) Columns
+         classified pii/phi by Item #10 are DROPPED from the DataFrame in
+         this process, before it is pickled for the child. The sandboxed
+         code never has the column in memory; there is nothing for a
+         generated script to print, return, or reconstruct.
 
     Note: the previous version of this docstring claimed the in-process
     sandbox was "sufficient" for LLM-generated code. It was not: a 14-payload
@@ -177,16 +256,19 @@ class PythonRunner:
         df_result = await self._load_dataframe(source_id, row_limit)
         if "error" in df_result:
             return df_result
-        df = df_result["df"]
+        df = df_result["df"]                      # already stripped (Item #12)
+        withheld = df_result.get("withheld", [])
 
         # 3. Execute
-        exec_result = self._execute(code, df)
+        exec_result = self._execute(code, df, withheld=withheld)
         if "error" in exec_result:
             return exec_result
 
         result_df = exec_result["result_df"]
         duration_ms = exec_result["duration_ms"]
         warnings = exec_result.get("warnings", [])
+        if withheld:
+            warnings.append(_withheld_warning(withheld))
 
         # 4. Cap output rows
         truncated = len(result_df) > MAX_ROWS_OUTPUT
@@ -235,10 +317,20 @@ class PythonRunner:
         self,
         df: pd.DataFrame,
         code: str,
+        sensitive_columns=None,
     ) -> dict:
         """
         Runs Pandas transformation code against a DataFrame passed directly.
-        Used by quality checks and pipeline run steps that already have data in memory.
+        (Its docstring used to say quality checks and pipeline steps call
+        this; grep finds no caller outside tests. Kept, and protected.)
+
+        Item #12: there is no source here and so no stored classification
+        to consult. The frame is classified on the spot from its own column
+        names and values, exactly as Item #10 does for an unprofiled source,
+        and the caller may add `sensitive_columns` it knows about. The
+        stripping mechanism is then identical to run_on_source's -- the
+        difference between the two paths is only where the list of columns
+        comes from, never whether it is applied.
 
         Returns: same schema as run_on_source
         """
@@ -248,9 +340,11 @@ class PythonRunner:
         if "error" in safety:
             return safety
 
-        # Cap input
+        # Cap input, then strip -- before anything is pickled for the child.
         df_capped = df.head(MAX_ROWS_INPUT)
-        exec_result = self._execute(code, df_capped)
+        flagged = set(sensitive_columns or ()) | _classify_frame(df_capped, known=())
+        df_capped, withheld = _strip_columns(df_capped, flagged)
+        exec_result = self._execute(code, df_capped, withheld=withheld)
         if "error" in exec_result:
             return exec_result
 
@@ -258,6 +352,9 @@ class PythonRunner:
         truncated = len(result_df) > MAX_ROWS_OUTPUT
         result_df = result_df.head(MAX_ROWS_OUTPUT)
         rows = self._serialize_df(result_df)
+        warnings = exec_result.get("warnings", [])
+        if withheld:
+            warnings.append(_withheld_warning(withheld))
 
         return {
             "rows": rows,
@@ -265,7 +362,7 @@ class PythonRunner:
             "row_count": len(rows),
             "truncated": truncated,
             "duration_ms": exec_result["duration_ms"],
-            "warnings": exec_result.get("warnings", []),
+            "warnings": warnings,
         }
 
     # ------------------------------------------------------------------
@@ -305,7 +402,7 @@ class PythonRunner:
     # Internal: restricted exec
     # ------------------------------------------------------------------
 
-    def _execute(self, code: str, df: pd.DataFrame) -> dict:
+    def _execute(self, code: str, df: pd.DataFrame, withheld=()) -> dict:
         """Executes the transformation in an isolated, resource-limited child
         process. See modules/transformation/python_sandbox.py.
 
@@ -330,6 +427,17 @@ class PythonRunner:
                     tenant_id=self.tenant_id,
                     detail=detail,
                 )
+                # Item #12: the one thing worth saying clearly. A KeyError on
+                # a column this runner withheld is not a crash, it is the
+                # control working; say so, naming only the column the script
+                # itself named. The traceback still stays in the log.
+                missing = _withheld_key_error(detail, withheld)
+                if missing:
+                    return {"error": (
+                        f"Column '{missing}' is not available to transformations on "
+                        "this source: it is classified as sensitive (pii/phi) and was "
+                        "removed from `df` before your code ran. Use the other columns, "
+                        "or ask an administrator to reclassify it.")}
             return {"error": result["error"]}
 
         result_df = result["result_df"]
@@ -425,7 +533,19 @@ class PythonRunner:
             if isinstance(df, dict) and "error" in df:
                 return df
 
-            return {"df": df}
+            # Item #12. This is the last point in the parent before the frame
+            # is handed to _execute -> run_sandboxed -> pickle.dumps -> child.
+            # Stripping here, inside the loader, means every caller of
+            # _load_dataframe gets a frame the sensitive columns are simply
+            # not in -- no later layer has to remember to do it.
+            table = "main" if source_type in ("csv", "excel", "json") else \
+                (config.get("table") or config.get("default_table") or None)
+            flagged = _sensitive_for_frame(source.schema_snapshot, table, df)
+            df, withheld = _strip_columns(df, flagged)
+            if withheld:
+                log.info("python_runner.columns_withheld", tenant_id=self.tenant_id,
+                         source_id=source_id, count=len(withheld))
+            return {"df": df, "withheld": withheld}
 
         except Exception as exc:
             log.error("python_runner._load_dataframe.error", error=str(exc))

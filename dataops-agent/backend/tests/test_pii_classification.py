@@ -436,8 +436,13 @@ async def test_human_transform_endpoints_mask_and_storage_sink_is_clean(client, 
                               json={"source_id": s["source_id"], "code": "result_df = df"})
         assert r.status_code == 200, (path, r.text)
         body = r.json()
-        assert set(body["masked_columns"]) == FLAGGED
-        assert all(body["rows"][0][c] == pii_classifier.MASK for c in FLAGGED)
+        # Item #12 superseded masking for the pandas path: the flagged
+        # columns are dropped from the frame before the sandbox ever sees
+        # it, so they are absent here rather than masked. The invariant
+        # this test guards -- no value in the response or the storage
+        # sink -- is unchanged; see tests/test_pandas_column_access.py.
+        assert "masked_columns" not in body
+        assert set(body["columns"]) == SAFE
         for v in LEAK_VALUES:
             assert v not in r.text
     async with tenant_session(s["tenant_id"]) as db:
@@ -510,8 +515,11 @@ async def test_unprofiled_source_is_classified_on_the_spot(client, tmp_path):
         assert v not in dumped
     assert set(res["columns"]) == SAFE
     assert await _snapshot(tenant_id, source_id) == {}   # still unprofiled
-    # and the human path masks rather than strips
+    # the human path: since Item #12 the pandas frame never carried the
+    # columns, so they are absent rather than masked (see test_pandas_column_access.py)
     r = await client.post("/api/v1/transformations/preview/pandas",
                           headers={"Authorization": f"Bearer {token}"},
                           json={"source_id": source_id, "code": "result_df = df"})
-    assert r.status_code == 200 and set(r.json()["masked_columns"]) == FLAGGED
+    assert r.status_code == 200 and set(r.json()["columns"]) == SAFE
+    for v in LEAK_VALUES:
+        assert v not in r.text
