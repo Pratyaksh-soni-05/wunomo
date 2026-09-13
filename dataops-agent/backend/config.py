@@ -2,6 +2,9 @@ from pydantic_settings import BaseSettings
 from functools import lru_cache
 from typing import List
 from typing import Optional
+from pydantic import field_validator
+
+LLM_DATA_RESIDENCY_MODES = ("global", "eu", "self_hosted")
 
 
 class Settings(BaseSettings):
@@ -36,6 +39,20 @@ class Settings(BaseSettings):
     PRIMARY_LLM_MODEL: str = "gemini-3.5-flash"
     FALLBACK_LLM_PROVIDER: str = "groq"
     FALLBACK_LLM_MODEL: str = "openai/gpt-oss-120b"
+    # Security Master Ranking Item #11 (GDPR data residency). Where LLM
+    # inference is allowed to run:
+    #   global       the configured providers above (Gemini / Groq), whose
+    #                own regions apply -- see docs/compliance/LLM_DATA_FLOW.md
+    #   eu           an EU-resident endpoint. NOT IMPLEMENTED: every outbound
+    #                LLM call is refused (DataResidencyError) rather than sent
+    #                somewhere that does not satisfy the setting.
+    #   self_hosted  a customer-operated OpenAI-compatible endpoint at
+    #                LLM_SELF_HOSTED_ENDPOINT. NOT IMPLEMENTED: same refusal.
+    # Deliberately fail-closed: a residency promise that silently falls back
+    # to the global providers is worse than no setting at all. Validated at
+    # import so a typo cannot boot as "global".
+    LLM_DATA_RESIDENCY_MODE: str = "global"
+    LLM_SELF_HOSTED_ENDPOINT: str = ""
     JWT_SECRET: str = "dev-jwt-secret"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60
@@ -70,6 +87,15 @@ class Settings(BaseSettings):
     GOOGLE_OAUTH_REDIRECT_URI: str = "http://localhost:3000/api/auth/callback/google"
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = ""
+
+    @field_validator("LLM_DATA_RESIDENCY_MODE")
+    @classmethod
+    def _residency_mode_known(cls, v: str) -> str:
+        v = (v or "").strip().lower()
+        if v not in LLM_DATA_RESIDENCY_MODES:
+            raise ValueError(
+                f"LLM_DATA_RESIDENCY_MODE={v!r} is not one of {LLM_DATA_RESIDENCY_MODES}")
+        return v
 
     @property
     def cors_origins(self) -> List[str]:

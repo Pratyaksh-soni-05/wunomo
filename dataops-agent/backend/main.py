@@ -51,6 +51,16 @@ async def lifespan(app: FastAPI):
     for problem in validate_llm_config():
         log.error("llm_config_invalid", problem=problem)
 
+    # Item #11: say where inference is allowed to run, every boot. A mode
+    # other than "global" means every LLM call in the product will be
+    # refused, which is intended, but must never be a surprise.
+    from services.llm_service import residency_status
+    residency = residency_status()
+    if residency["outbound_llm_allowed"]:
+        log.info("llm_data_residency", **residency)
+    else:
+        log.error("llm_data_residency_blocks_all_llm_calls", **residency)
+
     log.info("axiom.startup", env=settings.APP_ENV, version="1.0.0")
     yield
     await engine.dispose()

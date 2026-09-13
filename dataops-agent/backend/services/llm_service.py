@@ -6,7 +6,7 @@ from langchain_core.messages import BaseMessage
 from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
 from config import settings
 import structlog
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 from groq import AuthenticationError as GroqAuthError
 from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 
@@ -40,6 +40,49 @@ _GROQ_MODEL_HINTS = (
     "llama", "mixtral", "gemma", "qwen", "allam", "whisper",
     "gpt-oss", "compound", "groq/", "openai/", "meta-llama/",
 )
+
+
+class DataResidencyError(RuntimeError):
+    """Raised instead of making an outbound LLM call when
+    LLM_DATA_RESIDENCY_MODE names a placement this build cannot honour."""
+
+
+def residency_status() -> dict:
+    """What the residency setting currently means, for the startup log,
+    tests, and anyone answering a compliance question about a deployment."""
+    mode = settings.LLM_DATA_RESIDENCY_MODE
+    if mode == "global":
+        return {"mode": mode, "outbound_llm_allowed": True,
+                "providers": [settings.PRIMARY_LLM_PROVIDER, settings.FALLBACK_LLM_PROVIDER],
+                "note": "inference runs at the configured providers' own regions"}
+    return {"mode": mode, "outbound_llm_allowed": False, "providers": [],
+            "note": f"{mode} endpoint not implemented in this build; every outbound "
+                    "LLM call is refused with DataResidencyError",
+            "self_hosted_endpoint": settings.LLM_SELF_HOSTED_ENDPOINT or None}
+
+
+def assert_outbound_llm_allowed() -> None:
+    """Item #11's one gate. Called before any provider client is built and
+    again before any message list is sent, so a client cached at boot
+    (get_agent()'s module-level cache) cannot outlive a mode change.
+
+    The only mode that permits an outbound call today is "global". "eu"
+    and "self_hosted" are real settings so an EU buyer has something
+    concrete to point at, but the endpoints behind them do not exist yet,
+    and the honest behaviour for a residency promise this build cannot keep
+    is to refuse the call -- not to send it to the global providers and
+    log a warning nobody reads.
+    """
+    mode = settings.LLM_DATA_RESIDENCY_MODE
+    if mode == "global":
+        return
+    log.error("llm_call_refused_by_residency_mode", mode=mode)
+    raise DataResidencyError(
+        f"LLM_DATA_RESIDENCY_MODE={mode!r}: no {mode} inference endpoint is implemented "
+        "in this build, so outbound LLM calls are refused rather than sent to a "
+        "provider outside the configured residency. Set the mode to 'global' to use "
+        f"{settings.PRIMARY_LLM_PROVIDER}/{settings.FALLBACK_LLM_PROVIDER}, or wait for "
+        "the EU / self-hosted endpoint work (docs/compliance/LLM_DATA_FLOW.md).")
 
 
 def _provider_for_model(model: str) -> str:
@@ -172,6 +215,7 @@ def _build_llm(model: str, temperature: float, provider: str | None = None):
     provider instead of a substring guess -- because the guess was wrong for
     every Groq chat model this account actually has.
     """
+    assert_outbound_llm_allowed()   # Item #11: before any client exists
     resolved = (provider or _provider_for_model(model) or "").lower()
     if resolved == "groq":
         return ChatGroq(
@@ -205,12 +249,17 @@ def get_fallback_llm(temperature=0.0):
                       provider=settings.FALLBACK_LLM_PROVIDER)
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+# retry_if_not_exception_type: a residency refusal is a configuration fact,
+# not a transient fault -- retrying it three times with backoff would only
+# delay the same answer by up to 20 seconds.
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10),
+       retry=retry_if_not_exception_type(DataResidencyError))
 async def invoke_llm(
     messages: list, temperature=0.0, *, tenant_id: str | None = None,
     user_id: str | None = None, session_id: str | None = None,
     request_type: str = "general_completion",
 ) -> str:
+    assert_outbound_llm_allowed()   # Item #11: before any message is sent
     start = time.monotonic()
     used_fallback = False
     model = settings.PRIMARY_LLM_MODEL
@@ -283,6 +332,7 @@ class _TimeoutFallbackChatModel:
         # _cache). Usage details are stashed on the response's
         # additional_kwargs instead; the caller (agent_node, which does have
         # tenant context) is responsible for popping and logging them.
+        assert_outbound_llm_allowed()   # Item #11: the agent path, cached clients
         start = time.monotonic()
         try:
             response = await asyncio.wait_for(
