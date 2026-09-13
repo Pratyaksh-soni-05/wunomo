@@ -193,6 +193,14 @@ needs already exists and is already fetched there today.
 
 ## 4. Design system cost
 
+**Status: shipped 2026-09-14 (slice 2).** Both themes now use the neutral treatment described below
+— blue reserved for exactly the wordmark and the focus ring, in both, not just dark. `--chart-accent`
+keeps its exemption (decorative, functional, not brand — annotated as a decision in `tokens.css`, not
+left to read as a miss); the `--accent-fill-a35/-a50` etc. overlay tokens stayed deferred to slice 3
+as recommended. One pre-existing bug found and fixed along the way, not introduced by this slice:
+`.badge-midnight` had no dark-mode override at all (`WALKTHROUGH_FINDINGS_2026-08.md` item 88).
+Analysis below is left as written — it's what was executed, not superseded by shipping it.
+
 **Headline finding: dark mode already mostly *is* the target palette.** Look at `tokens.css`'s own
 "Decision 1" (2026-08-19, still in force): *"buttons, active nav state, links, hover states — all
 grey [in dark mode]; blue is reserved for exactly the wordmark/monogram and the focus ring."* That
@@ -281,16 +289,17 @@ other, not calendar estimates. Changes since the first pass: Workbench ships **O
 is its own slice and is a **real `<Button>` replacement at all 28 call sites**, not a CSS recolor, so
 it reviews as one self-contained diff instead of riding along inside feature slices.
 
-1. **`.auth-link-btn` / `.link-btn` → real `<Button>` components.** Replace all 28 call sites
-   (14 files) with a real `<Button variant="ghost">` (or a new small text-button tier if a 44px-floor
-   ghost button doesn't fit every site — table-row links and breadcrumbs are visually denser than a
-   standalone button). One diff, independently reviewable, no dependency on the token slice below or
-   on anything else in this list. **Size: M** (mechanical but touches 14 files; the risk is visual —
-   dense table rows and breadcrumbs may need a tighter variant, not just a swapped tag).
-2. **Design tokens — dark-neutral pass.** Redefine the ~2–3 root light-mode accent tokens to mirror
-   dark mode's existing neutral pattern; decide and apply the `--focus-ring` exception; explicitly
-   exclude `--mesh-*`/`--auth-brand-bg` (landing/auth-panel-only) from the change. Independent of
-   slice 1 — this repaints the tokens those new Button instances already consume. **Size: S–M.**
+1. ✅ **SHIPPED 2026-09-14.** `.auth-link-btn` / `.link-btn` → real `<Button>` components. New
+   `variant="text"` (`.btn-text` — no 44px floor, `display: inline` for mid-sentence use). 16 clean
+   swaps, 7 real `<Link>`/`<a>` cases kept as anchors with `.btn-text` classes applied directly
+   (preserving right-click/middle-click/copy-link), 1 sentence-embedded plain button converted the
+   same way, 1 genuine redundant-row case resolved by dropping the inner button. Verified live, both
+   themes. Finding 87 logged (no row in the product supports middle-click, pre-existing, not
+   introduced here).
+2. ✅ **SHIPPED 2026-09-14.** Design tokens — full neutral pass, both themes (see §4 for the complete
+   before/after, cascade audit, and contrast table). `--chart-accent` exemption re-confirmed and
+   annotated as a decision; `--accent-fill-a35/-a50` etc. overlays deferred to slice 3 as planned;
+   `.badge-midnight`'s pre-existing missing dark-mode override fixed and logged as finding 88.
 3. **Global shell rebuild.** New 6-item icon rail (Home, Scheduled, Needs you, Projects, Settings,
    Team) replacing `Sidebar`/`navItems.tsx`'s domain-crossfade model; Topbar breadcrumb updated to
    match. **Size: M.**

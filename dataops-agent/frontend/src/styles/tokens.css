@@ -1,12 +1,18 @@
 /* ==========================================
    WUNOMO AI — Design Tokens
-   Futurewave (2026-08-19) — light is the Futurewave blue direction, dark is
-   greyscale chrome. Replaces the Midnight × Pearl Perfect × Noir × Ocean
-   palette below, which stays only as the underlying primitive scales a few
-   still-untouched consumers (chart lines, the sidebar spine, deferred to
-   Phase 5) read from. See docs/context/... session log for the swap.
-   Locked Phase 0 values — see /dataops-agent/DESIGN_TOKENS.md
-   ========================================== */
+   Futurewave (2026-08-19) — originally light was the Futurewave blue
+   direction, dark was greyscale chrome. SUPERSEDED 2026-09-14 (Wunomo
+   UI-rebuild slice 2): both themes are now greyscale chrome, blue reserved
+   for exactly the wordmark/monogram and the focus ring in both — light no
+   longer gets its own separate blue direction. See the JOB-SCOPED ACCENT
+   TOKENS block below for the actual repainted values, and
+   docs/design/UI_REBUILD_INVENTORY.md §4/§8 for the full rationale,
+   cascade audit, and contrast table behind the change. Replaces the
+   Midnight × Pearl Perfect × Noir × Ocean palette below, which stays only
+   as the underlying primitive scales a few still-untouched consumers
+   (chart lines, the sidebar spine, deferred to Phase 5) read from. See
+   docs/context/... session log for the swap. Locked Phase 0 values — see
+   /dataops-agent/DESIGN_TOKENS.md */
 
 :root {
   /* Midnight scale (sidebar, primary actions, headings) */
@@ -107,15 +113,26 @@
      indistinguishable, confirmed live at 100% zoom. Fixed the same way as
      tr.selected: --sidebar-active-border now feeds a left-edge box-shadow
      bar (components.css), not a full-perimeter border, and always holds a
-     real accent colour, never a neutral grey — light already pointed at
-     --accent-fill (a real blue, 3.41:1 vs --deep-ground, never broken);
-     dark now points at --brand-blue instead of --border-strong. Fill stays
-     as a quiet reinforcement in both themes, the bar is what carries the
-     signal now, not fill-vs-fill contrast. Hover (not active) stays the
-     existing neutral white-alpha wash in both themes — it was never meant
-     to carry this signal, only active needs it. */
-  --sidebar-active-bg: color-mix(in srgb, var(--accent-fill) 40%, transparent);
-  --sidebar-active-border: var(--accent-fill);   /* solid: 3.41:1 vs --deep-ground */
+     real accent colour, never a neutral grey — dark points at --brand-blue.
+     Fill stays as a quiet reinforcement in both themes, the bar is what
+     carries the signal now, not fill-vs-fill contrast. Hover (not active)
+     stays the existing neutral white-alpha wash in both themes — it was
+     never meant to carry this signal, only active needs it.
+
+     AMENDED AGAIN 2026-09-14 (Wunomo UI-rebuild slice 2, the light/dark
+     neutral-palette pass): light used to point directly at --accent-fill,
+     which was safe only because --accent-fill was itself a real blue back
+     then. Once --accent-fill became the neutral button-fill token (see the
+     JOB-SCOPED ACCENT TOKENS block below), a light-mode sidebar reading it
+     here would have gone dark-navy-on-dark-navy against --sidebar-bg
+     (--deep-ground, dark chrome regardless of app theme) — invisible,
+     confirmed by inspection before it ever shipped. Repointed to
+     --focus-ring instead, the exact same fix dark mode already
+     independently arrived at via --brand-blue — the sidebar's active
+     indicator is "focus-ring family," not "button-fill family," in both
+     themes now, not just dark. */
+  --sidebar-active-bg: color-mix(in srgb, var(--focus-ring) 40%, transparent);
+  --sidebar-active-border: var(--focus-ring);   /* solid: 3.41:1 vs --deep-ground (light) */
   --sidebar-active-text: var(--on-dark);
 
   /* Two inline JSX rgba() literals folded into real tokens (Phase 5) —
@@ -134,17 +151,23 @@
      greyscale except the wordmark/monogram and the focus ring, both of
      which use #2277FF (4.86:1 on dark), never #0056FF (3.56:1 — fails). */
 
-  /* Fill — filled surface with a label on top. Dark values (Decision 1,
-     2026-08-19) live in the dark blocks below: primary buttons go
-     light-on-dark there (--text-primary fill + --bg label), not blue and
-     not grey — blue stays reserved for exactly the wordmark and focus
-     ring, per the brief. */
-  --accent-fill: #0056FF;              /* light. */
-  --accent-fill-hover: #0047D6;        /* light hover. */
-  --on-accent-fill: var(--on-dark);    /* light: the label sitting on --accent-fill. 5.496:1. */
-  --badge-accent-bg: var(--midnight-100);
-  --accent-subtle-bg: #E3E7FC;         /* light. Wired to tr.selected, .cmd-item hover/selected, .notif-item.unread, .credits-badge, .chat-context-chip (Decision 2, 2026-08-19) — were --ocean-50. Dark value in the dark blocks. */
-  --accent-subtle-border: var(--ocean-100);  /* light — .credits-badge/.chat-context-chip's border, paired with --accent-subtle-bg. Dark override in the dark blocks, so a grey dark chip doesn't keep a blue-tinted edge. */
+  /* Fill — filled surface with a label on top.
+     REPAINTED 2026-09-14 (Wunomo UI-rebuild slice 2): light used to be a
+     real blue (#0056FF) here, on the theory that dark mode's own Decision
+     1 below ("blue stays reserved for exactly the wordmark and focus
+     ring") only applied to dark mode. Explicit decision this pass: it
+     applies to both — light now uses the identical --text-primary/--bg
+     pairing dark mode already proved out (15.71:1 here in light, vs dark's
+     own documented 17.7:1), rather than a separate light-only rule. See
+     docs/design/UI_REBUILD_INVENTORY.md §4/§8 for the full contrast table
+     and cascade audit behind this change. */
+  --accent-fill: var(--text-primary);         /* light: #16233A on white text, 15.71:1 */
+  --accent-fill-hover: color-mix(in srgb, var(--text-primary) 85%, black);  /* light hover — same darken-toward-black idiom .btn-danger/.btn-success:hover already use */
+  --on-accent-fill: var(--on-dark);    /* light: the label sitting on --accent-fill. Unchanged — already white, still correct against the new dark fill. */
+  --badge-accent-bg: var(--surface-hover);   /* light. Was --midnight-100 (a real blue tile) — .badge-midnight (AXIOM's badge/avatar tile) goes neutral same as everything else here; accepted explicitly (2026-09-14): once six employee types exist, one of them being blue is an accident of build order, not signal. Colour means state now, not identity — the AX mark and the type label carry identity instead. Dark value below was previously undefined entirely (pre-existing gap, not introduced by this pass — see WALKTHROUGH_FINDINGS_2026-08.md item 88). */
+  --badge-accent-text: var(--text-primary);  /* light. Was --midnight-700. Paired with --badge-accent-bg above. */
+  --accent-subtle-bg: var(--surface-hover);  /* light. Was #E3E7FC (blue-tinted). Wired to tr.selected, .cmd-item hover/selected, .notif-item.unread, .credits-badge, .chat-context-chip. Dark value in the dark blocks, unchanged by this pass. */
+  --accent-subtle-border: var(--border);  /* light. Was --ocean-100 (blue-tinted) — .credits-badge/.chat-context-chip's border, paired with --accent-subtle-bg above. Dark override in the dark blocks, unchanged by this pass. */
   --deep-ground: #061024;              /* light. Gradient terminus / footer — .landing-final-cta */
 
   /* Phase 3 (2026-08-19): the auth brand panel's own background — layered
@@ -218,10 +241,18 @@
       var(--mesh-ramp-3) 70%,
       var(--deep-ground) 100%);
 
-  /* Text / link — must satisfy AA against --surface and --bg */
-  --accent-text: #0056FF;              /* light: 5.496:1/surface, 5.238:1/bg. Replaces Phase 1's #416487 (--ocean-650) stopgap. */
-  --accent-text-hover: var(--ocean-700);
-  --badge-accent-text: var(--midnight-700);
+  /* Text / link — must satisfy AA against --surface and --bg.
+     REPAINTED 2026-09-14 (slice 2): was #0056FF, a real blue (5.496:1/
+     surface, 5.238:1/bg — replacing Phase 1's #416487/--ocean-650 stopgap
+     at the time). Now neutral, same reasoning as --accent-fill above —
+     and higher contrast as a side effect of reusing an already-proven
+     pair: 8.97:1/surface, 8.45:1/bg. --badge-accent-text moved up to the
+     JOB-SCOPED ACCENT TOKENS block above, next to --badge-accent-bg —
+     removed from here rather than left duplicated (a second declaration
+     of the same custom property in one :root block silently wins by
+     source order, which would have re-introduced the old blue value). */
+  --accent-text: var(--text-secondary);        /* light: 8.97:1/surface, 8.45:1/bg */
+  --accent-text-hover: var(--text-primary);
 
   /* Border */
   --accent-border: var(--focus-ring);  /* tracks focus-ring so both stay in sync across themes */
@@ -231,7 +262,17 @@
      to read distinctly next to the success/warning/danger lines beside it.
      Deliberately NOT repointed to the new accent blue — stays on the old
      Ocean primitive so its dark-mode lightening (already established,
-     unrelated to this swap) keeps working unchanged. */
+     unrelated to this swap) keeps working unchanged.
+
+     RE-CONFIRMED, not just carried over, 2026-09-14 (Wunomo UI-rebuild
+     slice 2 — the "no blue except the wordmark and focus ring" pass):
+     this token is a deliberate, explicit exception to that rule, decided
+     the same day as everything else in this file that DID go neutral —
+     not something the pass simply missed. Chart-series colour is
+     functional (distinguishing one line from another when several share
+     a canvas), not a brand-identity signal the way a button fill or a
+     badge is — flattening it to grey would cost real chart readability
+     for no identity benefit. See docs/design/UI_REBUILD_INVENTORY.md §8. */
   --chart-accent: var(--ocean-600);
 
   /* Focus ring — the light value tracks the new accent (no separate light
@@ -433,6 +474,20 @@
   --on-accent-fill: var(--bg);              /* #0A0A0B — 17.7:1 on the above */
   --accent-fill-hover: #FFFFFF;
 
+  /* ADDED 2026-09-14 (Wunomo UI-rebuild slice 2) — .badge-midnight
+     (AXIOM's badge/avatar tile) had NO dark-mode override at all, unlike
+     every sibling semantic pair (success/warning/danger/info all get one
+     a few lines below). It was silently falling through to :root's
+     light-mode values in dark theme — a pale blue-tinted chip with dark
+     navy text sitting on an otherwise near-black UI. Pre-existing gap,
+     not introduced by this pass — logged as
+     WALKTHROUGH_FINDINGS_2026-08.md item 88. Fixed here as part of the
+     same neutral-palette pass that repointed the light values, using the
+     identical opaque-neutral-chip pattern the semantic badges already
+     use: #F2F2F3 on #1A1A1D, 15.56:1. */
+  --badge-accent-bg: var(--surface-hover);
+  --badge-accent-text: var(--text-primary);
+
   /* --auth-brand-bg NOT overridden here as of 2026-08-27 — the panel's
      gradient (defined once on :root) is theme-invariant, same as the
      landing hero mesh; only the previous flat-grey dark treatment (and the
@@ -514,6 +569,10 @@
     /* --auth-brand-bg not overridden here either — see the :root definition. */
     --accent-subtle-bg: var(--surface-hover);
     --accent-subtle-border: var(--border);
+    /* Same gap, same fix as the :root[data-theme="dark"] block above —
+       see that block's comment (2026-09-14, slice 2 / finding 88). */
+    --badge-accent-bg: var(--surface-hover);
+    --badge-accent-text: var(--text-primary);
 
     --sidebar-bg: var(--bg);
     --sidebar-active-bg: var(--surface-hover);
