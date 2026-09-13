@@ -4,6 +4,7 @@ import structlog
 
 from database import AsyncSessionLocal
 from models.all_models import DataSource, SourceType
+from services import pii_classifier
 from services.tenant_context import tenant_scoped
 
 log = structlog.get_logger()
@@ -16,6 +17,20 @@ class SchemaProfiler:
     def __init__(self, tenant_id: str, source_id: str):
         self.tenant_id = tenant_id
         self.source_id = source_id
+        # Transient per-call sample values, {table: {column: [values]}}, filled
+        # by the profiler branches from data they already loaded and consumed
+        # by _finalize(). Never persisted: a snapshot holding sample PII would
+        # itself be the leak Item #10 exists to prevent.
+        self._samples: dict = {}
+
+    def _finalize(self, schema: dict, old_snapshot: dict | None) -> dict:
+        """Classify every column, then reinstate any manual overrides from
+        the previous snapshot so a re-profile cannot silently revert an
+        engineer's correction. Samples are dropped afterwards."""
+        pii_classifier.classify_snapshot(schema, self._samples)
+        pii_classifier.merge_manual_overrides(old_snapshot, schema)
+        self._samples = {}
+        return schema
 
     async def _get_source(self, db) -> DataSource:
         r = await db.execute(select(DataSource).where(
@@ -32,6 +47,7 @@ class SchemaProfiler:
             try:
                 schema = await self._profile_source(source)
                 old_snapshot = source.schema_snapshot or {}
+                schema = self._finalize(schema, old_snapshot)
                 source.schema_snapshot = schema
                 source.last_profiled_at = utcnow()
                 await db.commit()
@@ -59,7 +75,7 @@ class SchemaProfiler:
                 current = await self._profile_source(source)
                 drift = self._compare_schemas(old, current)
                 if drift["has_drift"]:
-                    source.schema_snapshot = current
+                    source.schema_snapshot = self._finalize(current, old)
                     source.last_profiled_at = utcnow()
                     await db.commit()
                 return drift
@@ -102,6 +118,16 @@ class SchemaProfiler:
                 "columns": [dict(c) for c in cols],
                 "row_count": count["cnt"]
             }
+            # One bounded read per table for value-based PII detection. Same
+            # quoting as the COUNT(*) above -- this method's identifier
+            # handling is a known Item #7 finding and is not changed here.
+            sample_rows = await conn.fetch(
+                f'SELECT * FROM "{schema}"."{tbl}" LIMIT {pii_classifier.VALUE_SAMPLE_SIZE}')
+            if sample_rows:
+                self._samples[tbl] = {
+                    k: [r[k] for r in sample_rows if r[k] is not None]
+                    for k in sample_rows[0].keys()
+                }
         await conn.close()
         return result
 
@@ -114,6 +140,12 @@ class SchemaProfiler:
             df = pd.read_excel(fp, nrows=10000)
         else:
             df = pd.read_json(fp)
+        # Value samples for PII detection, from the frame already in memory --
+        # no extra read. Bounded, non-null, and discarded after classification.
+        self._samples["main"] = {
+            c: df[c].dropna().head(pii_classifier.VALUE_SAMPLE_SIZE).tolist()
+            for c in df.columns
+        }
         return {
             "main": {
                 "columns": [
