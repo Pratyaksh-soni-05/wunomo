@@ -8,6 +8,9 @@ from models.all_models import DataSource
 from modules.ingestion.connector_manager import ConnectorManager
 from modules.ingestion.schema_profiler import SchemaProfiler
 from services.encryption_service import redact_config, REDACTED
+from services import pii_classifier
+from modules.governance.audit_trail import AuditTrail
+from sqlalchemy.orm.attributes import flag_modified
 import uuid
 from datetime import datetime, timezone
 def utcnow(): return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -28,6 +31,13 @@ class SourceUpdate(BaseModel):
     tags: Optional[list] = None
     owner: Optional[str] = None
     is_active: Optional[bool] = None
+
+class ClassificationUpdate(BaseModel):
+    """Item #10 manual override of one column's sensitivity level."""
+    table: str
+    column: str
+    sensitivity: str          # one of pii_classifier.LEVELS
+    reason: Optional[str] = None
 
 @router.get("/")
 async def list_sources(user=Depends(get_current_user)):
@@ -116,3 +126,53 @@ async def preview(source_id: str, table: str = "main", limit: int = 50, user=Dep
 @router.post("/{source_id}/drift")
 async def detect_drift(source_id: str, user=Depends(require_permission("sources.profile"))):
     return await SchemaProfiler(user["tenant_id"], source_id).detect_drift()
+
+@router.put("/{source_id}/classification")
+async def classify_column(source_id: str, req: ClassificationUpdate,
+                          user=Depends(require_permission("sources.classify"))):
+    """Item #10: manually set a column's sensitivity (none/pii/phi).
+
+    Lives beside PUT /{source_id} rather than inside it because the two carry
+    different authority: editing a source's name or tags is `sources.create`,
+    but lowering a column from pii to none removes masking from every preview,
+    prompt and transform output for it, so it has its own capability
+    (`sources.classify`, builders only) and its own audit action. The override
+    is marked source="manual" and survives re-profiling
+    (pii_classifier.merge_manual_overrides).
+    """
+    level = (req.sensitivity or "").strip().lower()
+    if level not in pii_classifier.LEVELS:
+        raise HTTPException(status_code=422,
+                            detail=f"sensitivity must be one of {list(pii_classifier.LEVELS)}")
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(DataSource).where(
+            DataSource.id == source_id, DataSource.tenant_id == user["tenant_id"]))
+        source = r.scalars().first()
+        if not source:
+            raise HTTPException(status_code=404, detail="Source not found")
+        snapshot = dict(source.schema_snapshot or {})
+        info = snapshot.get(req.table)
+        cols = info.get("columns") if isinstance(info, dict) else None
+        target = next((c for c in cols or [] if c.get("column_name") == req.column), None)
+        if target is None:
+            raise HTTPException(status_code=404,
+                                detail=f"Column {req.table}.{req.column} not in schema snapshot; profile the source first")
+        previous = target.get("sensitivity", "none")
+        target["sensitivity"] = level
+        target["sensitivity_source"] = "manual"
+        target["sensitivity_reason"] = (req.reason or f"manually set by {user['email']}")[:200]
+        # JSON column: SQLAlchemy does not see in-place mutation of a nested dict.
+        source.schema_snapshot = snapshot
+        flag_modified(source, "schema_snapshot")
+        source.updated_at = datetime.utcnow()
+        await db.commit()
+
+    await AuditTrail(user["tenant_id"]).log_action(
+        actor=user["email"], action="source.column_classified",
+        resource_type="source", resource_id=source_id,
+        payload={"table": req.table, "column": req.column,
+                 "previous": previous, "new": level, "reason": req.reason},
+    )
+    return {"message": "Column classification updated", "id": source_id,
+            "table": req.table, "column": req.column,
+            "previous": previous, "sensitivity": level, "source": "manual"}

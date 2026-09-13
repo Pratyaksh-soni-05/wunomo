@@ -52,6 +52,12 @@ PERMISSIONS: dict[str, frozenset[Role]] = {
     "sources.create": _BUILDERS,
     "sources.profile": _OPERATORS,  # sync/profile; Catalog's Sync Metadata fans out to this
     "sources.delete": _BUILDERS,
+    # Item #10. Reclassifying a column DOWNWARD (pii -> none) removes masking
+    # from every preview, prompt and transform output for it -- a security
+    # decision, so gated like sources.create (who may define a source), not
+    # sources.profile (analysts). Its own capability so the audit log can name
+    # it and it can be tightened independently.
+    "sources.classify": _BUILDERS,
 
     "pipelines.create": _BUILDERS,
     "pipelines.operate": _OPERATORS,  # trigger/pause/activate
