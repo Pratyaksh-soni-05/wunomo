@@ -57,6 +57,8 @@ REPRESENTATIVE_ENDPOINTS = [
      {"name": "t", "source_type": "csv", "connection_config": {"file_path": "x.csv"}}),
     ("sources.profile", "post", "/api/v1/sources/nonexistent-id/profile", None),
     ("sources.delete", "delete", "/api/v1/sources/nonexistent-id", None),
+    ("sources.classify", "put", "/api/v1/sources/nonexistent-id/classification",
+     {"table": "main", "column": "ssn", "sensitivity": "none"}),
     ("pipelines.create", "post", "/api/v1/pipelines/", {"name": "t"}),
     ("pipelines.operate", "post", "/api/v1/pipelines/nonexistent-id/trigger", None),
     ("pipelines.delete", "delete", "/api/v1/pipelines/nonexistent-id", None),
