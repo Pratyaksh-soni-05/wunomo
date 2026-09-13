@@ -138,9 +138,9 @@ export default function ProjectsPage() {
                 {list.map((p) => (
                   <Tr key={p.id}>
                     <Td>
-                      <button className="auth-link-btn" onClick={() => router.push(`/projects/${p.id}`)}>
+                      <Button variant="text" onClick={() => router.push(`/projects/${p.id}`)}>
                         {p.name}
-                      </button>
+                      </Button>
                     </Td>
                     <Td className="text-muted text-sm">{formatApiDate(p.created_at)}</Td>
                     <Td style={{ textAlign: "right" }}>

@@ -77,7 +77,7 @@ function GoogleCallbackInner() {
         {error ? (
           <div className="flex flex-col gap-3">
             <p className="text-danger font-medium">{error}</p>
-            <a href="/login" className="auth-link-btn">Back to login</a>
+            <a href="/login" className="btn btn-text">Back to login</a>
           </div>
         ) : (
           <div className="flex flex-col gap-3">

@@ -92,7 +92,7 @@ export function ToolCallBlock({
             AXIOM paused this action for approval{approval?.risk_level ? ` (${approval.risk_level} risk)` : ""} instead
             of running it.
             {approval?.reason ? ` ${approval.reason}` : ""} Review and approve or reject it on the{" "}
-            <button className="link-btn" onClick={onGoToApprovals}>Approvals screen</button>.
+            <Button variant="text" onClick={onGoToApprovals}>Approvals screen</Button>.
           </span>
         </div>
       )}

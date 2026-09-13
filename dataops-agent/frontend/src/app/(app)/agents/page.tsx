@@ -55,9 +55,9 @@ export default function AgentsPage() {
                 {list.map((a) => (
                   <Tr key={a.id}>
                     <Td>
-                      <button className="auth-link-btn" onClick={() => router.push(`/agents/${a.id}`)}>
+                      <Button variant="text" onClick={() => router.push(`/agents/${a.id}`)}>
                         {a.name}
-                      </button>
+                      </Button>
                     </Td>
                     <Td className="text-muted text-sm">{EMPLOYEE_TYPE_LABEL[a.employee_type] ?? a.employee_type}</Td>
                     <Td>

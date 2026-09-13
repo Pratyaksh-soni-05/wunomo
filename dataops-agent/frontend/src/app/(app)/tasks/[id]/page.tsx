@@ -262,7 +262,7 @@ export default function TaskDetailPage() {
       <div className="page-header">
         <div className="flex items-center justify-between">
           <div>
-            <button className="auth-link-btn text-sm" onClick={() => router.push("/tasks")}>← All tasks</button>
+            <Button variant="text" className="text-sm" onClick={() => router.push("/tasks")}>← All tasks</Button>
             <h1 className="page-title" style={{ marginTop: 4 }}>{task.goal}</h1>
             <div className="flex items-center gap-2" style={{ marginTop: 6 }}>
               <Badge variant={taskStatusVariant(task.status)}>{taskStatusLabel(task.status)}</Badge>
@@ -271,16 +271,18 @@ export default function TaskDetailPage() {
               <span className="text-xs text-muted">
                 {task.step_budget_used}/{task.step_budget_max} steps used
               </span>
-              <span className="text-xs text-muted">
-                · {task.cost.credits.toLocaleString()} AI Credits
-              </span>
+              {task.cost && (
+                <span className="text-xs text-muted">
+                  · {task.cost.credits.toLocaleString()} AI Credits
+                </span>
+              )}
               {task.originating_session_id && (
-                <button
-                  className="auth-link-btn text-xs"
+                <Button
+                  variant="text" className="text-xs"
                   onClick={() => router.push(`/chat?session=${task.originating_session_id}`)}
                 >
                   ← Back to conversation
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -333,7 +335,7 @@ export default function TaskDetailPage() {
         <Card style={{ marginBottom: 16 }}>
           <CardHeader><span className="font-medium text-sm">Cost</span></CardHeader>
           <CardBody>
-            {task.cost.llm_calls === 0 ? (
+            {!task.cost || task.cost.llm_calls === 0 ? (
               <span className="text-sm text-muted">No LLM calls yet — nothing spent.</span>
             ) : (
               <div className="flex items-center gap-4 flex-wrap">

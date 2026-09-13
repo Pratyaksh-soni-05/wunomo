@@ -136,7 +136,7 @@ export default function SignupPage() {
           >
             Continue to your new workspace
           </Button>
-          <Link href="/login" className="auth-link-btn" style={{ textAlign: "center" }}>
+          <Link href="/login" className="btn btn-text" style={{ textAlign: "center" }}>
             Log in to an existing workspace instead
           </Link>
         </div>
@@ -147,13 +147,13 @@ export default function SignupPage() {
           <Input id="signup-tenant-name" label="Workspace name" required value={tenantName} onChange={(e) => setTenantName(e.target.value)} />
           <Input id="signup-password" label="Password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
           <Button type="submit" disabled={loading} className="w-full mt-2">Create account</Button>
-          <button
+          <Button
             type="button"
-            className="auth-link-btn"
+            variant="text"
             onClick={() => (tenantName && email ? setMode("code-request") : toast.push("Fill in your email and workspace name first.", "warning"))}
           >
             Verify by code instead of a password
-          </button>
+          </Button>
         </form>
       )}
 
@@ -161,7 +161,7 @@ export default function SignupPage() {
         <form onSubmit={handleRequestCode} className="flex flex-col gap-3">
           <p className="text-sm text-muted">We&apos;ll email a code to {email} to verify it&apos;s yours.</p>
           <Button type="submit" disabled={loading} className="w-full mt-2">Send code</Button>
-          <button type="button" className="auth-link-btn" onClick={() => setMode("form")}>Back</button>
+          <Button type="button" variant="text" onClick={() => setMode("form")}>Back</Button>
         </form>
       )}
 
@@ -171,15 +171,15 @@ export default function SignupPage() {
           <Input id="signup-code" label="Code" required value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />
           <Button type="submit" disabled={loading} className="w-full mt-2">Verify &amp; create workspace</Button>
           <div className="flex justify-between items-center">
-            <button type="button" className="auth-link-btn" onClick={() => setMode("form")}>Back</button>
-            <button
+            <Button type="button" variant="text" onClick={() => setMode("form")}>Back</Button>
+            <Button
               type="button"
-              className="auth-link-btn"
+              variant="text"
               disabled={cooldown > 0}
               onClick={() => handleRequestCode(new Event("submit") as unknown as React.FormEvent)}
             >
               {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
-            </button>
+            </Button>
           </div>
         </form>
       )}
@@ -190,7 +190,7 @@ export default function SignupPage() {
           <Button variant="secondary" className="w-full" onClick={handleGoogle}>Continue with Google</Button>
 
           <p className="auth-footer">
-            Already have a workspace? <Link href="/login" className="auth-link-btn">Log in</Link>
+            Already have a workspace? <Link href="/login" className="btn btn-text">Log in</Link>
           </p>
         </>
       )}

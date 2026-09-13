@@ -132,7 +132,7 @@ export default function PipelinesPage() {
                 {list.map((p: PipelineItem) => (
                   <Tr key={p.id}>
                     <Td>
-                      <button className="auth-link-btn" onClick={() => setRunsFor(p)}>{p.name}</button>
+                      <Button variant="text" onClick={() => setRunsFor(p)}>{p.name}</Button>
                     </Td>
                     <Td><Badge variant={statusVariant(p.status)}>{p.status}</Badge></Td>
                     <Td>{sourceName(p.source_id)}</Td>

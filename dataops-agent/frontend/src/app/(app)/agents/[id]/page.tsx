@@ -123,7 +123,7 @@ export default function AgentDetailPage() {
   return (
     <div>
       <div className="page-header">
-        <button className="auth-link-btn text-sm" onClick={() => router.push("/agents")}>← All Agents</button>
+        <Button variant="text" className="text-sm" onClick={() => router.push("/agents")}>← All Agents</Button>
         <div className="flex items-center gap-2" style={{ marginTop: 4 }}>
           <h1 className="page-title">{agent.name}</h1>
           <Badge variant="midnight">{EMPLOYEE_TYPE_LABEL[agent.employee_type] ?? agent.employee_type}</Badge>
@@ -148,7 +148,7 @@ export default function AgentDetailPage() {
           <CardBody>
             {sourceList.length === 0 ? (
               <p className="text-muted text-sm">
-                No sources connected yet. <Link href="/sources" className="auth-link-btn">Connect one</Link> to
+                No sources connected yet. <Link href="/sources" className="btn btn-text">Connect one</Link> to
                 scope this agent&apos;s access.
               </p>
             ) : (

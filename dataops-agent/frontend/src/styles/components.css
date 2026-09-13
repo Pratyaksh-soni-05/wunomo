@@ -162,6 +162,24 @@ img { display: block; max-width: 100%; }
   background: var(--surface-hover); border-color: var(--border-strong); color: var(--text-primary);
 }
 
+/* Tier 4 — TEXT: replaces .auth-link-btn/.link-btn (2026-09-14). Same job
+   (a clickable action that reads as text, not a control) but a real button
+   underneath, never underlined. Deliberately opts OUT of the shared .btn's
+   `display: inline-flex` / `align-items: center` / `line-height: 1` — those
+   are right for a button sitting alone, but wrong for the two shapes this
+   tier actually gets used in: a dense table cell (no min-height floor to
+   push the row taller) and a link sitting mid-sentence (must sit on the
+   surrounding text's own baseline, not center itself as a flex item).
+   `display: inline` + `line-height: inherit` fixes both. No hover border
+   or background, unlike Tier 2/3 — same "color shift only" behavior
+   .auth-link-btn already had, since a border/lift appearing mid-sentence
+   would read as a UI control intruding on the sentence, not a link. */
+.btn-text {
+  display: inline; background: transparent; border-color: transparent; padding: 0; min-height: auto;
+  font-size: 12.5px; font-weight: 500; line-height: inherit; color: var(--text-secondary);
+}
+.btn-text:hover:not(:disabled) { background: transparent; color: var(--text-primary); }
+
 .btn-sm { padding: 0 14px; font-size: 13px; }
 .btn-lg { padding: 0 26px; font-size: 15px; }
 /* Tier 3: 44x44 minimum target regardless of size modifier or how small the
@@ -448,11 +466,6 @@ tr.selected td:first-child {
 .auth-card .auth-subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
 .auth-divider { display: flex; align-items: center; gap: 10px; margin: 16px 0; color: var(--text-muted); font-size: 12px; }
 .auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
-.auth-link-btn {
-  background: none; border: none; color: var(--accent-text); font-size: 12.5px; cursor: pointer;
-  text-decoration: underline; text-underline-offset: 2px; padding: 0;
-}
-.auth-link-btn:hover { color: var(--accent-text-hover); }
 .auth-footer { margin-top: 20px; text-align: center; font-size: 13px; color: var(--text-secondary); }
 .auth-nudge {
   background: var(--info-bg); border: 1px solid var(--info-border); border-radius: var(--radius-md);
@@ -768,6 +781,15 @@ tr.selected td:first-child {
 .chat-session-item:hover .chat-session-delete { opacity: 1; }
 .chat-session-delete:hover { color: var(--danger); }
 
+/* Section-header action button (e.g. "New channel"). Same >=24x24 hit-area
+   pattern as .chat-session-delete above, but always visible, not hover-
+   revealed -- it has no .chat-session-item ancestor to key a :hover rule
+   off, and it's the only entry point for the action, not a secondary one
+   a row hover should surface. */
+.chat-section-action { position: relative; color: var(--text-muted); background: none; border: none; cursor: pointer; line-height: 1; padding: 0 2px; flex-shrink: 0; font-size: 11px; }
+.chat-section-action::before { content: ""; position: absolute; inset: -8px; }
+.chat-section-action:hover { color: var(--text-primary); }
+
 .chat-saved-prompts { padding: 10px 12px; border-top: 1px solid var(--border); }
 .chat-saved-prompt-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; font-size: 11px; color: var(--text-secondary); cursor: pointer; border-radius: 4px; }
 .chat-saved-prompt-item:hover { background: var(--surface); }
@@ -798,7 +820,6 @@ tr.selected td:first-child {
 .chat-tool-label { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
 
 .chat-approval-notice { display: flex; gap: 8px; align-items: flex-start; background: var(--warning-bg); border: 1px solid var(--warning-border); border-radius: var(--radius-md); padding: 10px 12px; font-size: 12px; color: var(--text-primary); margin-top: 8px; }
-.chat-approval-notice .link-btn { color: var(--accent-text); font-weight: 600; cursor: pointer; text-decoration: underline; background: none; border: none; padding: 0; font-size: inherit; font-family: inherit; }
 
 .chat-composer { padding: 14px 20px; border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
 .chat-composer-box { position: relative; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; }

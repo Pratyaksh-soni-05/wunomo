@@ -56,7 +56,7 @@ export default function ProjectDetailPage() {
   return (
     <div>
       <div className="page-header">
-        <button className="auth-link-btn text-sm" onClick={() => router.push("/projects")}>← All Projects</button>
+        <Button variant="text" className="text-sm" onClick={() => router.push("/projects")}>← All Projects</Button>
         <h1 className="page-title" style={{ marginTop: 4 }}>{project?.name ?? "Project"}</h1>
         <p className="text-muted text-sm" style={{ marginTop: 6 }}>
           {agentList.length} agent{agentList.length === 1 ? "" : "s"}

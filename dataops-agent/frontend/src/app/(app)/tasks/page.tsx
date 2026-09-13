@@ -133,9 +133,7 @@ export default function TasksPage() {
                 {list.map((t: TaskSummary) => (
                   <Tr key={t.id} style={{ cursor: "pointer" }} onClick={() => router.push(`/tasks/${t.id}`)}>
                     <Td>
-                      <button className="auth-link-btn" onClick={() => router.push(`/tasks/${t.id}`)}>
-                        {t.goal.length > 80 ? `${t.goal.slice(0, 80)}…` : t.goal}
-                      </button>
+                      {t.goal.length > 80 ? `${t.goal.slice(0, 80)}…` : t.goal}
                     </Td>
                     <Td><span className="text-sm text-muted">{shapeLabel(t.task_shape)}</span></Td>
                     <Td><Badge variant={taskStatusVariant(t.status)}>{taskStatusLabel(t.status)}</Badge></Td>

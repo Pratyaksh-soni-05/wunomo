@@ -64,7 +64,7 @@ function InviteAcceptInner() {
       ) : invalidReason ? (
         <div className="flex flex-col gap-3">
           <p className="text-danger font-medium">{invalidReason}</p>
-          <a href="/login" className="auth-link-btn">Back to login</a>
+          <a href="/login" className="btn btn-text">Back to login</a>
         </div>
       ) : (
         <form onSubmit={handleAccept} className="flex flex-col gap-4">

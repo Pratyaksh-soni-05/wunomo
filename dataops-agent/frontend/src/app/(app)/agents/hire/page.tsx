@@ -60,9 +60,9 @@ export default function HireAgentPage() {
     <div>
       <div className="page-header">
         {projectId && (
-          <button className="auth-link-btn text-sm" onClick={() => router.push(`/projects/${projectId}`)}>
+          <Button variant="text" className="text-sm" onClick={() => router.push(`/projects/${projectId}`)}>
             ← {currentProjectName ?? "Project"}
-          </button>
+          </Button>
         )}
         <h1 className="page-title" style={{ marginTop: projectId ? 4 : 0 }}>Hire an agent</h1>
         <p className="text-muted text-sm" style={{ marginTop: 6 }}>
@@ -102,7 +102,7 @@ export default function HireAgentPage() {
                 <Skeleton style={{ height: 60, borderRadius: 8 }} />
               ) : sourceList.length === 0 ? (
                 <p className="text-muted text-sm">
-                  No sources connected yet. <Link href="/sources" className="auth-link-btn">Connect one</Link> to
+                  No sources connected yet. <Link href="/sources" className="btn btn-text">Connect one</Link> to
                   scope this agent&apos;s access — or hire now with no scope.
                 </p>
               ) : (

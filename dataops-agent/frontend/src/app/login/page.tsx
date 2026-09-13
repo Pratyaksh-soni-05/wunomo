@@ -148,9 +148,9 @@ export default function LoginPage() {
           <Input id="login-email" label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           <Input id="login-password" label="Password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
           <Button type="submit" disabled={loading} className="w-full mt-2">Log in</Button>
-          <button type="button" className="auth-link-btn" onClick={() => setMode("code-request")}>
+          <Button type="button" variant="text" onClick={() => setMode("code-request")}>
             Email me a code instead
-          </button>
+          </Button>
         </form>
       )}
 
@@ -158,9 +158,9 @@ export default function LoginPage() {
         <form onSubmit={handleRequestCode} className="flex flex-col gap-3">
           <Input id="login-code-email" label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           <Button type="submit" disabled={loading} className="w-full mt-2">Send code</Button>
-          <button type="button" className="auth-link-btn" onClick={() => setMode("password")}>
+          <Button type="button" variant="text" onClick={() => setMode("password")}>
             Back to password
-          </button>
+          </Button>
         </form>
       )}
 
@@ -170,17 +170,17 @@ export default function LoginPage() {
           <Input id="login-code" label="Code" required value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />
           <Button type="submit" disabled={loading} className="w-full mt-2">Verify &amp; log in</Button>
           <div className="flex justify-between items-center">
-            <button type="button" className="auth-link-btn" onClick={() => setMode("password")}>
+            <Button type="button" variant="text" onClick={() => setMode("password")}>
               Back to password
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="auth-link-btn"
+              variant="text"
               disabled={cooldown > 0}
               onClick={() => handleRequestCode(new Event("submit") as unknown as React.FormEvent)}
             >
               {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
-            </button>
+            </Button>
           </div>
         </form>
       )}
@@ -189,7 +189,7 @@ export default function LoginPage() {
       <Button variant="secondary" className="w-full" onClick={handleGoogle}>Continue with Google</Button>
 
       <p className="auth-footer">
-        Don&apos;t have a workspace? <Link href="/signup" className="auth-link-btn">Sign up</Link>
+        Don&apos;t have a workspace? <Link href="/signup" className="btn btn-text">Sign up</Link>
       </p>
 
       <WorkspacePicker
