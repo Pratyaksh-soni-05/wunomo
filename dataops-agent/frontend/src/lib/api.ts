@@ -1217,7 +1217,14 @@ export interface TaskItem {
   created_at: string | null;
   started_at: string | null;
   steps: TaskStepItem[];
-  cost: TaskCost;
+  // Only GET /tasks/{id} merges this in (a second DB query) -- every
+  // other task-mutation endpoint's response (approve/reject-plan,
+  // edit-steps, advance, resume, reject-step, cancel) returns
+  // _serialize_task() alone, with no `cost` key at all. Those responses
+  // land in the query cache directly via setQueryData before the
+  // follow-up invalidate()'s refetch resolves, so a consumer must treat
+  // this as genuinely absent, not just zeroed.
+  cost?: TaskCost;
 }
 
 export interface TaskSummary {
