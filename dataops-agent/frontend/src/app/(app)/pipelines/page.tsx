@@ -7,6 +7,7 @@ import {
   Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast, RowActionsMenu,
 } from "@/components/ui";
 import { formatApiDate } from "@/lib/dates";
+import { ScopeBanner } from "@/components/shell";
 import {
   getToken, getPipelines, createPipeline, deletePipeline, triggerPipelineRun,
   pausePipeline, activatePipeline, getPipelineRuns, getSources,
@@ -43,7 +44,10 @@ export default function PipelinesPage() {
   const [description, setDescription] = useState("");
   const [scheduleCron, setScheduleCron] = useState("");
 
-  const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => getPipelines(token) });
+  // Repurposed (slice 6b, 2026-09-14): this route used to list every
+  // pipeline tenant-wide, now shows only the ones with no source_id --
+  // project-scoped pipelines moved into each project's Workbench.
+  const pipelines = useQuery({ queryKey: ["pipelines", "unscoped"], queryFn: () => getPipelines(token, { unscoped: true }) });
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => getSources(token) });
   const runs = useQuery({
     queryKey: ["pipeline-runs", runsFor?.id],
@@ -105,13 +109,15 @@ export default function PipelinesPage() {
       </div>
 
       <div style={{ padding: "20px 24px" }}>
+        <ScopeBanner label="pipelines" />
         {pipelines.isLoading ? (
           <Skeleton style={{ height: 300, borderRadius: 12 }} />
         ) : list.length === 0 ? (
           <div className="empty-state">
-            <h2 className="font-display text-xl">No pipelines yet</h2>
-            <p className="text-muted text-sm" style={{ maxWidth: 360 }}>
-              Create a pipeline to sync a source and run quality checks on a schedule.
+            <h2 className="font-display text-xl">No unscoped pipelines</h2>
+            <p className="text-muted text-sm" style={{ maxWidth: 380 }}>
+              Every pipeline in this tenant is tied to a source and lives in a project&apos;s
+              Workbench. Creating one here without a source keeps it here instead.
             </p>
             <Button size="sm" onClick={() => setModalOpen(true)}>+ New Pipeline</Button>
           </div>
@@ -214,6 +220,11 @@ export default function PipelinesPage() {
         }
       >
         <div className="flex flex-col gap-3">
+          <p className="text-muted text-xs">
+            Picking a source here scopes this pipeline to whichever project can already reach
+            it — it&apos;ll appear in that project&apos;s Workbench, not in this list, right after
+            creation.
+          </p>
           <Input id="pipeline-name" label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
           <Select id="pipeline-source" label="Source" value={sourceId} onChange={(e) => setSourceId(e.target.value)}>
             <option value="">No source (manual)</option>

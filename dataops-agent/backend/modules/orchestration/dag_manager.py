@@ -100,13 +100,18 @@ class DAGManager:
             }
 
     # ── LIST ──────────────────────────────────────────────────────────────────
-    async def list_pipelines(self) -> dict:
+    async def list_pipelines(self, unscoped: bool = None) -> dict:
         async with AsyncSessionLocal() as db:
-            r = await db.execute(
-                select(Pipeline)
-                .where(Pipeline.tenant_id == self.tenant_id)
-                .order_by(desc(Pipeline.created_at))
-            )
+            query = select(Pipeline).where(Pipeline.tenant_id == self.tenant_id)
+            # unscoped=True: only pipelines with no source_id -- these can
+            # never resolve into any project's scope (Option B's join starts
+            # at source_id), so "unscoped" is independent of which project is
+            # asking. Used both for the muted in-project count and for the
+            # repurposed tenant-wide /pipelines view (Wunomo UI-rebuild
+            # slice 6b, 2026-09-14).
+            if unscoped:
+                query = query.where(Pipeline.source_id.is_(None))
+            r = await db.execute(query.order_by(desc(Pipeline.created_at)))
             pipelines = r.scalars().all()
 
             # Most recent run per pipeline, one query for the whole tenant

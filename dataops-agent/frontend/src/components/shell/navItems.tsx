@@ -112,9 +112,16 @@ export const RAIL_FOOTER_ITEMS: NavItem[] = [
  * than removed outright — the routes still exist (RetiredRouteRedirect,
  * a real redirect + explanation, not a 404), so a command-palette search
  * finding them and landing on that explanation is the intended path, not
- * a dead end. Pipelines/Incidents/Transforms are untouched in 6a — their
- * old pages stay fully real until 6b's repurposing work.
+ * a dead end.
  *
+ * Slice 6b (2026-09-14): Pipelines/Incidents/Transforms repurposed
+ * instead of retired — each has a real unscoped population (a pipeline
+ * with no source, an incident with no pipeline), so their old top-level
+ * routes stay live and useful, just narrowed to unscoped-only, with a
+ * ScopeBanner explaining the change on the page itself (same URL, real
+ * content, not a redirect).
+ *
+
  * Governance/Lineage correction (explicit instruction, 2026-09-14):
  * losing the Lineage tab can't leave a silent gap. /governance itself now
  * says so on its own now-inert Lineage tab (governance/page.tsx); this
@@ -137,10 +144,10 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { slug: "tasks", label: "Tasks" },
   { slug: "sources", label: "Data Sources (moved into each project's Workbench)" },
   { slug: "catalog", label: "Data Catalog" },
-  { slug: "pipelines", label: "Pipelines" },
-  { slug: "transforms", label: "Transforms" },
+  { slug: "pipelines", label: "Pipelines (unscoped only — the rest moved into each project's Workbench)" },
+  { slug: "transforms", label: "Transforms (unscoped only — the rest moved into each project's Workbench)" },
   { slug: "quality", label: "Quality (moved into each project's Workbench)" },
-  { slug: "incidents", label: "Incidents" },
+  { slug: "incidents", label: "Incidents (unscoped only — the rest moved into each project's Workbench)" },
   { slug: "governance", label: "Governance (Contracts, Audit Log)" },
   { slug: "governance", label: "Lineage (moved into each project's Workbench)" },
   { slug: "automations", label: "Automations" },

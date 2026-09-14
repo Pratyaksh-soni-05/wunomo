@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, Badge, Button, Input, Select, Tabs, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast } from "@/components/ui";
 import { formatApiDate } from "@/lib/dates";
+import { ScopeBanner } from "@/components/shell";
 import {
   getToken, getSources, getTransformRuns,
   generateSqlTransform, generatePandasTransform,
@@ -132,7 +133,17 @@ export default function TransformsPage() {
   };
 
   // ---- History tab ----
-  const runsQuery = useQuery({ queryKey: ["transform-runs"], queryFn: () => getTransformRuns(token, { limit: 50 }) });
+  // Repurposed (slice 6b, 2026-09-14): used to be every run tenant-wide,
+  // now unscoped-only (no source_id) - project-scoped runs moved into
+  // each project's Workbench. Note: TransformRun.source_id is nullable in
+  // the schema, but RunSqlRequest/RunPandasRequest both require source_id
+  // as a plain `str` (not Optional) at every code path that ever inserts a
+  // row (api/v1/transformations.py's run/sql and run/pandas, and the
+  // agent's own run_sql_transform/run_python_transformation tools) - so in
+  // practice this History tab will show 0 today, correctly, not from a
+  // bug here. Logged as finding 97 rather than silently building for a
+  // case that can't currently happen.
+  const runsQuery = useQuery({ queryKey: ["transform-runs", "unscoped"], queryFn: () => getTransformRuns(token, { limit: 50, unscoped: true }) });
   const runs = runsQuery.data?.runs ?? [];
 
   const replay = (run: TransformRunItem) => {
@@ -154,6 +165,7 @@ export default function TransformsPage() {
       </div>
 
       <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+        <ScopeBanner label="transform runs" />
         <div style={{ maxWidth: 320 }}>
           <Select
             id="transform-source" label="Data source" value={sourceId}
@@ -162,6 +174,10 @@ export default function TransformsPage() {
             <option value="">Select a source</option>
             {sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </Select>
+          <p className="text-muted text-xs" style={{ marginTop: 6 }}>
+            Running against a source here still logs the run to whichever project can reach
+            it — it&apos;ll show in that project&apos;s Workbench History, not in the tab below.
+          </p>
         </div>
 
         <Tabs
@@ -304,10 +320,11 @@ export default function TransformsPage() {
             <Skeleton style={{ height: 200, borderRadius: 12 }} />
           ) : runs.length === 0 ? (
             <div className="empty-state">
-              <h2 className="font-display text-xl">No transforms run yet</h2>
+              <h2 className="font-display text-xl">No unscoped transform runs</h2>
               <p className="text-muted text-sm" style={{ maxWidth: 380 }}>
-                Real SQL and Python transforms you run from this screen — or AXIOM runs on your
-                behalf in chat — appear here.
+                Every run always logs against a specific source, so it always belongs to
+                whichever project can reach that source — this tenant-wide history will only ever
+                show something here if that ever changes.
               </p>
             </div>
           ) : (

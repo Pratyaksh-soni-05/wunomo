@@ -40,6 +40,7 @@ class IncidentUpdate(BaseModel):
 async def list_incidents(
     status: Optional[str] = None,
     severity: Optional[str] = None,
+    unscoped: Optional[bool] = None,
     limit: int = 50,
     offset: int = 0,
     user=Depends(get_current_user)
@@ -50,6 +51,11 @@ async def list_incidents(
             filters.append(Incident.status == IncidentStatus(status))
         if severity:
             filters.append(Incident.severity == IncidentSeverity(severity))
+        # unscoped=True: incidents with no pipeline_id -- can never resolve
+        # into any project's scope regardless of which project is asking
+        # (Wunomo UI-rebuild slice 6b, 2026-09-14).
+        if unscoped:
+            filters.append(Incident.pipeline_id.is_(None))
 
         # item 55 fix: "count" previously echoed len(page) - always equal to
         # whatever the truncated page returned, never the true total. A

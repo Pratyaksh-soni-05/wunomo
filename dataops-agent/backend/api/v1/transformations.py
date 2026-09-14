@@ -2,7 +2,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 
 from .auth import get_current_user, require_permission
 from database import AsyncSessionLocal
@@ -189,16 +189,31 @@ async def list_transform_runs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     source_id: Optional[str] = None,
+    unscoped: Optional[bool] = None,
     user=Depends(get_current_user),
 ):
     """Lists real transform executions for the Transforms History tab —
     newest-first, tenant-scoped. Phase 13 built TransformRun persistence but
     no read endpoint; this is that missing read side (Phase 14 addendum)."""
     async with AsyncSessionLocal() as db:
-        query = select(TransformRun).where(TransformRun.tenant_id == user["tenant_id"])
+        filters = [TransformRun.tenant_id == user["tenant_id"]]
         if source_id:
-            query = query.where(TransformRun.source_id == source_id)
-        query = query.order_by(desc(TransformRun.created_at)).offset(offset).limit(limit)
+            filters.append(TransformRun.source_id == source_id)
+        # unscoped=True: runs with no source_id -- can never resolve into
+        # any project's scope regardless of which project is asking
+        # (Wunomo UI-rebuild slice 6b, 2026-09-14).
+        if unscoped:
+            filters.append(TransformRun.source_id.is_(None))
+
+        # Real total, not len(page) -- the same defect finding 55 already
+        # fixed on Incidents; this endpoint had never been touched for it.
+        count_q = select(func.count()).select_from(TransformRun).where(*filters)
+        total = (await db.execute(count_q)).scalar_one()
+
+        query = (
+            select(TransformRun).where(*filters)
+            .order_by(desc(TransformRun.created_at)).offset(offset).limit(limit)
+        )
         result = await db.execute(query)
         runs = result.scalars().all()
 
@@ -218,5 +233,7 @@ async def list_transform_runs(
             }
             for r in runs
         ],
-        "count": len(runs),
+        "count": total,
+        "offset": offset,
+        "limit": limit,
     }

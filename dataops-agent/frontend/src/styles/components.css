@@ -718,6 +718,12 @@ tr.selected td:first-child {
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; text-align: center; gap: 12px; min-height: 60vh; }
 .empty-icon { width: 48px; height: 48px; background: var(--surface-hover); border-radius: var(--radius-lg); display: flex; align-items: center; justify-content: center; color: var(--text-muted); margin: 0 auto 4px; }
 
+/* ScopeBanner (slice 6b, 2026-09-14) — a repurposed route's "this URL
+   changed meaning" notice, sits inline at the top of the page's own
+   content, not centered/full-height like .empty-state (the page still has
+   real content below it). */
+.scope-banner { padding: 10px 14px; border-radius: var(--radius-md); background: var(--accent-subtle-bg); border: 1px solid var(--accent-subtle-border); color: var(--text-secondary); font-size: 13px; margin-bottom: 16px; }
+
 /* Phase 4 (2026-08-19): a bounded gradient is permitted on the header strip
    in light mode only — the card region below it (.stats-grid and every
    .card) stays flat in both themes, and dark mode gets no gradient here

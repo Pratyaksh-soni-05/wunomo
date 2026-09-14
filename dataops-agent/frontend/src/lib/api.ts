@@ -298,13 +298,19 @@ export function rejectRequest(token: string, approvalId: string): Promise<unknow
 // button conditionally per row); getOpenIncidents() is now a thin wrapper
 // that actually passes status=open, matching what its name has always
 // implied and what the health banner actually needs.
-export function getIncidents(token: string, status?: string): Promise<{ incidents: Incident[]; count: number }> {
-  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-  return authedRequest(`/api/v1/incidents/${qs}`, token);
+export function getIncidents(
+  token: string,
+  opts?: { status?: string; unscoped?: boolean }
+): Promise<{ incidents: Incident[]; count: number }> {
+  const qs = new URLSearchParams();
+  if (opts?.status) qs.set("status", opts.status);
+  if (opts?.unscoped) qs.set("unscoped", "true");
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return authedRequest(`/api/v1/incidents/${suffix}`, token);
 }
 
 export function getOpenIncidents(token: string): Promise<{ incidents: Incident[]; count: number }> {
-  return getIncidents(token, "open");
+  return getIncidents(token, { status: "open" });
 }
 
 export interface ChatSessionSummary {
@@ -530,8 +536,12 @@ export interface PipelineRunItem {
   error_message?: string | null;
 }
 
-export function getPipelines(token: string): Promise<{ pipelines: PipelineItem[]; count: number }> {
-  return authedRequest("/api/v1/pipelines/", token);
+export function getPipelines(
+  token: string,
+  opts?: { unscoped?: boolean }
+): Promise<{ pipelines: PipelineItem[]; count: number }> {
+  const qs = opts?.unscoped ? "?unscoped=true" : "";
+  return authedRequest(`/api/v1/pipelines/${qs}`, token);
 }
 
 export function createPipeline(
@@ -851,12 +861,13 @@ export function explainCode(
 
 export function getTransformRuns(
   token: string,
-  opts?: { limit?: number; offset?: number; source_id?: string }
+  opts?: { limit?: number; offset?: number; source_id?: string; unscoped?: boolean }
 ): Promise<{ runs: TransformRunItem[]; count: number }> {
   const qs = new URLSearchParams();
   if (opts?.limit) qs.set("limit", String(opts.limit));
   if (opts?.offset) qs.set("offset", String(opts.offset));
   if (opts?.source_id) qs.set("source_id", opts.source_id);
+  if (opts?.unscoped) qs.set("unscoped", "true");
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return authedRequest(`/api/v1/transformations/runs${suffix}`, token);
 }

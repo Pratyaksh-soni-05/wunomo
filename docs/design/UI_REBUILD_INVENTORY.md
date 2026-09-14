@@ -373,12 +373,35 @@ it reviews as one self-contained diff instead of riding along inside feature sli
      source granted to both — confirmed live it shows in *both* projects' Sources (the union, not
      exclusive), and that a quality rule built on that shared source's pipeline resolves into both
      projects too, not just the literal source-level case.
-   - **6b, not yet started.** Pipelines, Incidents, Transforms, Lineage (with the approximate/
-     unresolved badges from findings item 86) + the two-tier Unscoped treatment (an always-visible
-     muted in-project section, plus repurposing Pipelines/Incidents/Transforms's old top-level routes
-     into the tenant-wide "unscoped" destination those sections link out to) + Catalog/Contracts/
-     Audit's placement question, logged as findings item 94 so it lives in the findings list, not
-     only here.
+   - **6b ✅ SHIPPED 2026-09-14.** Pipelines, Incidents, Transforms, Lineage built as filtered copies
+     of their old top-level pages, same pattern as 6a's Sources/Quality/CI-CD, plus the two-tier
+     Unscoped treatment: an always-visible muted note on each project Workbench sub-page
+     (`UnscopedNote`, new shared component) backed by a real `unscoped=true` query param added to
+     all three list endpoints (`GET /pipelines`, `/incidents`, `/transformations/runs` — a single
+     indexed `COUNT(*)`/list filter each, not N+1; Transforms' endpoint also got finding 55's
+     real-COUNT fix, which it had never received). Pipelines/Incidents/Transforms's old top-level
+     routes repurposed rather than retired (real unscoped population, unlike 6a's three) — same URL,
+     narrowed to unscoped-only, with a new `ScopeBanner` component explaining the change on the page
+     itself (same "don't leave a silent gap" rule as Governance/Lineage), plus `ALL_NAV_ITEMS` labels
+     updated to match. Lineage built fresh: derives from `LineageTracker.sync_tenant_lineage()`
+     (source/pipeline registration metadata, not real query-level tracing), with an Approximate badge
+     driven by each node's real `metadata.auto` flag rather than assumed, and an Unresolved badge for
+     a pipeline with no lineage edges. Verified both badges render on real, non-fabricated data — but
+     doing so surfaced a structural fact: `useProjectScope`'s `pipelineIds` only ever contains
+     pipelines that already have a source, so a *project's own* pipeline list can never actually
+     produce "Unresolved" (always resolves, always Approximate) — Lineage needed the same two-tier
+     Unscoped treatment as the other three surfaces for "Unresolved" to have anywhere real to appear
+     (an unscoped/manual pipeline is exactly `sync_tenant_lineage`'s bare-node case). Separately,
+     while building the repurposed `/transforms` route, `TransformRun.source_id` turned out to be
+     nullable in the schema but never actually nullable in practice — every insert path (UI and
+     agent) requires a real `source_id` — so unlike Pipelines/Incidents, Transforms' unscoped bucket
+     is correct-but-currently-empty, not a bug in this slice; logged as findings item 97 rather than
+     silently building UI for a case the original audit assumed without checking. Catalog/Contracts/
+     Audit's placement question (findings item 94) remains open, unrelated to this slice's scope.
+     **Verified**: two-project negative control (an unscoped pipeline shows in the muted note but
+     never in either project's own list — checked with two separate projects, not one); a
+     project-scoped pipeline confirmed absent from the repurposed `/pipelines` view; both Lineage
+     badges confirmed on real data, in both themes.
 7. **Chat tab.** Wire chat into the project route; filter Channels client-side by `project_id`
    (free — already on the model); resolve the 1:1-session-has-no-project-id question from §1 before
    this ships, not during it. **Size: S–M.**
