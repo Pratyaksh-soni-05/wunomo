@@ -402,6 +402,12 @@ it reviews as one self-contained diff instead of riding along inside feature sli
      never in either project's own list — checked with two separate projects, not one); a
      project-scoped pipeline confirmed absent from the repurposed `/pipelines` view; both Lineage
      badges confirmed on real data, in both themes.
+   - **Correction, 2026-09-15 (findings item 97).** Transforms' repurposed unscoped view was retired
+     rather than kept — no code path can produce a sourceless `TransformRun` (both API request models
+     and both agent tools require a real `source_id`), so the tenant-wide view could only ever show
+     empty. `/transforms` now retires outright via `RetiredRouteRedirect`, same as Sources/Quality/
+     CI-CD; Pipelines/Incidents keep the real two-tier treatment, both have a genuine reachable
+     unscoped case.
 7. **Chat tab.** Wire chat into the project route; filter Channels client-side by `project_id`
    (free — already on the model); resolve the 1:1-session-has-no-project-id question from §1 before
    this ships, not during it. **Size: S–M.**

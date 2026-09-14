@@ -7,7 +7,6 @@ import { Card, Badge, Button, Input, Select, Tabs, Table, Thead, Tbody, Tr, Th, 
 import { formatApiDate } from "@/lib/dates";
 import { useProjectScope } from "@/lib/projectScope";
 import { NoSourcesGrantedEmptyState } from "@/components/workbench/WorkbenchEmptyStates";
-import { UnscopedNote } from "@/components/workbench/UnscopedNote";
 import {
   getToken, getSources, getTransformRuns,
   generateSqlTransform, generatePandasTransform,
@@ -18,12 +17,19 @@ import {
 
 // Filtered copy of /transforms (Wunomo UI-rebuild slice 6b, 2026-09-14) --
 // same three editors + history, source picker and history both scoped to
-// this project's resolved sourceIds. A transform run with no source_id
-// (or one on an out-of-project source) never shows here -- the always-
-// visible muted note under History covers it, matching Pipelines/
-// Incidents' own unscoped treatment. Gated on the whole page, not just
+// this project's resolved sourceIds. Gated on the whole page, not just
 // History, like Sources -- running a transform genuinely needs a
 // project-scoped source to pick from.
+//
+// No Unscoped note here, unlike Pipelines/Incidents (findings item 97,
+// fixed 2026-09-15): TransformRun.source_id is nullable in the schema,
+// but every insert path -- both API request models and both agent tools
+// -- requires a real source_id. A sourceless transform run isn't a state
+// this architecture can produce (SqlRunner/PythonRunner both resolve
+// their connection/dataframe from source_id; there's no engine to run
+// against without one), so the tenant-wide unscoped route this note used
+// to point at was retired rather than left showing a permanently-empty
+// "0 unscoped" line.
 function errMsg(e: unknown): string {
   return e instanceof ApiError ? (typeof e.detail === "string" ? e.detail : e.message) : "Something went wrong.";
 }
@@ -149,7 +155,6 @@ export default function ProjectTransformsTab() {
   // ---- History tab ----
   const runsQuery = useQuery({ queryKey: ["transform-runs"], queryFn: () => getTransformRuns(token, { limit: 50 }) });
   const runs = (runsQuery.data?.runs ?? []).filter((r) => sourceIds.has(r.source_id));
-  const unscoped = useQuery({ queryKey: ["transform-runs", "unscoped"], queryFn: () => getTransformRuns(token, { unscoped: true, limit: 1 }) });
 
   const replay = (run: TransformRunItem) => {
     setSourceId(run.source_id);
@@ -358,7 +363,6 @@ export default function ProjectTransformsTab() {
                 </Table>
               </Card>
             )}
-            <UnscopedNote loading={unscoped.isLoading} count={unscoped.data?.count ?? 0} itemLabel="transform run" />
           </>
         )}
       </div>

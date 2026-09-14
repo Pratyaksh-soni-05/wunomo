@@ -4,12 +4,16 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui";
 
-// Shared by every top-level Workbench-surface route retired in slice 6a
-// (Sources, Quality, CI/CD -- the three that resolve cleanly with no
-// unscoped population, so unlike Pipelines/Incidents/Transforms they
-// don't get repurposed into a tenant-wide "unscoped" view in 6b, they
-// just go away). A real redirect with an explanation, not a bare 404 --
-// same "don't leave a dead end" rule as the project Chat tab's signpost.
+// Shared by every top-level Workbench-surface route retired outright
+// (Sources/Quality/CI-CD in slice 6a; Transforms joined them after slice
+// 6b shipped, findings item 97 -- its "unscoped" population turned out to
+// be schema-possible but structurally unreachable, since every code path
+// that ever runs a transform requires a real source_id, so the repurposed
+// tenant-wide view could only ever show empty. Pipelines/Incidents keep
+// the real two-tier Unscoped treatment -- both have a genuine, reachable
+// "no source"/"no pipeline" case today). A real redirect with an
+// explanation, not a bare 404 -- same "don't leave a dead end" rule as
+// the project Chat tab's signpost.
 export function RetiredRouteRedirect({ label }: { label: string }) {
   const router = useRouter();
   const toast = useToast();

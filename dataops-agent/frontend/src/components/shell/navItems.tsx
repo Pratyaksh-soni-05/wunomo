@@ -114,12 +114,16 @@ export const RAIL_FOOTER_ITEMS: NavItem[] = [
  * finding them and landing on that explanation is the intended path, not
  * a dead end.
  *
- * Slice 6b (2026-09-14): Pipelines/Incidents/Transforms repurposed
- * instead of retired — each has a real unscoped population (a pipeline
- * with no source, an incident with no pipeline), so their old top-level
- * routes stay live and useful, just narrowed to unscoped-only, with a
+ * Slice 6b (2026-09-14): Pipelines/Incidents repurposed instead of
+ * retired — each has a real unscoped population (a pipeline with no
+ * source, an incident with no pipeline), so their old top-level routes
+ * stay live and useful, just narrowed to unscoped-only, with a
  * ScopeBanner explaining the change on the page itself (same URL, real
- * content, not a redirect).
+ * content, not a redirect). Transforms was repurposed the same way
+ * initially, then retired outright (2026-09-15, findings item 97) once
+ * it turned out no code path can ever produce a sourceless TransformRun
+ * — the repurposed view could only ever show empty, so it joined
+ * Sources/Quality/CI-CD's plain retirement instead.
  *
 
  * Governance/Lineage correction (explicit instruction, 2026-09-14):
@@ -145,7 +149,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { slug: "sources", label: "Data Sources (moved into each project's Workbench)" },
   { slug: "catalog", label: "Data Catalog" },
   { slug: "pipelines", label: "Pipelines (unscoped only — the rest moved into each project's Workbench)" },
-  { slug: "transforms", label: "Transforms (unscoped only — the rest moved into each project's Workbench)" },
+  { slug: "transforms", label: "Transforms (moved into each project's Workbench)" },
   { slug: "quality", label: "Quality (moved into each project's Workbench)" },
   { slug: "incidents", label: "Incidents (unscoped only — the rest moved into each project's Workbench)" },
   { slug: "governance", label: "Governance (Contracts, Audit Log)" },
