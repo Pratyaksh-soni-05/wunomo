@@ -1,45 +1,30 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useQuery, useQueries } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardBody, Button, Skeleton } from "@/components/ui";
 import { ICON_NEW_PROJECT } from "@/components/shell/navItems";
 import { formatApiDateOnly } from "@/lib/dates";
-import {
-  getToken, decodeUserFromToken, listProjects, getProjectAgents, getAgentSources,
-} from "@/lib/api";
+import { useProjectScope } from "@/lib/projectScope";
+import { getToken, decodeUserFromToken, listProjects } from "@/lib/api";
 
-// Real agent count (one call) + real, de-duplicated source count (an N-of-N
-// nested fetch: this project's agents, then each agent's own sources) --
-// no aggregate endpoint exists yet for either, source count especially.
+// Real agent count + real, de-duplicated source count, both from the same
+// resolver every Workbench surface reads (lib/projectScope.ts, slice 6a) --
+// no aggregate endpoint exists yet for either, source count especially,
+// which is why this is still an N-of-N nested fetch under the hood.
 // Accepted for now given the small project/agent counts expected at this
 // stage; logged as a real backend gap, not silently absorbed:
 // WALKTHROUGH_FINDINGS_2026-08.md item 92 (GET /api/v1/projects/summary).
 function ProjectCardStats({ token, projectId }: { token: string; projectId: string }) {
-  const agentsQuery = useQuery({
-    queryKey: ["project-agents", projectId],
-    queryFn: () => getProjectAgents(token, projectId),
-  });
-  const agents = agentsQuery.data?.agents ?? [];
+  const { agentCount, sourceIds, loading } = useProjectScope(token, projectId);
 
-  const sourceQueries = useQueries({
-    queries: agents.map((a) => ({
-      queryKey: ["agent-sources", a.id],
-      queryFn: () => getAgentSources(token, a.id),
-    })),
-  });
-  const sourcesLoading = sourceQueries.some((q) => q.isLoading);
-  const uniqueSourceCount = new Set(
-    sourceQueries.flatMap((q) => (q.data?.sources ?? []).map((s) => s.id))
-  ).size;
-
-  if (agentsQuery.isLoading) return <Skeleton style={{ height: 14, width: 100 }} />;
+  if (loading && agentCount === 0) return <Skeleton style={{ height: 14, width: 100 }} />;
 
   return (
     <span className="text-muted text-xs">
-      {agents.length} agent{agents.length === 1 ? "" : "s"}
+      {agentCount} agent{agentCount === 1 ? "" : "s"}
       {" · "}
-      {agents.length > 0 && sourcesLoading ? "…" : `${uniqueSourceCount} source${uniqueSourceCount === 1 ? "" : "s"}`}
+      {loading ? "…" : `${sourceIds.size} source${sourceIds.size === 1 ? "" : "s"}`}
     </span>
   );
 }

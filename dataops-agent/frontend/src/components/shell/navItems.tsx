@@ -103,6 +103,24 @@ export const RAIL_FOOTER_ITEMS: NavItem[] = [
  * (e.g. /approvals shows "Needs you" in the rail but still says
  * "Approvals" here and in the breadcrumb, because the page itself hasn't
  * been rebuilt into Needs You yet — slice 9's job, not this one's).
+ *
+ * Slice 6a (2026-09-14): Sources/Quality/CI-CD's old top-level routes
+ * retired — each resolves cleanly per project with no unscoped population
+ * (UI_REBUILD_INVENTORY.md §2), so unlike Pipelines/Incidents/Transforms
+ * they don't get repurposed into a tenant-wide view in 6b, they just move
+ * into each project's Workbench. Labels updated here to say so rather
+ * than removed outright — the routes still exist (RetiredRouteRedirect,
+ * a real redirect + explanation, not a 404), so a command-palette search
+ * finding them and landing on that explanation is the intended path, not
+ * a dead end. Pipelines/Incidents/Transforms are untouched in 6a — their
+ * old pages stay fully real until 6b's repurposing work.
+ *
+ * Governance/Lineage correction (explicit instruction, 2026-09-14):
+ * losing the Lineage tab can't leave a silent gap. /governance itself now
+ * says so on its own now-inert Lineage tab (governance/page.tsx); this
+ * list adds a second, separate "Lineage" entry pointing at the same
+ * /governance slug purely so searching "lineage" in the command palette
+ * surfaces that explanation, rather than finding nothing at all.
  */
 export const ALL_NAV_ITEMS: NavItem[] = [
   { slug: "home", label: "Home" },
@@ -117,15 +135,16 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { slug: "ai-employees", label: "AI Employees" },
   { slug: "chat", label: "AXIOM" },
   { slug: "tasks", label: "Tasks" },
-  { slug: "sources", label: "Data Sources" },
+  { slug: "sources", label: "Data Sources (moved into each project's Workbench)" },
   { slug: "catalog", label: "Data Catalog" },
   { slug: "pipelines", label: "Pipelines" },
   { slug: "transforms", label: "Transforms" },
-  { slug: "quality", label: "Quality" },
+  { slug: "quality", label: "Quality (moved into each project's Workbench)" },
   { slug: "incidents", label: "Incidents" },
-  { slug: "governance", label: "Governance" },
+  { slug: "governance", label: "Governance (Contracts, Audit Log)" },
+  { slug: "governance", label: "Lineage (moved into each project's Workbench)" },
   { slug: "automations", label: "Automations" },
-  { slug: "cicd", label: "CI / CD" },
+  { slug: "cicd", label: "CI / CD (moved into each project's Workbench)" },
   { slug: "analytics", label: "Analytics" },
   { slug: "audit", label: "Audit Logs" },
 ];

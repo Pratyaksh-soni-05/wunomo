@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Card, Badge, Button, Modal, Input, Select, Tabs,
@@ -8,18 +9,9 @@ import {
 } from "@/components/ui";
 import { formatApiDate } from "@/lib/dates";
 import {
-  getToken, getLineageGraph, getContracts, createContract, validateContract, getAuditTrail, getSources,
-  type LineageNode, type DataContract, type AuditEntry,
+  getToken, getContracts, createContract, validateContract, getAuditTrail, getSources,
+  type DataContract, type AuditEntry,
 } from "@/lib/api";
-
-function nodeTypeVariant(type: string): "info" | "success" | "warning" | "gray" {
-  switch (type) {
-    case "source": return "info";
-    case "pipeline": return "success";
-    case "output": return "warning";
-    default: return "gray";
-  }
-}
 
 function validationVariant(status: string): "success" | "danger" | "warning" | "gray" {
   switch (status) {
@@ -32,15 +24,17 @@ function validationVariant(status: string): "success" | "danger" | "warning" | "
 
 export default function GovernancePage() {
   const token = getToken() as string;
+  const router = useRouter();
   const toast = useToast();
   const qc = useQueryClient();
-  const [tab, setTab] = useState("lineage");
+  // Lineage is no longer this page's own content (see the tab below) --
+  // Contracts is the real default now, not Lineage.
+  const [tab, setTab] = useState("contracts");
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState("");
   const [producerSourceId, setProducerSourceId] = useState("");
   const [consumerDescription, setConsumerDescription] = useState("");
 
-  const graph = useQuery({ queryKey: ["lineage-graph"], queryFn: () => getLineageGraph(token) });
   const contracts = useQuery({ queryKey: ["contracts"], queryFn: () => getContracts(token) });
   const audit = useQuery({ queryKey: ["audit-trail"], queryFn: () => getAuditTrail(token) });
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => getSources(token) });
@@ -69,9 +63,6 @@ export default function GovernancePage() {
     onError: () => toast.push("Failed to create contract.", "danger"),
   });
 
-  const nodes = graph.data?.nodes ?? [];
-  const edges = graph.data?.edges ?? [];
-  const nodeById = (id: string) => nodes.find((n: LineageNode) => n.id === id);
   const contractList = contracts.data?.contracts ?? [];
   const auditList = audit.data?.entries ?? [];
   const sourceList = sources.data?.sources ?? [];
@@ -99,56 +90,20 @@ export default function GovernancePage() {
         />
 
         {tab === "lineage" && (
-          graph.isLoading ? (
-            <Skeleton style={{ height: 300, borderRadius: 12 }} />
-          ) : nodes.length === 0 ? (
-            <div className="empty-state">
-              <h2 className="font-display text-xl">No lineage yet</h2>
-              <p className="text-muted text-sm" style={{ maxWidth: 380 }}>
-                Lineage nodes are created automatically as you add sources and pipelines.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-2" style={{ gap: 16 }}>
-              <Card>
-                <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }} className="text-sm text-muted">
-                  Nodes ({nodes.length})
-                </div>
-                <Table>
-                  <Thead><Tr><Th>Name</Th><Th>Type</Th></Tr></Thead>
-                  <Tbody>
-                    {nodes.map((n: LineageNode) => (
-                      <Tr key={n.id}>
-                        <Td>{n.name}</Td>
-                        <Td><Badge variant={nodeTypeVariant(n.node_type)}>{n.node_type}</Badge></Td>
-                      </Tr>
-                    ))}
-                  </Tbody>
-                </Table>
-              </Card>
-              <Card>
-                <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }} className="text-sm text-muted">
-                  Edges ({edges.length})
-                </div>
-                {edges.length === 0 ? (
-                  <div style={{ padding: 16 }} className="text-muted text-sm">No relationships yet.</div>
-                ) : (
-                  <Table>
-                    <Thead><Tr><Th>Upstream</Th><Th>Relationship</Th><Th>Downstream</Th></Tr></Thead>
-                    <Tbody>
-                      {edges.map((e) => (
-                        <Tr key={e.edge_id}>
-                          <Td>{nodeById(e.upstream_id)?.name || e.upstream_id}</Td>
-                          <Td><span className="text-muted text-sm">{e.relationship_type}</span></Td>
-                          <Td>{nodeById(e.downstream_id)?.name || e.downstream_id}</Td>
-                        </Tr>
-                      ))}
-                    </Tbody>
-                  </Table>
-                )}
-              </Card>
-            </div>
-          )
+          // Not removed outright (slice 6a, 2026-09-14) -- a vanished tab
+          // is a silent gap, an inert one that says where it went isn't.
+          // The real Lineage view now lives inside each project's
+          // Workbench, per-project by construction (Option B); this page
+          // is tenant-wide, so it was never going to be the real home for
+          // a per-project view anyway.
+          <div className="empty-state">
+            <h2 className="font-display text-xl">Lineage has moved</h2>
+            <p className="text-muted text-sm" style={{ maxWidth: 400 }}>
+              Lineage is now scoped to each project — open a project and go to its Workbench tab to
+              see it there.
+            </p>
+            <Button size="sm" onClick={() => router.push("/projects")}>Go to Projects</Button>
+          </div>
         )}
 
         {tab === "contracts" && (

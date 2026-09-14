@@ -300,9 +300,37 @@ img { display: block; max-width: 100%; }
    TABS
    ========================================== */
 .tabs { display: flex; border-bottom: 1px solid var(--border); gap: 0; }
-.tab { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all var(--t-fast); white-space: nowrap; }
+.tab { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all var(--t-fast); white-space: nowrap; text-decoration: none; }
 .tab:hover { color: var(--text-primary); }
-.tab.active { color: var(--midnight-600); border-color: var(--midnight-600); }
+/* Was var(--midnight-600) both properties -- a theme-invariant blue
+   primitive slice 2's neutral pass never touched (it only grepped
+   --accent-fill/--accent-text consumers, not every hardcoded primitive
+   in the file). Found 2026-09-14 building slice 6a's Workbench sub-nav,
+   right next to this rule. Text goes neutral like everything else that
+   pass touched; the underline stays --focus-ring, matching the same
+   "active-state marker shapes are the one place blue survives" pattern
+   already established for .sidebar-item.active and tr.selected's own
+   left-edge bar -- not an arbitrary second choice, the same rule applied
+   consistently. See findings item 95. */
+.tab.active { color: var(--text-primary); border-color: var(--focus-ring); }
+
+/* ==========================================
+   WORKBENCH SUB-NAV (slice 6a, 2026-09-14)
+   Matches wunomo-all-screens.html's .wb/.wbnav/.wbi/.wbbody exactly --
+   a second-level nav inside the project container's own Workbench tab,
+   not a restyle of the app-wide sidebar or the project tab bar above.
+   ========================================== */
+.wb { display: grid; grid-template-columns: 184px minmax(0, 1fr); flex: 1; min-height: 0; }
+.wbnav { border-right: 1px solid var(--border); padding: 14px 10px; overflow-y: auto; }
+.wbi {
+  display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: var(--radius-sm);
+  color: var(--text-muted); font-size: 12.5px; width: 100%; text-align: left; margin-bottom: 1px;
+  text-decoration: none; transition: background var(--t-fast), color var(--t-fast);
+}
+.wbi:hover { background: var(--surface-hover); color: var(--text-secondary); }
+.wbi.active { background: var(--surface-hover); color: var(--text-primary); font-weight: 500; }
+.wbi .c { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.wbbody { overflow-y: auto; padding: 22px 24px; flex: 1; min-height: 0; }
 
 /* ==========================================
    TABLE

@@ -354,16 +354,31 @@ it reviews as one self-contained diff instead of riding along inside feature sli
    click and post-create redirect; the old hire page's two links disappeared with the page itself).
    **Size: L** (matches the original M–L estimate, landed at the high end — the hire-modal extraction
    and the tasks-tab pull-forward were both real, not wrapper-only work).
-6. **Workbench sub-nav, project-bounded (Option B).** Wrap the real operational pages at their new
-   nested URLs, filtered to the union of sources reachable by the project's agents (§2's join table).
-   Concretely: Sources/Catalog/Contracts filter cleanly today; Quality and CI/CD-Incidents resolve
-   cleanly in practice (their nullable FKs are never actually left empty by the create forms);
-   Pipelines/Transforms need an explicit "Unscoped" bucket for the real manual/sourceless rows;
-   Incidents needs the same for its "optional pipeline" rows. Lineage ships against the existing
-   `node_metadata` JSON convention for v1 (workable, not indexed) — **flag the `source_id`/
-   `pipeline_id`-as-real-columns migration as a fast-follow, not a blocker**, unless you'd rather do
-   it up front. **Size: L** (this is now real filtering logic on top of routing, not just a wrapper —
-   correctly reflects that Option B costs more than Option A would have).
+6. **Workbench sub-nav, project-bounded (Option B) — split into 6a and 6b (2026-09-14):
+   verify the resolver after three surfaces, not seven.**
+   - **6a ✅ SHIPPED 2026-09-14.** The Workbench sub-nav shell (all 7 items, matching the preview's
+     WBNAV exactly) + the shared resolver (`lib/projectScope.ts`: `project_agents → agents →
+     agent_sources`, with pipelines derived from resolved sources) + the three clean surfaces
+     (Sources, Quality, CI/CD — no unscoped population per §2's join table). Their old top-level
+     routes retired via a real redirect + explanation (`RetiredRouteRedirect`), not a bare 404;
+     Pipelines/Incidents/Transforms/Lineage ship as honest `StubPage`s, untouched otherwise. Two
+     distinct empty states built (Q3): zero agents (layout-level, replaces the whole sub-nav) vs.
+     agents-with-no-sources-granted (per-surface, shared component). Governance's Lineage tab
+     replaced with a visible "moved" notice, not silently dropped, plus a second command-palette
+     entry so searching "lineage" finds where it went. Home's `ProjectCardStats` refactored onto
+     the same shared resolver instead of its own copy. Bonus fix while in the area: `.tab.active`
+     was hardcoding a theme-invariant blue primitive slice 2's audit never caught (findings item 95)
+     — the project container's own tab bar had been rendering a blue underline since slice 5 shipped.
+     **Verified hardest exactly where asked**: two different projects, two different agents, one
+     source granted to both — confirmed live it shows in *both* projects' Sources (the union, not
+     exclusive), and that a quality rule built on that shared source's pipeline resolves into both
+     projects too, not just the literal source-level case.
+   - **6b, not yet started.** Pipelines, Incidents, Transforms, Lineage (with the approximate/
+     unresolved badges from findings item 86) + the two-tier Unscoped treatment (an always-visible
+     muted in-project section, plus repurposing Pipelines/Incidents/Transforms's old top-level routes
+     into the tenant-wide "unscoped" destination those sections link out to) + Catalog/Contracts/
+     Audit's placement question, logged as findings item 94 so it lives in the findings list, not
+     only here.
 7. **Chat tab.** Wire chat into the project route; filter Channels client-side by `project_id`
    (free — already on the model); resolve the 1:1-session-has-no-project-id question from §1 before
    this ships, not during it. **Size: S–M.**
