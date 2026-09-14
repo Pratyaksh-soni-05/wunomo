@@ -314,9 +314,26 @@ it reviews as one self-contained diff instead of riding along inside feature sli
    `--chart-accent-fill-a12` confirmed exempt, same reasoning as `--chart-accent`. Findings 89
    (slice 2's colour audit missed `rgba()` literals) and 91 (`WorkspacePicker`'s disabled "current"
    row is unreadable in dark mode, pre-existing, newly exercised) logged during this slice.
-4. **Home screen.** Restyle current Dashboard content under the new shell; de-AXIOM-ify copy/CTAs
-   that assume a single agent. Nearly pure reuse of `KpiCard`/`TrendCharts`/`RecentRunsCard`/
-   `ApprovalsCard`/`AxiomActivityCard`. **Size: S.**
+4. ✅ **SHIPPED 2026-09-14 — scope corrected from the original description.** The original plan
+   ("restyle current Dashboard content under the new shell") turned out wrong once checked against
+   `wunomo-all-screens.html`'s actual Home panel, which has none of the KPI/chart/approvals/activity
+   content at all — just welcome copy, a start-a-project card, and a Recent project grid. Resolution:
+   Home is a real, separate, brand-new screen at a real, new route (`/home`); `/dashboard`'s KPI
+   content survives completely untouched at its existing URL (no longer the landing page, reachable
+   via the command palette and a new "Workspace health" link on Home — the mock's silence on this
+   was confirmed as an omission, not a decision). Every post-auth redirect that assumed `/dashboard`
+   was the landing page (login, signup, invite-accept, Google OAuth callback, onboarding's own
+   completion check, the sidebar's post-workspace-switch reload, Topbar's wordmark-breadcrumb link,
+   and the public landing page's logged-in-visitor CTA) was found by grep and repointed to `/home` —
+   checked explicitly so Home wouldn't ship as a screen nobody's routing ever reached. Added
+   `Project.description` (nullable, migration `a3f7c982e410`) — small backend change, approved
+   explicitly rather than deferred, since retrofitting it later would mean a migration *and* a
+   backfill. The Recent grid's footer stats have three different real costs, not one: agent count is
+   cheap and real; source count needs an N-of-N nested fetch (accepted for now); last activity has no
+   data source at all today, so Home shows "Created {date}" instead of fabricating one — the
+   `GET /api/v1/projects/summary` endpoint that would fix all three at once is logged as findings
+   item 92, not silently absorbed. **Size: M** (bigger than the original S estimate — the scope
+   question and the redirect audit were the real work, not the screen itself).
 5. **Projects list + project container shell.** Projects screen restyle; new 4-tab container
    (Chat/Workbench/Tasks/Agents) wrapping `projects/[id]`'s existing agent-grid body as the
    Agents-tab default; empty-Workbench-no-agents state reuses the existing "No agents yet" pattern

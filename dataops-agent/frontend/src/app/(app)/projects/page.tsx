@@ -57,6 +57,7 @@ export default function ProjectsPage() {
   const qc = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [renameTarget, setRenameTarget] = useState<ProjectItem | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ProjectItem | null>(null);
@@ -78,11 +79,12 @@ export default function ProjectsPage() {
   const projects = useQuery({ queryKey: ["projects"], queryFn: () => listProjects(token) });
 
   const createMut = useMutation({
-    mutationFn: () => createProject(token, name),
+    mutationFn: () => createProject(token, name, description),
     onSuccess: (p) => {
       toast.push(`Project "${p.name}" created.`, "success");
       setModalOpen(false);
       setName("");
+      setDescription("");
       qc.invalidateQueries({ queryKey: ["projects"] });
       router.push(`/projects/${p.id}`);
     },
@@ -186,12 +188,19 @@ export default function ProjectsPage() {
           </>
         }
       >
-        <Input
-          id="project-name" label="Name" value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Q3 Revenue Migration"
-          required
-        />
+        <div className="flex flex-col gap-3">
+          <Input
+            id="project-name" label="Name" value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Q3 Revenue Migration"
+            required
+          />
+          <Input
+            id="project-description" label="What's this project for? (optional)" value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="One line your agents will read as context"
+          />
+        </div>
       </Modal>
 
       <Modal

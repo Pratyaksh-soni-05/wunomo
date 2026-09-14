@@ -59,7 +59,7 @@ export function Sidebar({
       // Full reload, not router.push — every React Query cache entry in
       // this app is implicitly scoped to whichever tenant was active when
       // it was fetched (unchanged reasoning from the pre-slice-3 sidebar).
-      window.location.href = "/dashboard";
+      window.location.href = "/home";
     } catch {
       toast.push("Couldn't switch workspaces. Try again.", "danger");
       setSwitching(false);

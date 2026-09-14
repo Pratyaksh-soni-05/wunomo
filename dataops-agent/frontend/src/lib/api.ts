@@ -1348,6 +1348,7 @@ export function cancelTask(token: string, id: string): Promise<TaskItem> {
 export interface ProjectItem {
   id: string;
   name: string;
+  description: string | null;
   created_at: string;
 }
 
@@ -1366,9 +1367,10 @@ export function listProjects(token: string): Promise<{ projects: ProjectItem[] }
   return authedRequest("/api/v1/projects/", token);
 }
 
-export function createProject(token: string, name: string): Promise<ProjectItem> {
+export function createProject(token: string, name: string, description?: string): Promise<ProjectItem> {
   return request("/api/v1/projects/", {
-    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ name }),
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ name, description: description || undefined }),
   });
 }
 

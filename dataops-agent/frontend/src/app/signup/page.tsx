@@ -17,7 +17,7 @@ type Mode = "form" | "code-request" | "code-verify";
 async function completeAuth(token: string, tenantId: string, userId: string, router: ReturnType<typeof useRouter>) {
   saveSession(token, tenantId, userId);
   const profile = await getOnboarding(token).catch(() => ({ completed: false }));
-  router.push(profile.completed ? "/dashboard" : "/onboarding");
+  router.push(profile.completed ? "/home" : "/onboarding");
 }
 
 export default function SignupPage() {

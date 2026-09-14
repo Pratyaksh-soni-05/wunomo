@@ -65,16 +65,22 @@ export const ICON_NEW_PROJECT = (
  *
  * Slugs point at whatever real page already exists for each concept today,
  * not at new routes invented for this slice — "point at what's real" (see
- * docs/design/UI_REBUILD_INVENTORY.md, slice 3): Home is /dashboard
- * (reworked in slice 4), Needs you is /approvals (reworked in slice 9).
- * Scheduled has no existing equivalent at all, so it's the one genuinely
- * new route, landing on a StubPage until slice 10. Settings and Team both
- * already exist unchanged; the "& billing" half of Team's label is a
- * rail-copy decision only in this slice — the actual Billing page content
- * hasn't merged into /team yet (see the ALL_NAV_ITEMS note below).
+ * docs/design/UI_REBUILD_INVENTORY.md, slice 3). Needs you is /approvals
+ * (reworked in slice 9). Scheduled has no existing equivalent at all, so
+ * it's the one genuinely new route, landing on a StubPage until slice 10.
+ * Settings and Team both already exist unchanged; the "& billing" half of
+ * Team's label is a rail-copy decision only in this slice — the actual
+ * Billing page content hasn't merged into /team yet (see the
+ * ALL_NAV_ITEMS note below).
+ *
+ * Home pointed at /dashboard through slice 3, as an interim "point at
+ * what's real" measure — slice 4 is the real rework: Home now has its own
+ * route (/home, built fresh) and /dashboard keeps its original KPI/
+ * analytics content unchanged, no longer the landing page. See
+ * docs/design/UI_REBUILD_INVENTORY.md, slice 4.
  */
 export const RAIL_NAV_ITEMS: NavItem[] = [
-  { slug: "dashboard", label: "Home", icon: ICON_HOME },
+  { slug: "home", label: "Home", icon: ICON_HOME },
   { slug: "scheduled", label: "Scheduled", icon: ICON_SCHEDULED },
   { slug: "approvals", label: "Needs you", icon: ICON_NEEDS_YOU },
 ];
@@ -99,6 +105,7 @@ export const RAIL_FOOTER_ITEMS: NavItem[] = [
  * been rebuilt into Needs You yet — slice 9's job, not this one's).
  */
 export const ALL_NAV_ITEMS: NavItem[] = [
+  { slug: "home", label: "Home" },
   { slug: "dashboard", label: "Dashboard" },
   { slug: "scheduled", label: "Scheduled" },
   { slug: "approvals", label: "Approvals" },

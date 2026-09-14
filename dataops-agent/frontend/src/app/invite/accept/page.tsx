@@ -47,7 +47,7 @@ function InviteAcceptInner() {
     try {
       const result = await acceptInvite({ token, password, full_name: fullName });
       saveSession(result.access_token, result.tenant_id, result.user_id);
-      router.push("/dashboard");
+      router.push("/home");
     } catch (err) {
       toast.push(err instanceof ApiError ? String(err.detail ?? "Failed to accept invite") : "Failed to accept invite", "danger");
       setSubmitting(false);

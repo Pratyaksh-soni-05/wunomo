@@ -128,7 +128,7 @@ export default function LandingPage() {
           </div>
           <div className="landing-nav-actions">
             {authed ? (
-              <Link href="/dashboard" className="btn btn-primary">Go to Dashboard</Link>
+              <Link href="/home" className="btn btn-primary">Go to Home</Link>
             ) : (
               <>
                 <Link href="/login" className="btn btn-secondary">Log in</Link>

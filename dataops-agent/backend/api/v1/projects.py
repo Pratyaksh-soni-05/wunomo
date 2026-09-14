@@ -22,6 +22,7 @@ router = APIRouter()
 
 class ProjectCreate(BaseModel):
     name: str
+    description: str | None = None
 
 
 class ProjectRename(BaseModel):
@@ -54,12 +55,13 @@ async def create_project(body: ProjectCreate, user=Depends(require_permission("a
     async with AsyncSessionLocal() as db:
         await _name_collision(db, tenant_id, body.name.strip())
 
-        project = Project(id=str(uuid.uuid4()), tenant_id=tenant_id, name=body.name.strip())
+        description = body.description.strip() if body.description and body.description.strip() else None
+        project = Project(id=str(uuid.uuid4()), tenant_id=tenant_id, name=body.name.strip(), description=description)
         db.add(project)
         await db.commit()
         await db.refresh(project)
 
-    return {"id": project.id, "name": project.name, "created_at": project.created_at}
+    return {"id": project.id, "name": project.name, "description": project.description, "created_at": project.created_at}
 
 
 @router.get("/")
@@ -70,7 +72,9 @@ async def list_projects(user=Depends(require_permission("agents.manage"))):
             select(Project).where(Project.tenant_id == tenant_id).order_by(Project.created_at.desc())
         )
         projects = r.scalars().all()
-    return {"projects": [{"id": p.id, "name": p.name, "created_at": p.created_at} for p in projects]}
+    return {"projects": [
+        {"id": p.id, "name": p.name, "description": p.description, "created_at": p.created_at} for p in projects
+    ]}
 
 
 @router.patch("/{project_id}")

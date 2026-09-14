@@ -86,7 +86,7 @@ export function Topbar({
       </button>
 
       <div className="breadcrumb">
-        <a onClick={() => router.push("/dashboard")} style={{ cursor: "pointer" }}>Wunomo</a>
+        <a onClick={() => router.push("/home")} style={{ cursor: "pointer" }}>Wunomo</a>
         <span className="breadcrumb-sep">/</span>
         <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>{activeItem?.label ?? "..."}</span>
       </div>

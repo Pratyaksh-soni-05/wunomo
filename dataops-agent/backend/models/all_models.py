@@ -551,6 +551,11 @@ class Project(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
     tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
     name = Column(String, nullable=False)
+    # Nullable, optional at create time (Wunomo UI-rebuild slice 4, 2026-09-14)
+    # -- a one-line note on what the project is for. Deliberately free text,
+    # not structured: the proposal's own framing is "context your agents will
+    # eventually read," not a field any current code path consumes yet.
+    description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
