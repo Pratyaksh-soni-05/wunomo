@@ -334,10 +334,26 @@ it reviews as one self-contained diff instead of riding along inside feature sli
    `GET /api/v1/projects/summary` endpoint that would fix all three at once is logged as findings
    item 92, not silently absorbed. **Size: M** (bigger than the original S estimate — the scope
    question and the redirect audit were the real work, not the screen itself).
-5. **Projects list + project container shell.** Projects screen restyle; new 4-tab container
-   (Chat/Workbench/Tasks/Agents) wrapping `projects/[id]`'s existing agent-grid body as the
-   Agents-tab default; empty-Workbench-no-agents state reuses the existing "No agents yet" pattern
-   (§2). **Size: M–L** (the tab shell is new; the content it wraps isn't).
+5. ✅ **SHIPPED 2026-09-14.** Projects list + project container shell. `/projects`: whole rows
+   clickable (same `<Tr onClick>` pattern as Tasks, inheriting finding 87's already-logged
+   middle-click limitation), description shown, and findings item 83 (the ⋮ menu opening below the
+   fold) fixed at the shared `RowActionsMenu` component level — benefits every list page that uses
+   it, not just Projects. Project container: real 4-tab shell (`/projects/[id]/{chat,workbench,
+   tasks,agents}`) with a shared layout (header + tabs); bare `/projects/[id]` redirects to **Chat**,
+   not Agents — an explicit correction to this doc's own original proposal, decided because the
+   default tab is a product statement ("chat is where work gets asked for"), not just whichever tab
+   has real content this slice. Agents tab is the old `/projects/[id]` page moved verbatim. Tasks tab
+   is real, not a stub — pulled forward from slice 8, filtered by `agent_id ∈ project's agents`
+   client-side (which required a small, genuine backend fix: `GET /api/v1/tasks/` never surfaced
+   `agent_id` at all despite the column existing since Phase 0 — findings item 93). Chat tab is an
+   honest signpost stub (explains what's coming, links to the real `/chat` in the meantime, not a
+   dead end); Workbench is a plain `StubPage`. Hire-agent extracted from the old standalone
+   `/agents/hire` page into a shared `HireAgentModal` (project pre-filled from the container header,
+   empty from the global `/agents` list) — the standalone page is retired. Six real deep-link sites
+   to bare `/projects/[id]` found and repointed to the chat tab (sidebar, Home, the list's own row
+   click and post-create redirect; the old hire page's two links disappeared with the page itself).
+   **Size: L** (matches the original M–L estimate, landed at the high end — the hire-modal extraction
+   and the tasks-tab pull-forward were both real, not wrapper-only work).
 6. **Workbench sub-nav, project-bounded (Option B).** Wrap the real operational pages at their new
    nested URLs, filtered to the union of sources reachable by the project's agents (§2's join table).
    Concretely: Sources/Catalog/Contracts filter cleanly today; Quality and CI/CD-Incidents resolve

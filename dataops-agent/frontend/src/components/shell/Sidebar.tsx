@@ -160,8 +160,8 @@ export function Sidebar({
             return (
               <div key={p.id}>
                 <Link
-                  href={`/projects/${p.id}`}
-                  className={["sidebar-item", pathname === `/projects/${p.id}` ? "active" : ""].filter(Boolean).join(" ")}
+                  href={`/projects/${p.id}/chat`}
+                  className={["sidebar-item", isActive ? "active" : ""].filter(Boolean).join(" ")}
                 >
                   <span className="sidebar-item-icon">{ICON_PROJECT}</span>
                   <span>{p.name}</span>

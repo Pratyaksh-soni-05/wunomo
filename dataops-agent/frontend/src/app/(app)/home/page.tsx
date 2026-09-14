@@ -92,7 +92,7 @@ export default function HomePage() {
       ) : (
         <div className="grid grid-3" style={{ gap: 12 }}>
           {projects.map((p) => (
-            <Card key={p.id} hover style={{ cursor: "pointer" }} onClick={() => router.push(`/projects/${p.id}`)}>
+            <Card key={p.id} hover style={{ cursor: "pointer" }} onClick={() => router.push(`/projects/${p.id}/chat`)}>
               <CardBody>
                 <div className="font-display" style={{ fontSize: 16 }}>{p.name}</div>
                 <p className="text-muted text-sm" style={{ margin: "2px 0 16px", minHeight: 19 }}>

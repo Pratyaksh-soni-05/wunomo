@@ -350,6 +350,10 @@ tr.selected td:first-child {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg); min-width: 140px; overflow: hidden; animation: modal-in 0.12s ease;
 }
+/* Findings item 83: a row near the bottom of the table opens upward
+   instead, computed in RowActionsMenu.tsx from the trigger's real
+   position against the viewport at open time. */
+.row-actions-dropdown.flip-up { top: auto; bottom: calc(100% + 4px); }
 .row-actions-dropdown button {
   display: block; width: 100%; text-align: left; padding: 10px 14px; min-height: 40px;
   background: none; border: none; cursor: pointer; font-size: 13px; color: var(--danger);

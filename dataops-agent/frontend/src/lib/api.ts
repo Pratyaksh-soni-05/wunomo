@@ -1230,6 +1230,7 @@ export interface TaskItem {
 export interface TaskSummary {
   id: string;
   user_id: string;
+  agent_id: string | null;
   goal: string;
   task_shape: TaskShapeValue;
   status: string;

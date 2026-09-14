@@ -2,7 +2,11 @@
 // status/provenance -> Badge variant + label, used by the Tasks list page,
 // the Task detail page, and the chat inline "Started task" card, so the
 // three surfaces can never silently drift apart on what a status means.
-import type { TaskStepProvenance } from "@/lib/api";
+import { TASK_SHAPES, type TaskStepProvenance } from "@/lib/api";
+
+export function shapeLabel(shape: string): string {
+  return TASK_SHAPES.find((s) => s.value === shape)?.label ?? shape;
+}
 
 type BadgeVariant = "success" | "danger" | "warning" | "info" | "gray" | "midnight";
 

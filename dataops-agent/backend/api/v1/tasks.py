@@ -296,10 +296,18 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
 
 def _serialize_task_summary(task: Task) -> dict:
     """List view -- no step list (avoids an N+1 join for something the
-    list screen doesn't need; GET /{id} returns the full detail)."""
+    list screen doesn't need; GET /{id} returns the full detail).
+
+    agent_id added (Wunomo UI-rebuild slice 5, 2026-09-14): the column has
+    existed on Task since Wunomo Projects Phase 0, but this serializer
+    never surfaced it, so no list-view consumer could filter by it. The
+    project container's Tasks tab is the first one that needs to -- a
+    project's tasks are exactly the tasks whose agent_id is one of that
+    project's agents, filtered client-side against this field."""
     return {
         "id": task.id,
         "user_id": task.user_id,
+        "agent_id": task.agent_id,
         "goal": task.goal,
         "task_shape": task.task_shape.value,
         "status": task.status.value,

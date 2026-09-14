@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Card, Table, Thead, Tbody, Tr, Th, Td, Skeleton } from "@/components/ui";
+import { HireAgentModal } from "@/components/agents/HireAgentModal";
 import { getToken, listAgents } from "@/lib/api";
 
 const EMPLOYEE_TYPE_LABEL: Record<string, string> = {
@@ -12,6 +14,8 @@ const EMPLOYEE_TYPE_LABEL: Record<string, string> = {
 export default function AgentsPage() {
   const token = getToken() as string;
   const router = useRouter();
+  const qc = useQueryClient();
+  const [hireOpen, setHireOpen] = useState(false);
 
   const agents = useQuery({ queryKey: ["agents"], queryFn: () => listAgents(token) });
   const list = agents.data?.agents ?? [];
@@ -26,7 +30,7 @@ export default function AgentsPage() {
               Every agent your tenant has hired — assigned to a project or not.
             </p>
           </div>
-          <Button size="sm" onClick={() => router.push("/agents/hire")}>+ Hire Agent</Button>
+          <Button size="sm" onClick={() => setHireOpen(true)}>+ Hire Agent</Button>
         </div>
       </div>
 
@@ -39,7 +43,7 @@ export default function AgentsPage() {
             <p className="text-muted text-sm" style={{ maxWidth: 360 }}>
               Hire an agent to give it a name, a data source scope, and optionally a project.
             </p>
-            <Button size="sm" onClick={() => router.push("/agents/hire")}>+ Hire Agent</Button>
+            <Button size="sm" onClick={() => setHireOpen(true)}>+ Hire Agent</Button>
           </div>
         ) : (
           <Card>
@@ -72,6 +76,13 @@ export default function AgentsPage() {
           </Card>
         )}
       </div>
+
+      <HireAgentModal
+        token={token}
+        open={hireOpen}
+        onClose={() => setHireOpen(false)}
+        onHired={() => qc.invalidateQueries({ queryKey: ["agents"] })}
+      />
     </div>
   );
 }

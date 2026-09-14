@@ -86,7 +86,7 @@ export default function ProjectsPage() {
       setName("");
       setDescription("");
       qc.invalidateQueries({ queryKey: ["projects"] });
-      router.push(`/projects/${p.id}`);
+      router.push(`/projects/${p.id}/chat`);
     },
     onError: () => toast.push("Failed to create project.", "danger"),
   });
@@ -152,11 +152,12 @@ export default function ProjectsPage() {
               </Thead>
               <Tbody>
                 {list.map((p) => (
-                  <Tr key={p.id}>
+                  <Tr key={p.id} style={{ cursor: "pointer" }} onClick={() => router.push(`/projects/${p.id}/chat`)}>
                     <Td>
-                      <Button variant="text" onClick={() => router.push(`/projects/${p.id}`)}>
-                        {p.name}
-                      </Button>
+                      <div className="font-medium">{p.name}</div>
+                      {p.description && (
+                        <div className="text-muted text-sm" style={{ marginTop: 2 }}>{p.description}</div>
+                      )}
                     </Td>
                     <Td className="text-muted text-sm">{formatApiDate(p.created_at)}</Td>
                     <Td style={{ textAlign: "right" }}>
