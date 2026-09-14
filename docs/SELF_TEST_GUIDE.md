@@ -1558,9 +1558,11 @@ in this tenant: **Sales Orders**, **Marketing Data**, **Support Tickets**.
 **15.4** Go back to the **Marketing Ops** project page (§15.2) and click
 **+ Hire Agent**.
 
-**What you should see:** you land on **Hire an agent**, with a breadcrumb
-**← Marketing Ops** at the top (since you arrived from the project page —
-the project is pre-selected for you) and a subtitle *"Only DataOps is
+**What you should see (updated 2026-09-14 — hiring is a modal now, not a
+separate page):** a **Hire an agent** window opens over the current page —
+no navigation, no breadcrumb. Its **Project** field already shows
+**Marketing Ops**, pre-filled because you opened it from this project (still
+a normal editable dropdown, not locked). Subtitle *"Only DataOps is
 available today — the rest are shown for context, not selectable."* Above
 the form, a row of employee cards — only the DataOps one is real; the rest
 are shown greyed-out/labeled, not clickable.
@@ -1574,9 +1576,10 @@ are shown greyed-out/labeled, not clickable.
 
 Click **Hire**.
 
-**What you should see:** a `` Hired "Nova". `` toast, and you land back on
-the **Marketing Ops** project page, now showing **1 agent** and a card for
-**Nova** (badge **DataOps Engineer**).
+**What you should see (updated 2026-09-14):** a `` Hired "Nova". `` toast,
+and the modal closes — you're back on whichever page/tab you opened it
+from, not navigated anywhere. A card for **Nova** (badge **DataOps
+Engineer**) now shows wherever this project's agents are listed.
 
 **15.6** Click **+ Hire Agent** again. This time:
 - **Name**: `Atlas`
@@ -1586,8 +1589,9 @@ the **Marketing Ops** project page, now showing **1 agent** and a card for
 
 Click **Hire**.
 
-**What you should see:** `` Hired "Atlas". ``, and the project page now
-shows **2 agents** — **Nova** and **Atlas**, each its own card. Click
+**What you should see (updated 2026-09-14):** `` Hired "Atlas". ``, the
+modal closes, and this project now shows **2 agents** — **Nova** and
+**Atlas**, each its own card. Click
 either card (or click **Agents** in the same sidebar **Projects** lives in
 — a top-level list of every agent on this tenant, regardless of project)
 and confirm on the **Data source scope** card: Nova shows **Marketing
