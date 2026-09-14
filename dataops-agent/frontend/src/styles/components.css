@@ -207,14 +207,13 @@ img { display: block; max-width: 100%; }
    since a light-mode scrim looks washed-out on a dark card and vice versa. */
 .locked-overlay {
   position: absolute; inset: 0; z-index: 1; border-radius: inherit;
-  background: rgba(255, 255, 255, 0.72); backdrop-filter: blur(1px);
+  background: var(--overlay-scrim); backdrop-filter: blur(1px);
   display: flex; align-items: center; justify-content: center;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .locked-overlay { background: rgba(11, 20, 33, 0.72); }
-}
-:root[data-theme="dark"] .locked-overlay { background: rgba(11, 20, 33, 0.72); }
-:root[data-theme="light"] .locked-overlay { background: rgba(255, 255, 255, 0.72); }
+/* Colour sweep (2026-09-14): the three rgba() overrides that used to sit
+   here (base, @media dark, :root[data-theme="dark"]) duplicated the
+   token layer's own light/dark split by hand. --overlay-scrim
+   (tokens.css) now carries that split — see its definition there. */
 /* 2026-08-21: forced regardless of the toggle inside the now-always-dark
    landing sections - the light-theme variant above (rgba(255,255,255,.72))
    rendered as a jarring bright-white block against the new dark backdrop;
@@ -429,7 +428,7 @@ tr.selected td:first-child {
    PROGRESS
    ========================================== */
 .progress-bar { height: 4px; background: var(--surface-hover); border-radius: var(--radius-full); overflow: hidden; }
-.progress-fill { height: 100%; border-radius: var(--radius-full); background: var(--midnight-600); transition: width 0.3s ease; }
+.progress-fill { height: 100%; border-radius: var(--radius-full); background: var(--accent-fill); transition: width 0.3s ease; }
 .progress-fill.success { background: var(--success-fill); }
 .progress-fill.danger { background: var(--danger-fill); }
 .progress-fill.warning { background: var(--warning-fill); }
@@ -524,7 +523,7 @@ tr.selected td:first-child {
   transition: all var(--t-fast);
 }
 .chip:hover { background: var(--surface-hover); }
-.chip.chip-selected { background: var(--accent-fill); color: var(--on-accent-fill); border-color: var(--midnight-800); }
+.chip.chip-selected { background: var(--accent-fill); color: var(--on-accent-fill); border-color: var(--accent-fill); }
 .onboarding-actions { display: flex; justify-content: space-between; margin-top: 32px; }
 
 /* Mobile: panels stack instead of side-by-side; the brand panel collapses
@@ -671,16 +670,11 @@ tr.selected td:first-child {
   border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer;
   flex: 1; max-width: 400px; transition: all var(--t-fast);
 }
-.topbar-search:hover { background: var(--surface); border-color: var(--ocean-300); }
+.topbar-search:hover { background: var(--surface); border-color: var(--border-strong); }
 .topbar-search-ph { color: var(--text-muted); font-size: 13px; flex: 1; white-space: nowrap; }
-.env-select {
-  appearance: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
-  padding: 4px 26px 4px 10px; font-size: 12px; font-weight: 500; color: var(--text-secondary);
-  cursor: pointer; font-family: var(--font);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236B7C94' stroke-width='2.5'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 8px center;
-}
-.env-select:focus { outline: none; border-color: var(--ocean-400); }
+/* .env-select removed 2026-09-14 (colour sweep) — dead CSS, zero .tsx
+   consumers anywhere in src (grepped). Whatever topbar env-switcher this
+   was for predates the current Topbar.tsx and was never reconnected. */
 /* Text stays --text-primary (theme-aware) rather than a fixed shade — the
    background (--accent-subtle-bg) flips to an opaque grey in dark mode, so
    a fixed dark-navy text color would go dark-on-dark. */
@@ -868,7 +862,7 @@ tr.selected td:first-child {
   .sidebar { transform: translateX(-100%); }
   .sidebar.mobile-open { transform: translateX(0); }
   .main-content { margin-left: 0 !important; }
-  .ai-status, .credits-badge, .env-select { display: none; }
+  .ai-status, .credits-badge { display: none; }
   .topbar-search { max-width: 160px; }
   .chat-sidebar-right { display: none; }
 }

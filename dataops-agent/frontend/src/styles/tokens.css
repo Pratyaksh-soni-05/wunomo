@@ -311,6 +311,14 @@
   --scrim-a50: rgba(22, 35, 58, 0.5);
   --scrim-a35: rgba(22, 35, 58, 0.35);
 
+  /* Locked/coming-soon card overlay (.locked-overlay, components.css) —
+     unlike the modal scrim above, this ONE needs to flip per theme: an
+     opaque light scrim on a light card, an opaque dark scrim on a dark
+     card. ADDED 2026-09-14 (colour sweep) — previously three separate
+     hardcoded rgba() literals in components.css duplicating this same
+     light/dark split by hand instead of going through the token layer. */
+  --overlay-scrim: rgba(255, 255, 255, 0.72);
+
   /* Chart gridlines — theme-invariant on purpose, see Phase 1's note. */
   --chart-grid: rgba(107, 124, 148, 0.15);
 
@@ -392,6 +400,7 @@
   --_dark-info: #22D3EE;      /* 9.608:1 on --_dark-surface-hover */
 
   --_dark-focus-ring: #2277FF;  /* the brief's explicit dark exception — 4.854:1 on --_dark-bg, 4.589:1 on --_dark-surface. #0056FF measures 3.558:1 here — fails, must not be used dark. */
+  --_dark-overlay-scrim: rgba(11, 20, 33, 0.72);
 
   --_dark-ocean-50: rgba(91,136,178,0.12);
   --_dark-ocean-100: rgba(91,136,178,0.2);
@@ -471,6 +480,7 @@
 
   /* The other of the two allowed dark blues. */
   --focus-ring: var(--_dark-focus-ring);
+  --overlay-scrim: var(--_dark-overlay-scrim);
 
   /* Decision 1 (2026-08-19): primary fills go light-on-dark in dark mode —
      neither blue (reserved for the wordmark/focus-ring) nor grey-on-grey
@@ -574,6 +584,7 @@
     --accent-text: var(--text-secondary);
     --accent-text-hover: var(--text-primary);
     --focus-ring: var(--_dark-focus-ring);
+    --overlay-scrim: var(--_dark-overlay-scrim);
 
     --accent-fill: var(--text-primary);
     --on-accent-fill: var(--bg);
