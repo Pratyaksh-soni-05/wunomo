@@ -69,7 +69,12 @@ async def test_list_runs_limit_and_offset(client):
         headers={"Authorization": f"Bearer {reg['access_token']}"},
     )
     data = res.json()
-    assert data["count"] == 2
+    # count is the real total match count (finding 55's own fix, applied
+    # here 2026-09-14 alongside the unscoped filter) -- not len(page).
+    # This test previously asserted count == 2, which only ever passed
+    # because count was silently just echoing the page length back.
+    assert data["count"] == 5
+    assert len(data["runs"]) == 2
 
 
 @pytest.mark.asyncio
