@@ -546,8 +546,32 @@ it reviews as one self-contained diff instead of riding along inside feature sli
     to land directly on the Billing tab's real content, not just the Team page; bare `/team` confirmed
     to default to the Team tab, not Billing; command palette searches for "contracts", "audit",
     "billing", and "lineage" each confirmed to surface a real result. Both themes.
-13. **Docs.** Rewrite `SELF_TEST_GUIDE.md`'s nav-dependent instructions and recapture screenshots —
-    see §7 for exactly what's stale. **Size: M** (mechanical, but long).
+13. ✅ **SHIPPED 2026-09-15** (guide only — screenshots deliberately deferred, see below).
+    `SELF_TEST_GUIDE.md` rewritten from scratch rather than patched, per explicit instruction:
+    almost every navigation instruction in the old version was wrong (19-item sidebar, no
+    Projects/Workbench concept, 6 routes since retired). Restructured around what a real user
+    actually does — sign up → project → hire + scope an agent → chat → task with a real
+    approval gate → all 9 Workbench surfaces → a second agent proving the cross-project
+    boundary → channels/@mention → all 4 real failure paths (scope denial, source lock,
+    budget exhaustion, a genuinely-rejected PDF) → Needs You/Scheduled → offboarding/project
+    deletion → Team/Billing/Settings/Audit Log — rather than the build order the old version
+    followed. Every button/field label is verbatim from the real code, not paraphrased;
+    verified by reading the actual frontend and backend source directly (two research passes:
+    one dedicated agent for signup/tasks/offboarding — completed; a second for channels/
+    failure paths that stalled and was finished by direct research instead) rather than
+    assumed from file names. LLM-cost callouts mark every step that makes a real model call
+    with a running count, cross-checked against `task_planner.py`/`llm_service.py` for exactly
+    which steps do and don't call the LLM (only chat messages and "Generate Plan" do; every
+    task-advance/approve/resume step doesn't). Known Issues appendix carries findings 76, 91,
+    98, 99, 100, 101 verbatim plus two more surfaced by this same research pass: **findings
+    102** (Settings' AI Model picker offered a model Groq deprecated 2026-09-03 — found,
+    fixed, and closed in the same pass, also correcting CLAUDE.md's now-stale Hard Rule 2
+    wording about the routing mechanism) and **103** (the "Connect one" empty-sources link,
+    in both `HireAgentModal` and the agent detail page, still points at the retired `/sources`
+    route — logged, not fixed, since the honest fix needs a per-caller decision about what to
+    link to instead). **Screenshots deliberately not captured** — explicit instruction: they
+    come from the user's own real walkthrough of this guide, not a pre-run, so what's
+    documented reflects what a real person actually saw.
 
 See §8 below for the full read-through and how the two previews were reconciled (2026-09-14).
 
