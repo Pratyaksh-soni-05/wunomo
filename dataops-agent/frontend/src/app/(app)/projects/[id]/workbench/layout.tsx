@@ -7,10 +7,11 @@ import { getToken } from "@/lib/api";
 import { useProjectScope } from "@/lib/projectScope";
 import { NoAgentsEmptyState } from "@/components/workbench/WorkbenchEmptyStates";
 
-// All 7, matching wunomo-all-screens.html's WBNAV exactly, even though
-// only Sources/Quality/CI-CD are real in slice 6a -- the sub-nav is fully
-// populated from the start (the honest StubPage for the rest lives one
-// level down, not by hiding the destination here).
+// The original 7 (matching wunomo-all-screens.html's WBNAV, slice 6a/6b)
+// plus Contracts and Catalog, added in slice 12 once Governance's
+// Contracts tab and the old top-level /catalog both needed a real,
+// source-scoped home -- same "filtered copy, scoped by this project's
+// sourceIds" pattern every other section here already uses.
 const SECTIONS = [
   { slug: "sources", label: "Sources" },
   { slug: "pipelines", label: "Pipelines" },
@@ -19,6 +20,8 @@ const SECTIONS = [
   { slug: "transforms", label: "Transforms" },
   { slug: "lineage", label: "Lineage" },
   { slug: "cicd", label: "CI/CD" },
+  { slug: "contracts", label: "Contracts" },
+  { slug: "catalog", label: "Catalog" },
 ];
 
 export default function WorkbenchLayout({ children }: { children: ReactNode }) {

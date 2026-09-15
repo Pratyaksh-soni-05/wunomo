@@ -96,7 +96,7 @@ export function TaskCreateModal({
         const detail = err.detail as { error?: string; agent_id?: string; used?: number; limit?: number };
         if (detail.error === "quota_exceeded") {
           toast.push("Your workspace's AI-credit quota is exhausted for this billing period.", "danger", {
-            label: "Go to Billing", onClick: () => router.push("/billing"),
+            label: "Go to Billing", onClick: () => router.push("/team?tab=billing"),
           });
           return;
         }

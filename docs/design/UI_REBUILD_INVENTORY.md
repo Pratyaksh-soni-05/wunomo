@@ -512,10 +512,40 @@ it reviews as one self-contained diff instead of riding along inside feature sli
     afterward. Both themes.
 11. **3-tab `ContextPanel`.** Formalize the existing 3 stacked sections into real tabs. Pure
     presentation change over already-fetched data. **Size: S.**
-12. **Placement decisions cleanup.** Resolve and implement wherever you land on: `/ai-employees`
-    fate, global agents list fate, Governance's Contracts/Audit split vs. the `audit` stub, Billing's
-    home, Automations/Analytics stubs. Each is small once decided; listed here because each depends
-    on a decision from §1, not on any other slice above. **Size: S each.**
+12. ✅ **SHIPPED 2026-09-15.** Placement decisions — six real destinations decided and built, not
+    just discussed. `/ai-employees` retired (`RetiredRouteRedirect` → `/agents`): confirmed its only
+    other real consumers are the landing page and `HireAgentModal`, both direct imports of the shared
+    `EMPLOYEES`/`EmployeeCard`, unaffected by retiring the route. Global `/agents` kept as-is, an
+    explicit decision (agents are tenant-owned and can span projects — "every agent I've hired" has
+    no other home; also the target of 3 real deep-links from `/agents/[id]`'s own back-navigation).
+    `/governance` retired outright (findings item 94 resolved): Contracts moved into each project's
+    Workbench, source-scoped exactly like Sources — confirmed `producer_source_id` is required at
+    creation despite being schema-nullable (same shape as findings item 97), so no unscoped case to
+    handle. Audit Log moved into Settings as a real new tab, which also superseded the separate
+    `/audit` stub that predated this slice and had no content of its own — one real destination for
+    the concept instead of two orphaned ones. Data Catalog retired the same way as Sources/Quality/
+    CI-CD, into Workbench, source-scoped. Billing retired and merged into `/team` (now "Team &
+    Billing") as a real second tab — not just relabeled: the three live call sites that deep-link
+    here (both chat pages' quota-exceeded toast, `TaskCreateModal`) were repointed to
+    `/team?tab=billing` directly, landing on the Billing tab itself rather than bouncing through the
+    retirement redirect. Both Settings and Team read their initial tab from `window.location.search`
+    (not `useSearchParams()`, same reasoning as `/chat`'s own `?session=` consumer — no Suspense
+    boundary in this shell). Automations retired with no migration destination (confirmed by grep: no
+    backend exists at all). Analytics retired the same way but for a different reason, logged as
+    findings item 101: a full backend already exists unused behind it (overview, recent-runs,
+    pipelines, quality, KPI GET+POST, usage, a typed client already in `lib/api.ts`) — `/dashboard`
+    already consumes the overview endpoint, but the rest has no UI consumer anywhere; building that
+    screen is its own future slice, not silently lost just because the stub is gone.
+    `RetiredRouteRedirect` generalized to accept optional `message`/`to` overrides (defaulting to the
+    original Workbench-migration wording) so six different real destinations could each get honest,
+    specific copy instead of one hardcoded message.
+    **Verified**: two-project negative control for both new Workbench surfaces (Catalog and
+    Contracts) — a source/contract scoped to Project A confirmed absent from Project B's own
+    Workbench tabs, not just present in A's; every one of the 6 retired routes confirmed to redirect
+    to its real stated destination with the real explanation shown; `/billing`'s redirect confirmed
+    to land directly on the Billing tab's real content, not just the Team page; bare `/team` confirmed
+    to default to the Team tab, not Billing; command palette searches for "contracts", "audit",
+    "billing", and "lineage" each confirmed to surface a real result. Both themes.
 13. **Docs.** Rewrite `SELF_TEST_GUIDE.md`'s nav-dependent instructions and recapture screenshots —
     see §7 for exactly what's stale. **Size: M** (mechanical, but long).
 

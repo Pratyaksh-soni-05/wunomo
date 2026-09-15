@@ -72,10 +72,12 @@ export const ICON_NEW_PROJECT = (
  * slice 10 (2026-09-15): the tenant-wide ScheduledAgentTask list, agent
  * schedules only (pipeline schedule_cron stays in Workbench, its own
  * unrelated mechanism with no deactivation-reason concept).
- * Settings and Team both already exist unchanged; the "& billing" half of
- * Team's label is a rail-copy decision only in this slice — the actual
- * Billing page content hasn't merged into /team yet (see the
- * ALL_NAV_ITEMS note below).
+ * Settings and Team both already exist. Team's "& billing" half was a
+ * rail-copy decision made ahead of the real merge in slice 3 — the merge
+ * itself shipped in slice 12 (2026-09-15): /billing retired, its content
+ * moved into /team as a real second tab, deep-linked via ?tab=billing
+ * (the quota-exceeded toast's "Go to Billing" now lands there directly,
+ * not through the retirement redirect).
  *
  * Home pointed at /dashboard through slice 3, as an interim "point at
  * what's real" measure — slice 4 is the real rework: Home now has its own
@@ -130,13 +132,35 @@ export const RAIL_FOOTER_ITEMS: NavItem[] = [
  * — the repurposed view could only ever show empty, so it joined
  * Sources/Quality/CI-CD's plain retirement instead.
  *
-
- * Governance/Lineage correction (explicit instruction, 2026-09-14):
- * losing the Lineage tab can't leave a silent gap. /governance itself now
- * says so on its own now-inert Lineage tab (governance/page.tsx); this
- * list adds a second, separate "Lineage" entry pointing at the same
- * /governance slug purely so searching "lineage" in the command palette
- * surfaces that explanation, rather than finding nothing at all.
+ * Slice 12 (2026-09-15) — six placement decisions, each a real
+ * destination or a real "not available," never a silent gap:
+ *   - AI Employees retired: the hire-agent flow already shows the same
+ *     roster, this was a redundant second copy of it. -> /agents.
+ *   - Global Agents list kept as-is (an explicit decision, not a gap —
+ *     agents are tenant-owned and can span projects, so "every agent
+ *     I've hired" genuinely has no other home).
+ *   - Governance retired outright, split two ways: Contracts moved into
+ *     each project's Workbench (source-scoped, same as Sources —
+ *     confirmed producer_source_id is required at creation despite being
+ *     schema-nullable, so no unscoped case exists, unlike Pipelines/
+ *     Incidents). Audit Log moved into Settings as a real tab
+ *     (tenant-wide by nature, same as every other Settings tab) —
+ *     which also superseded the separate /audit stub that predated this
+ *     slice and never had real content of its own.
+ *   - Data Catalog retired the same way as Sources/Quality/CI-CD: real,
+ *     source-scoped content, moved into Workbench.
+ *   - Billing retired, merged into /team as a real second tab
+ *     (?tab=billing) — not just relabeled, the three live call sites
+ *     that deep-link here (both chat pages' quota-exceeded toast,
+ *     TaskCreateModal) were repointed to land on the tab directly.
+ *   - Automations retired with no migration destination — no backend
+ *     ever existed for it, confirmed by grep, nothing to point at.
+ *   - Analytics retired the same way, but NOT for the same reason —
+ *     a full backend already exists unused behind it (overview,
+ *     recent-runs, pipelines, quality, KPI GET+POST, usage, a typed
+ *     client already in lib/api.ts). Logged as findings item 101 so
+ *     that surface isn't silently forgotten just because its stub is
+ *     gone; building the real screen is its own future slice.
  */
 export const ALL_NAV_ITEMS: NavItem[] = [
   { slug: "home", label: "Home" },
@@ -144,23 +168,24 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { slug: "scheduled", label: "Scheduled" },
   { slug: "approvals", label: "Needs You" },
   { slug: "settings", label: "Settings" },
-  { slug: "team", label: "Team" },
-  { slug: "billing", label: "Billing" },
+  { slug: "team", label: "Team & Billing" },
+  { slug: "billing", label: "Billing (now part of Team & billing)" },
   { slug: "projects", label: "Projects" },
   { slug: "agents", label: "Agents" },
-  { slug: "ai-employees", label: "AI Employees" },
+  { slug: "ai-employees", label: "AI Employees (moved into the hire-agent flow)" },
   { slug: "chat", label: "AXIOM" },
   { slug: "tasks", label: "Tasks" },
   { slug: "sources", label: "Data Sources (moved into each project's Workbench)" },
-  { slug: "catalog", label: "Data Catalog" },
+  { slug: "catalog", label: "Data Catalog (moved into each project's Workbench)" },
   { slug: "pipelines", label: "Pipelines (unscoped only — the rest moved into each project's Workbench)" },
   { slug: "transforms", label: "Transforms (moved into each project's Workbench)" },
   { slug: "quality", label: "Quality (moved into each project's Workbench)" },
   { slug: "incidents", label: "Incidents (unscoped only — the rest moved into each project's Workbench)" },
-  { slug: "governance", label: "Governance (Contracts, Audit Log)" },
+  { slug: "governance", label: "Governance (Contracts moved to Workbench, Audit Log moved to Settings)" },
+  { slug: "governance", label: "Contracts (moved into each project's Workbench)" },
   { slug: "governance", label: "Lineage (moved into each project's Workbench)" },
-  { slug: "automations", label: "Automations" },
+  { slug: "automations", label: "Automations (not available in this workspace)" },
   { slug: "cicd", label: "CI / CD (moved into each project's Workbench)" },
-  { slug: "analytics", label: "Analytics" },
-  { slug: "audit", label: "Audit Logs" },
+  { slug: "analytics", label: "Analytics (not available yet)" },
+  { slug: "audit", label: "Audit Logs (now a tab in Settings)" },
 ];

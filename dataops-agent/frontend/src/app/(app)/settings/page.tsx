@@ -4,15 +4,16 @@ import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Card, Badge, Button, Modal, Input, Select, Tabs, Skeleton, useToast, RowActionsMenu,
+  Table, Thead, Tbody, Tr, Th, Td,
 } from "@/components/ui";
 import {
   getToken, decodeUserFromToken, getSettings, updateSettings,
   createApiKey, listApiKeys, revokeApiKey, getOnboardingProfile, testSlackWebhook,
   getMe, requestEmailVerifyCode, verifyEmailVerifyCode, saveSession, isChoose, isNoAccount,
-  type NotifyOn, type ApiKeyItem,
+  getAuditTrail, type NotifyOn, type ApiKeyItem, type AuditEntry,
 } from "@/lib/api";
 import { applyTheme, getStoredTheme, resolveEffectiveTheme, type ThemePreference } from "@/lib/theme";
-import { formatApiDateOnly } from "@/lib/dates";
+import { formatApiDate, formatApiDateOnly } from "@/lib/dates";
 import { applyTimezone, detectBrowserTimezone, timezoneOptionsWithDetected } from "@/lib/timezone";
 
 // Kept in sync manually with backend/services/llm_service.py's
@@ -33,6 +34,10 @@ const NOTIFY_ON_LABELS: Record<keyof NotifyOn, string> = {
   approval_required: "Approval required",
 };
 
+// "audit-log" added in slice 12 (2026-09-15) -- moved out of the retired
+// /governance page (findings item 94): tenant-wide by nature, so
+// Settings is its real home, not a per-project Workbench surface the
+// way Contracts (the OTHER governance tab) became.
 const TABS = [
   { id: "workspace", label: "Workspace" },
   { id: "profile", label: "Profile" },
@@ -40,7 +45,9 @@ const TABS = [
   { id: "ai-model", label: "AI Model" },
   { id: "theme", label: "Theme" },
   { id: "api-keys", label: "API Keys" },
+  { id: "audit-log", label: "Audit Log" },
 ];
+const TAB_IDS = new Set(TABS.map((t) => t.id));
 
 export default function SettingsPage() {
   const token = getToken() as string;
@@ -49,6 +56,17 @@ export default function SettingsPage() {
   const toast = useToast();
   const qc = useQueryClient();
   const [tab, setTab] = useState("workspace");
+
+  // Reads window.location.search directly rather than next/navigation's
+  // useSearchParams() -- same reason /chat's own ?session= consumer does
+  // (see that file): useSearchParams() needs a <Suspense> boundary this
+  // shell doesn't set up, and this only ever runs client-side anyway.
+  // Left in the URL (not stripped) so /settings?tab=audit-log stays a
+  // real, shareable deep link, unlike /chat's one-shot ?session= marker.
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested && TAB_IDS.has(requested)) setTab(requested);
+  }, []);
 
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => getSettings(token) });
   const s = settings.data?.settings;
@@ -87,6 +105,7 @@ export default function SettingsPage() {
             )}
             {tab === "theme" && <ThemeTab token={token} />}
             {tab === "api-keys" && <ApiKeysTab token={token} canManage={canManage} />}
+            {tab === "audit-log" && <AuditLogTab token={token} />}
           </>
         )}
       </div>
@@ -636,5 +655,45 @@ function ApiKeysTab({ token, canManage }: { token: string; canManage: boolean })
         </div>
       </Modal>
     </>
+  );
+}
+
+// ---------- Audit Log (moved from the retired /governance page, slice 12) ----------
+
+function AuditLogTab({ token }: { token: string }) {
+  const audit = useQuery({ queryKey: ["audit-trail"], queryFn: () => getAuditTrail(token) });
+  const list = audit.data?.entries ?? [];
+
+  return (
+    <Card>
+      {audit.isLoading ? (
+        <div className="card-body"><Skeleton style={{ height: 200, borderRadius: 12 }} /></div>
+      ) : list.length === 0 ? (
+        <div className="card-body">
+          <div className="empty-state" style={{ minHeight: "auto", padding: "40px 20px" }}>
+            <h2 className="font-display text-xl">No audit events yet</h2>
+            <p className="text-muted text-sm" style={{ maxWidth: 380 }}>
+              Every governance and approval action taken in this workspace is logged here.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <Table>
+          <Thead>
+            <Tr><Th>Actor</Th><Th>Action</Th><Th>Resource</Th><Th>When</Th></Tr>
+          </Thead>
+          <Tbody>
+            {list.map((e: AuditEntry, i: number) => (
+              <Tr key={i}>
+                <Td>{e.actor}</Td>
+                <Td><code>{e.action}</code></Td>
+                <Td>{e.resource_type}{e.resource_id ? ` · ${e.resource_id.slice(0, 8)}` : ""}</Td>
+                <Td>{formatApiDate(e.created_at)}</Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      )}
+    </Card>
   );
 }

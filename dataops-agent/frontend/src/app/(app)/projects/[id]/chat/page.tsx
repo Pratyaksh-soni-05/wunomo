@@ -234,7 +234,7 @@ export default function ProjectChatTab() {
         if (detail.error === "quota_exceeded") {
           const message = "Your workspace's AI-credit quota is exhausted for this billing period.";
           setSendError(message);
-          toast.push(message, "danger", { label: "Go to Billing", onClick: () => router.push("/billing") });
+          toast.push(message, "danger", { label: "Go to Billing", onClick: () => router.push("/team?tab=billing") });
         } else if (detail.error === "agent_budget_exceeded") {
           const usage = detail.used != null && detail.limit != null ? ` (${detail.used}/${detail.limit} tokens)` : "";
           const message = `This agent's own monthly token budget${usage} is exhausted.`;
