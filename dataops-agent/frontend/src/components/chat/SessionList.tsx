@@ -4,19 +4,7 @@ import { useState } from "react";
 import { Badge, Button, Input, Modal, Skeleton } from "@/components/ui";
 import type { SelectableAgent, ChannelItem, ChatSessionSummary } from "@/lib/api";
 import { useSavedPrompts } from "./useSavedPrompts";
-import { parseApiDate } from "@/lib/dates";
-
-function timeAgo(iso: string): string {
-  const d = parseApiDate(iso);
-  const diffMs = Date.now() - (d ? d.getTime() : 0);
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return days === 1 ? "Yesterday" : `${days}d ago`;
-}
+import { timeAgo } from "@/lib/dates";
 
 export function SessionList({
   tenantId,

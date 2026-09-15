@@ -441,9 +441,46 @@ it reviews as one self-contained diff instead of riding along inside feature sli
    real end-to-end message send round-trips through the actual LLM successfully, in both themes.
 8. **Tasks tab.** Filter the Tasks list by `agent_id ∈ project's agents`, client-side join against
    already-fetched agent data. Task list/detail bodies unchanged. **Size: S.**
-9. **Needs you screen.** Merge `getMergedApprovals` (risk-tiered) with the Topbar's existing
-   attention-task logic into one screen. Both data sources already exist; this is a new layout over
-   old plumbing. **Size: S–M.**
+9. ✅ **SHIPPED 2026-09-15.** Needs You — replaces `/approvals`' old flat, uniform-row list with the
+   real combined screen the rail's label always implied. New shared derivation (`lib/needsYou.ts`)
+   used by both the Sidebar's "Needs you" badge and this page, so the two can never disagree about
+   the count again — before this slice the badge counted `getMergedApprovals().count` only, silently
+   blind to every task needing attention (a `DRAFT_PLAN`, a dead `PAUSED_FAILED_STEP`), while the
+   Topbar's separate task-rail dropdown counted task `needs_attention` only, blind to approvals. Four
+   urgency tiers, not the task rail's original three: 0 = `PAUSED_NEEDS_APPROVAL` (real clock,
+   `APPROVAL_PAUSE_TIMEOUT_HOURS` = 48h, soonest-to-expire first), 1 = standalone approvals — a
+   chat-originated `request_approval` with no task, or a CI/CD deployment gate — (no clock anywhere
+   in the code, but a live blocking decision outranks an already-dead task since speed still helps
+   here; oldest-first), 2 = `PAUSED_FAILED_STEP`/`PAUSED_PLAN_INVALID` (already dead, no resume path —
+   finding 76 — most-recently-died first), 3 = `DRAFT_PLAN` (no decay, oldest-first).
+   Real correctness bug found and fixed around, not silently reproduced: a task's own
+   `PAUSED_NEEDS_APPROVAL` and a `policy_engine`-sourced `MergedApproval` can be the exact same
+   `ApprovalRequest` row (`task_executor.py` and the agent's own ad-hoc `request_approval` chat tool
+   both create one via the same `PolicyEngine.create_request()`), and resolving it through the
+   generic `/approvals` endpoint runs the action but never touches the `Task` row — permanently
+   stuck in `PAUSED_NEEDS_APPROVAL` even though the approval resolved, live on `/approvals` today,
+   predating this slice (**logged as findings item 98**, not fixed at the state-machine level — that's
+   its own slice, same reasoning as finding 76 staying open). `GET /tasks/active` now exposes each
+   task's `current_step.approval_request_id` (a field already loaded, not a new query) so this page
+   can dedupe: a task-linked approval renders exactly once, as a task row, resolved exclusively
+   through `resumeTask()`/`rejectTaskStep()`, never the generic endpoint. Also added `project_id`/
+   `project_name` (via an outerjoin already sitting next to the existing `AgentInstance` one) and
+   reused the already-computed `_pause_reason()`/`_plan_invalid_reason()` helpers so blocked rows show
+   the real specific failure, not just generic action text. The preview's literal `Grant access`
+   button wasn't built — `_pause_reason()`'s scope-denial text is prose, not a structured
+   `{agent_id, source_id}` a link could route from with confidence; shipped `Open task` instead and
+   logged the structured-payload fix as its own follow-up (**findings item 99**). Empty state is this
+   app's own standard `.empty-state` pattern (icon, heading, calm copy), not the preview's minimal
+   list-cap line — deliberate, the preview's line was designed as an end-of-list cap, not a true zero
+   state. **Verified**: seeded a task paused for approval with a real linked `ApprovalRequest`
+   directly (mirroring the backend test suite's own `_set_status`-style seeding, since driving a full
+   LLM-planned task through real execution wasn't necessary to test this) — confirmed it renders
+   exactly once (not once as a task and once as an approval) and the Sidebar badge agrees with the
+   page's own count; approved it from Needs You and confirmed via a direct API check that the task's
+   status actually left `PAUSED_NEEDS_APPROVAL` (it resumed, ran for real, and correctly failed on
+   the seed's synthetic pipeline id after exhausting retries — landing in `PAUSED_FAILED_STEP`,
+   re-surfacing correctly as a "blocked" row with the real failure text) rather than the approval
+   resolving while the task stayed silently stuck.
 10. **Scheduled screen.** Aggregate pipeline `schedule_cron` + `ScheduledAgentTask`. Confirm the
     list-endpoint gap from §3/§5 first — this is the one slice with a real chance of needing a small
     backend addition. **Size: M.**

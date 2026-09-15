@@ -1267,6 +1267,10 @@ export interface ActiveTaskCurrentStep {
   step_index: number;
   description: string;
   status: string;
+  // Lets a caller tell whether a GET /approvals/merged item is already
+  // represented by this task -- both can trace back to the same
+  // PolicyEngine ApprovalRequest (slice 9, 2026-09-15, findings item 98).
+  approval_request_id: string | null;
 }
 
 export interface ActiveTaskRailItem {
@@ -1276,6 +1280,8 @@ export interface ActiveTaskRailItem {
   task_shape: TaskShapeValue;
   agent_id: string | null;
   agent_name: string | null;
+  project_id: string | null;
+  project_name: string | null;
   originating_session_id: string | null;
   current_step: ActiveTaskCurrentStep | null;
   // needs_attention/attention_tier are derived server-side as
@@ -1286,6 +1292,12 @@ export interface ActiveTaskRailItem {
   needs_attention: boolean;
   attention_tier: 0 | 1 | 2 | null;
   action_text: string | null;
+  // Real, specific failure text (finding 76's "can't be resumed"
+  // disclosure baked in) -- at most one is ever non-null, matching which
+  // status the task is actually in. Reused from the same *_reason()
+  // helpers the task detail page's pause_reason/plan_invalid_reason use.
+  pause_reason: string | null;
+  plan_invalid_reason: string | null;
   created_at: string | null;
   updated_at: string | null;
   paused_at: string | null;

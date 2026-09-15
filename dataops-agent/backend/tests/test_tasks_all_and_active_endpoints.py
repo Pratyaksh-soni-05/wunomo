@@ -309,7 +309,12 @@ async def test_active_surfaces_current_step(client, monkeypatch):
 
     r = await client.get("/api/v1/tasks/active", headers={"Authorization": f"Bearer {token}"})
     item = next(t for t in r.json() if t["goal"] == "stepped")
-    assert item["current_step"] == {"step_index": 0, "description": "check history", "status": "pending"}
+    # approval_request_id added (Wunomo UI-rebuild slice 9) so a caller
+    # can dedupe against GET /approvals/merged -- None here since this
+    # step never paused for approval.
+    assert item["current_step"] == {
+        "step_index": 0, "description": "check history", "status": "pending", "approval_request_id": None,
+    }
 
 
 @pytest.mark.asyncio

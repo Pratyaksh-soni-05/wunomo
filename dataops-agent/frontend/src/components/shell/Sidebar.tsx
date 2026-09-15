@@ -12,8 +12,9 @@ import { WorkspacePicker } from "@/components/auth/WorkspacePicker";
 import { WunomoMark } from "@/components/brand";
 import {
   getToken, getMyWorkspaces, switchWorkspace, saveSession, clearSession,
-  listProjects, getProjectChannels, getMergedApprovals, type DecodedUser,
+  listProjects, getProjectChannels, type DecodedUser,
 } from "@/lib/api";
+import { useNeedsYou } from "@/lib/needsYou";
 
 /**
  * The rail (2026-09-14, slice 3) — rebuilt to match
@@ -84,14 +85,14 @@ export function Sidebar({
     };
   }, [accountMenuOpen]);
 
-  // "Needs you" badge — real pending-approval count (getMergedApprovals is
-  // the same risk-tiered feed the /approvals page itself renders, so the
-  // rail's number never disagrees with what clicking through shows).
-  const approvalsQuery = useQuery({
-    queryKey: ["merged-approvals"],
-    queryFn: () => getMergedApprovals(getToken() as string),
-  });
-  const needsYouCount = approvalsQuery.data?.count ?? 0;
+  // "Needs you" badge (slice 9, 2026-09-15) — the same combined,
+  // deduped derivation the Needs You screen itself renders (lib/needsYou.ts),
+  // so the rail's number can never disagree with what clicking through
+  // shows again. Before this slice it counted getMergedApprovals().count
+  // only, silently blind to every task needing attention (a DRAFT_PLAN,
+  // a dead PAUSED_FAILED_STEP) — this fixes that, not just relabels it.
+  const needsYou = useNeedsYou(getToken() as string);
+  const needsYouCount = needsYou.count;
 
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: () => listProjects(getToken() as string) });
   const projects = projectsQuery.data?.projects ?? [];

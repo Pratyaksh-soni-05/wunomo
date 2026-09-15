@@ -65,9 +65,11 @@ export const ICON_NEW_PROJECT = (
  *
  * Slugs point at whatever real page already exists for each concept today,
  * not at new routes invented for this slice — "point at what's real" (see
- * docs/design/UI_REBUILD_INVENTORY.md, slice 3). Needs you is /approvals
- * (reworked in slice 9). Scheduled has no existing equivalent at all, so
- * it's the one genuinely new route, landing on a StubPage until slice 10.
+ * docs/design/UI_REBUILD_INVENTORY.md, slice 3). Needs you is /approvals,
+ * rebuilt in slice 9 into the real combined screen this label always
+ * implied — same route, real content now. Scheduled has no existing
+ * equivalent at all, so it's the one genuinely new route, landing on a
+ * StubPage until slice 10.
  * Settings and Team both already exist unchanged; the "& billing" half of
  * Team's label is a rail-copy decision only in this slice — the actual
  * Billing page content hasn't merged into /team yet (see the
@@ -100,9 +102,10 @@ export const RAIL_FOOTER_ITEMS: NavItem[] = [
  * docs/design/UI_REBUILD_INVENTORY.md, slice 3, "the interim-navigation
  * question." Labels here are each route's own honest current name, which
  * can genuinely differ from the rail's rebranded label for the same slug
- * (e.g. /approvals shows "Needs you" in the rail but still says
- * "Approvals" here and in the breadcrumb, because the page itself hasn't
- * been rebuilt into Needs You yet — slice 9's job, not this one's).
+ * when a route's real content hasn't caught up to its rail rebrand yet.
+ * /approvals no longer needs that exception (slice 9, 2026-09-15) — the
+ * page itself is the real Needs You screen now, so its breadcrumb/palette
+ * label matches the rail's.
  *
  * Slice 6a (2026-09-14): Sources/Quality/CI-CD's old top-level routes
  * retired — each resolves cleanly per project with no unscoped population
@@ -137,7 +140,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { slug: "home", label: "Home" },
   { slug: "dashboard", label: "Dashboard" },
   { slug: "scheduled", label: "Scheduled" },
-  { slug: "approvals", label: "Approvals" },
+  { slug: "approvals", label: "Needs You" },
   { slug: "settings", label: "Settings" },
   { slug: "team", label: "Team" },
   { slug: "billing", label: "Billing" },

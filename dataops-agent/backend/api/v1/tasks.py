@@ -20,8 +20,8 @@ from sqlalchemy import select
 
 from database import AsyncSessionLocal
 from models.all_models import (
-    AgentInstance, AgentInstanceStatus, RUNNABLE_TASK_STATUSES, TERMINAL_TASK_STATUSES, Task, TaskShape,
-    TaskStatus, TaskStep, TaskStepSource, TaskStepStatus,
+    AgentInstance, AgentInstanceStatus, Project, ProjectAgent, RUNNABLE_TASK_STATUSES, TERMINAL_TASK_STATUSES,
+    Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus,
 )
 from modules.orchestration.task_executor import APPROVAL_PAUSE_TIMEOUT_HOURS
 from modules.orchestration.task_planner import (
@@ -393,14 +393,30 @@ def _rail_action_text(task: Task) -> str | None:
 def _current_step_summary(steps: list[TaskStep]) -> dict | None:
     """The next thing this task will do, or the last thing it did if
     every step is already done -- not stored, derived the same way every
-    other per-task read-time field in this file is."""
+    other per-task read-time field in this file is.
+
+    approval_request_id added (Wunomo UI-rebuild slice 9, 2026-09-15) so
+    a caller can tell whether a given PolicyEngine ApprovalRequest is
+    already represented by this task -- GET /approvals/merged returns the
+    same underlying request independently (task_executor.py creates it
+    via the same PolicyEngine.create_request() an ad-hoc chat approval
+    uses), and without this field there was no way to dedupe the two
+    without guessing. See findings item 98: approving that duplicate via
+    the generic /approvals endpoint executes the action but never
+    touches this Task row, leaving it stuck in PAUSED_NEEDS_APPROVAL
+    forever -- the Needs You screen routes around this by always
+    resolving a task-linked approval through the task's own
+    resume/reject-step endpoints, never the generic one."""
     if not steps:
         return None
     ordered = sorted(steps, key=lambda s: s.step_index)
     current = next(
         (s for s in ordered if s.status not in (TaskStepStatus.SUCCEEDED, TaskStepStatus.SKIPPED)), ordered[-1],
     )
-    return {"step_index": current.step_index, "description": current.description, "status": current.status.value}
+    return {
+        "step_index": current.step_index, "description": current.description, "status": current.status.value,
+        "approval_request_id": current.approval_request_id,
+    }
 
 
 @router.get("/active")
@@ -429,9 +445,18 @@ async def list_active_tasks(current_user: dict = Depends(get_current_user)):
     can_view_all = has_permission(current_user.get("role"), "tasks.manage_all")
 
     async with AsyncSessionLocal() as db:
+        # ProjectAgent/Project outerjoined the same way AgentInstance is --
+        # an agent belongs to zero or one project by convention today, not
+        # by constraint (ProjectAgent's own docstring), so this assumes
+        # that convention holds rather than guarding against a pathological
+        # multi-project agent producing duplicate rows for one task. Needs
+        # You (slice 9, 2026-09-15) is the first consumer that needs to
+        # show which project a task belongs to.
         query = (
-            select(Task, AgentInstance.name)
+            select(Task, AgentInstance.name, Project.id, Project.name)
             .outerjoin(AgentInstance, Task.agent_id == AgentInstance.id)
+            .outerjoin(ProjectAgent, Task.agent_id == ProjectAgent.agent_id)
+            .outerjoin(Project, ProjectAgent.project_id == Project.id)
             .where(Task.tenant_id == tenant_id, Task.status.notin_(TERMINAL_TASK_STATUSES))
         )
         if not can_view_all:
@@ -439,7 +464,7 @@ async def list_active_tasks(current_user: dict = Depends(get_current_user)):
         r = await db.execute(query)
         rows = r.all()
 
-        task_ids = [t.id for t, _ in rows]
+        task_ids = [row[0].id for row in rows]
         steps_by_task: dict[str, list[TaskStep]] = {tid: [] for tid in task_ids}
         if task_ids:
             r = await db.execute(select(TaskStep).where(TaskStep.task_id.in_(task_ids)))
@@ -455,8 +480,8 @@ async def list_active_tasks(current_user: dict = Depends(get_current_user)):
     # crashing the comparison or silently floating to the top.
     _EPOCH = datetime(1970, 1, 1)
 
-    def _sort_key(pair):
-        task, _ = pair
+    def _sort_key(row):
+        task = row[0]
         tier = _ATTENTION_TIERS.get(task.status)
         if tier is None:
             return (1, -(task.updated_at or _EPOCH).timestamp())
@@ -469,7 +494,7 @@ async def list_active_tasks(current_user: dict = Depends(get_current_user)):
     rows = sorted(rows, key=_sort_key)
 
     items = []
-    for task, agent_name in rows:
+    for task, agent_name, project_id, project_name in rows:
         tier = _ATTENTION_TIERS.get(task.status)
         items.append({
             "id": task.id,
@@ -478,12 +503,22 @@ async def list_active_tasks(current_user: dict = Depends(get_current_user)):
             "task_shape": task.task_shape.value,
             "agent_id": task.agent_id,
             "agent_name": agent_name,
+            "project_id": project_id,
+            "project_name": project_name,
             "originating_session_id": task.originating_session_id,
             "originating_schedule_id": task.originating_schedule_id,
             "current_step": _current_step_summary(steps_by_task[task.id]),
             "needs_attention": tier is not None,
             "attention_tier": tier,
             "action_text": _rail_action_text(task),
+            # Both already computed from data this endpoint already loaded
+            # (steps_by_task) -- reused rather than re-fetched, same
+            # "compute once, read everywhere" reasoning as agent_name/
+            # project_name above. Added for Needs You (slice 9, 2026-09-15)
+            # so a blocked row can show the real, specific failure instead
+            # of only the generic action_text.
+            "pause_reason": _pause_reason(task, steps_by_task[task.id]),
+            "plan_invalid_reason": _plan_invalid_reason(task, steps_by_task[task.id]),
             "created_at": task.created_at.isoformat() if task.created_at else None,
             "updated_at": task.updated_at.isoformat() if task.updated_at else None,
             "paused_at": task.paused_at.isoformat() if task.paused_at else None,
