@@ -20,11 +20,17 @@ import { applyTimezone, detectBrowserTimezone, timezoneOptionsWithDetected } fro
 // SUPPORTED_MODEL_OVERRIDES - there's no list endpoint to fetch this from
 // (see CLAUDE.md's Known-broken/tech-debt entry: this list will silently
 // drift out of sync with the backend allowlist if either changes without
-// updating the other).
+// updating the other). Drift found and fixed 2026-09-15 (findings item
+// 102, slice 13 research): llama-3.3-70b-versatile was deprecated by
+// Groq 2026-09-03 and removed from SUPPORTED_MODEL_OVERRIDES the same
+// day, but this list was never updated to match -- a user selecting it
+// here saved an override the backend silently treats as invalid on
+// every read (falls through to the tenant default), with no error
+// shown anywhere. Replaced with the real current fallback model.
 const MODEL_OPTIONS = [
   { value: "", label: "Use plan default" },
   { value: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
-  { value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (Groq)" },
+  { value: "openai/gpt-oss-120b", label: "GPT-OSS 120B (Groq)" },
 ];
 
 const NOTIFY_ON_LABELS: Record<keyof NotifyOn, string> = {

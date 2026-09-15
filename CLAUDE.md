@@ -122,10 +122,17 @@ the actual code on 2026-08-12 — status noted per rule; see `docs/context/WUNOM
    any of those three anyway, consolidating onto `PostgresConnector` closes a real gap.
 
 2. **`get_primary_llm()` (and `get_fallback_llm()`) must never return `ChatGoogleGenerativeAI`
-   unconditionally** — both route through `_build_llm()` in `services/llm_service.py`, which
-   branches on the model name: contains `llama`/`mixtral`/`gemma` → `ChatGroq`, else →
-   `ChatGoogleGenerativeAI`. This still holds as of 2026-08-12. If you ever see a hardcoded
-   `ChatGoogleGenerativeAI(...)` construction outside `_build_llm()`, that's a regression.
+   unconditionally** — both route through `_build_llm()` in `services/llm_service.py`. *Updated
+   2026-09-15: the branch itself changed, not just the model list.* `_build_llm()` and
+   `_provider_for_model()` now key off Gemini's own `"gemini"` prefix (`gemini` if
+   `model.startswith("gemini")` else `groq`) rather than enumerating Groq model-family substrings
+   (the old `llama`/`mixtral`/`gemma` check) — that approach broke outright the day
+   `FALLBACK_LLM_MODEL` was renamed off `llama-3.3-70b-versatile` (Groq deprecated it 2026-09-03;
+   replaced with `openai/gpt-oss-120b`, which matches none of the old substrings). The inverted
+   check is deliberately more robust: a future Groq rename to anything not literally starting with
+   `"gemini"` keeps routing correctly with zero code change. The rule's intent is unchanged — if
+   you ever see a hardcoded `ChatGoogleGenerativeAI(...)` construction outside `_build_llm()`,
+   that's still a regression — only the mechanism enforcing it moved.
 
 3. **Never write a timezone-aware `datetime.now(timezone.utc)` into a naive
    `TIMESTAMP WITHOUT TIME ZONE` column** — use `datetime.utcnow()`, or
