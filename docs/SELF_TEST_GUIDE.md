@@ -116,11 +116,10 @@ cards (DataOps active, 5 marked **Coming Soon** and non-interactive).
   is your first agent, the list is empty: *"No sources connected yet. **Connect one** to
   scope this agent's access — or hire now with no scope."* That's fine — go ahead and hire
   with zero sources checked for now; Section 3.3 below (via Workbench) is where you'll
-  actually connect one. **Don't click "Connect one"** — it links to the old, retired
-  `/sources` route, which will just bounce you back out with a toast; it was never repointed
-  after Sources moved into Workbench (same gap on the agent detail page's own "Data source
-  scope" card, used in 3.4). Not a broken link exactly, just a dead end worth knowing about
-  rather than clicking through curiosity.
+  actually connect one. **Connect one** here now correctly links into this project's own
+  Workbench Sources tab (fixed 2026-09-15, findings item 103) rather than the old retired
+  `/sources` route — either path (clicking it now, or waiting for 3.3) lands you in the same
+  place.
 - **Monthly token budget (optional)** — leave this blank for now. You'll come back to this
   exact field in Section 9 to deliberately set a tiny one.
 
@@ -621,10 +620,12 @@ Full detail for all of these lives in `docs/context/WALKTHROUGH_FINDINGS_2026-08
   day as this guide. If your build is current, you won't see it — mentioned in Section 12.3
   only so you can tell a stale build from a fresh discovery.
 
-- **#103 — The "Connect one" link on an empty source list still points at the retired
-  `/sources` route.** (Sections 3.2 and 3.4.) Shows up both in the Hire an agent modal and on
-  the agent detail page's own "Data source scope" card. Clicking it doesn't 404, it bounces
-  you back out with a toast — a dead end dressed as a shortcut. Open.
+- **#103 — The "Connect one" link on an empty source list used to point at the retired
+  `/sources` route.** (Sections 3.2 and 3.4.) Closed 2026-09-15, same day as this guide, ahead
+  of the first real walkthrough — the hire modal's link now follows the selected project into
+  its Workbench Sources tab; the agent detail page (which has no way to know an agent's
+  project) links to `/projects` instead. If your build is current, you won't see the old
+  behavior.
 
 ---
 

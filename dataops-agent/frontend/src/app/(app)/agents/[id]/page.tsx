@@ -148,8 +148,9 @@ export default function AgentDetailPage() {
           <CardBody>
             {sourceList.length === 0 ? (
               <p className="text-muted text-sm">
-                No sources connected yet. <Link href="/sources" className="btn btn-text">Connect one</Link> to
-                scope this agent&apos;s access.
+                No sources connected yet. This page has no way to know which project (if any)
+                this agent belongs to, so <Link href="/projects" className="btn btn-text">pick a project</Link> and
+                connect one from its Workbench.
               </p>
             ) : (
               <div className="flex flex-col gap-2">

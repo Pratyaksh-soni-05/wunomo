@@ -133,8 +133,17 @@ export function HireAgentModal({
             <Skeleton style={{ height: 60, borderRadius: 8 }} />
           ) : sourceList.length === 0 ? (
             <p className="text-muted text-sm">
-              No sources connected yet. <Link href="/sources" className="btn btn-text">Connect one</Link> to
-              scope this agent&apos;s access — or hire now with no scope.
+              No sources connected yet.{" "}
+              {projectId ? (
+                <Link href={`/projects/${projectId}/workbench/sources`} className="btn btn-text">
+                  Connect one
+                </Link>
+              ) : (
+                <Link href="/projects" className="btn btn-text">
+                  Pick a project
+                </Link>
+              )}{" "}
+              to scope this agent&apos;s access — or hire now with no scope.
             </p>
           ) : (
             <div className="flex flex-col gap-2">
