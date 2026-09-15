@@ -32,6 +32,7 @@ export function SessionList({
   onInsertPrompt,
   onDeleteSession,
   draft,
+  showDirect = true,
 }: {
   tenantId: string | null;
   sessions: ChatSessionSummary[];
@@ -46,6 +47,11 @@ export function SessionList({
   onInsertPrompt: (text: string) => void;
   onDeleteSession: (id: string) => void;
   draft: string;
+  // false inside a project's Chat tab (slice 7, 2026-09-15) -- AXIOM
+  // Direct is a bare session_id with no project concept anywhere in the
+  // schema, so a 1:1 chat can never be "this project's," only channels
+  // can. Default true keeps /chat's own behavior unchanged.
+  showDirect?: boolean;
 }) {
   const { prompts, addPrompt, removePrompt } = useSavedPrompts(tenantId);
   const [channelModalOpen, setChannelModalOpen] = useState(false);
@@ -64,44 +70,48 @@ export function SessionList({
 
   return (
     <div className="chat-sidebar-left">
-      <div className="chat-new-btn-wrap">
-        <Button size="sm" style={{ width: "100%" }} onClick={onNewChat}>
-          + New Chat
-        </Button>
-      </div>
-
-      <div className="chat-section-label">AXIOM Direct</div>
-      <div className="chat-session-list">
-        {loading ? (
-          <div style={{ padding: "0 12px" }}>
-            <Skeleton height={40} style={{ marginBottom: 6, borderRadius: 6 }} />
-            <Skeleton height={40} style={{ marginBottom: 6, borderRadius: 6 }} />
-            <Skeleton height={40} style={{ borderRadius: 6 }} />
+      {showDirect && (
+        <>
+          <div className="chat-new-btn-wrap">
+            <Button size="sm" style={{ width: "100%" }} onClick={onNewChat}>
+              + New Chat
+            </Button>
           </div>
-        ) : sessions.length === 0 ? (
-          <div className="chat-empty-note" style={{ padding: "8px 12px" }}>No conversations yet.</div>
-        ) : (
-          sessions.map((s) => (
-            <div
-              key={s.session_id}
-              className={["chat-session-item", s.session_id === activeSessionId ? "active" : ""].join(" ")}
-              onClick={() => onSelectSession(s.session_id)}
-            >
-              <div className="chat-session-row">
-                <div className="chat-session-title">{s.title || "New conversation"}</div>
-                <button
-                  className="chat-session-delete"
-                  title="Delete conversation"
-                  onClick={(e) => { e.stopPropagation(); onDeleteSession(s.session_id); }}
-                >
-                  ✕
-                </button>
+
+          <div className="chat-section-label">AXIOM Direct</div>
+          <div className="chat-session-list">
+            {loading ? (
+              <div style={{ padding: "0 12px" }}>
+                <Skeleton height={40} style={{ marginBottom: 6, borderRadius: 6 }} />
+                <Skeleton height={40} style={{ marginBottom: 6, borderRadius: 6 }} />
+                <Skeleton height={40} style={{ borderRadius: 6 }} />
               </div>
-              <div className="chat-session-meta">{timeAgo(s.last_activity)} · {s.message_count} msgs</div>
-            </div>
-          ))
-        )}
-      </div>
+            ) : sessions.length === 0 ? (
+              <div className="chat-empty-note" style={{ padding: "8px 12px" }}>No conversations yet.</div>
+            ) : (
+              sessions.map((s) => (
+                <div
+                  key={s.session_id}
+                  className={["chat-session-item", s.session_id === activeSessionId ? "active" : ""].join(" ")}
+                  onClick={() => onSelectSession(s.session_id)}
+                >
+                  <div className="chat-session-row">
+                    <div className="chat-session-title">{s.title || "New conversation"}</div>
+                    <button
+                      className="chat-session-delete"
+                      title="Delete conversation"
+                      onClick={(e) => { e.stopPropagation(); onDeleteSession(s.session_id); }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="chat-session-meta">{timeAgo(s.last_activity)} · {s.message_count} msgs</div>
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      )}
 
       <div className="chat-section-label flex items-center justify-between" style={{ paddingRight: 8 }}>
         <span>Channels</span>

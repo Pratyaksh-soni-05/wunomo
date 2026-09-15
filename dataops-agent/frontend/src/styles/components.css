@@ -763,7 +763,16 @@ tr.selected td:first-child {
    see tokens.css) rather than a hardcoded gray, avoiding the light-only-tint
    bug documented earlier this project.
    ========================================== */
-.chat-layout { display: flex; height: calc(100vh - var(--topbar-h)); overflow: hidden; }
+/* height: 100%, not a hardcoded calc(100vh - var(--topbar-h)) (slice 7,
+   2026-09-15) -- the old value assumed .chat-layout always sits directly
+   under Topbar with nothing else above it, true for /chat but not for
+   the project Chat tab, which has the project header + tab row above it
+   too. Both hosts already give this element's immediate parent a
+   definite, correctly-computed flex height (.page-content for /chat,
+   the project layout's own flex:1 children-slot div for the project
+   route) -- 100% resolves against that in both cases, instead of
+   overflowing it by however much extra chrome sits above. */
+.chat-layout { display: flex; height: 100%; overflow: hidden; }
 
 .chat-sidebar-left, .chat-sidebar-right { flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface-hover); }
 .chat-sidebar-left { width: 240px; border-right: 1px solid var(--border); }

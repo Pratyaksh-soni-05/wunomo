@@ -44,6 +44,19 @@ export function useProjectScope(token: string, projectId: string) {
   const sourcesLoading = agents.length > 0 && sourceQueries.some((q) => q.isLoading);
   const sourceIds = new Set(sourceQueries.flatMap((q) => (q.data?.sources ?? []).map((s) => s.id)));
 
+  // Per-agent roster (slice 7's Chat tab Agents pane) — zips `agents` with
+  // `sourceQueries` by index, which useQueries guarantees stays aligned
+  // with the `queries` array it was built from. No extra fetch: this is
+  // the exact same per-agent source data every other consumer of this
+  // hook already pays for, just not discarded after being folded into the
+  // flat sourceIds set.
+  const agentRoster = agents.map((a, i) => ({
+    id: a.id,
+    name: a.name,
+    employee_type: a.employee_type,
+    sources: sourceQueries[i]?.data?.sources ?? [],
+  }));
+
   // Tenant-wide list, no scoped pipelines endpoint exists -- filtered
   // client-side against the resolved source set, same reasoning as
   // everything else in this hook.
@@ -56,6 +69,7 @@ export function useProjectScope(token: string, projectId: string) {
 
   return {
     agentCount: agents.length,
+    agentRoster,
     sourceIds,
     pipelineIds,
     loading: agentsQuery.isLoading || sourcesLoading || pipelinesQuery.isLoading,

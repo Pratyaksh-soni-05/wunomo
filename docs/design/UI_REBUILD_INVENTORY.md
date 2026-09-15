@@ -408,9 +408,37 @@ it reviews as one self-contained diff instead of riding along inside feature sli
      empty. `/transforms` now retires outright via `RetiredRouteRedirect`, same as Sources/Quality/
      CI-CD; Pipelines/Incidents keep the real two-tier treatment, both have a genuine reachable
      unscoped case.
-7. **Chat tab.** Wire chat into the project route; filter Channels client-side by `project_id`
-   (free — already on the model); resolve the 1:1-session-has-no-project-id question from §1 before
-   this ships, not during it. **Size: S–M.**
+7. ✅ **SHIPPED 2026-09-15.** Chat tab — replaces the slice-5 signpost stub with the real thing.
+   `MessageThread` reused completely unchanged (composer, @mention autocomplete, drag-and-drop file
+   upload, task creation, approvals routing — all pre-existing, none of it new). `SessionList` gained
+   one prop (`showDirect`) rather than being forked, hiding "+ New Chat"/AXIOM Direct for the project
+   route; channels filtered client-side by `project_id` (free, per the original plan). AXIOM Direct
+   stays exclusively at `/chat` — `ChatSession`/`ChatMessage` carry a bare `session_id` with no
+   `project_id` anywhere in the schema, confirmed by reading the model, not assumed.
+   `ProjectContextPanel` is a new, separate component (not `ContextPanel` made configurable — `/chat`'s
+   own AXIOM Direct sessions and non-project channels have no project to show a roster for), tabbed
+   Agents / Data / Activity to match `wunomo-redesign-v2.html`'s side panel by tab count. Mapping,
+   confirmed before building: **Agents** — new roster (name, employee type, real per-agent source
+   count via `useProjectScope`'s already-fetched per-agent queries, zero new network calls;
+   deliberately no status dot — `AgentInstanceStatus` is only ACTIVE/OFFBOARDED, a lifecycle flag, not
+   a live signal, so a permanently-"idle" dot would be fabricated, same "Created {date}" rule as
+   findings item 92). **Data** — project's sources (new list, links out to Workbench, doesn't
+   reproduce it) plus the pre-existing Attached Context picker; the preview's own footer note claiming
+   Pipelines/Quality/etc. are "reached from the Data panel" predates Workbench as a real tab and was
+   deliberately not carried over. **Activity** — Active Tasks and Tool Calls as two labeled
+   subsections, not an interleaved merge — different lifetimes (durable cross-session Task vs.
+   this-session-only tool log), and merging them would lose that distinction for no real gain.
+   Real bug found and fixed during the build: `.chat-layout`'s CSS hardcoded
+   `height: calc(100vh - var(--topbar-h))`, correct only when nothing sits above it (true for `/chat`,
+   false for the project route, which has the project header + tab row above it) — it overflowed
+   `.page-content` and auto-scrolled the header out of view. Fixed to `height: 100%`, which resolves
+   correctly against both hosts' actual flexed container height; verified both routes render
+   pixel-correct afterward, not just the new one. **Verified**: a channel in Project A is invisible
+   from Project B's Chat tab and Project B's from A's, both still visible tenant-wide at `/chat`
+   (same union/boundary shape as the Workbench resolver); @mention autocomplete inside a channel
+   offers only that channel's real agent *members*, confirmed distinct from the project's full agent
+   list and the tenant's; file upload resolves to the channel's real single agent, not a guess; a
+   real end-to-end message send round-trips through the actual LLM successfully, in both themes.
 8. **Tasks tab.** Filter the Tasks list by `agent_id ∈ project's agents`, client-side join against
    already-fetched agent data. Task list/detail bodies unchanged. **Size: S.**
 9. **Needs you screen.** Merge `getMergedApprovals` (risk-tiered) with the Topbar's existing
