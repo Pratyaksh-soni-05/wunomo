@@ -1505,6 +1505,54 @@ export function getAgentQuota(token: string, agentId: string): Promise<AgentQuot
   return authedRequest(`/api/v1/agents/${agentId}/quota`, token);
 }
 
+// ---------- Scheduled work (Wunomo UI-rebuild slice 10, 2026-09-15) ----------
+
+export interface ScheduleLastRun {
+  task_id: string;
+  status: string;
+  completed_at: string | null;
+  created_at: string | null;
+}
+
+export interface ScheduleItem {
+  id: string;
+  agent_id: string;
+  agent_name: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  created_by_user_id: string;
+  task_shape: TaskShapeValue;
+  description: string;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  schedule_cron: string;
+  active: boolean;
+  // Real, already-written prose from validate_schedule_can_run -- shown
+  // verbatim, not mapped from a code. Non-null exactly when active is
+  // false; a schedule only ever goes inactive automatically (no manual
+  // pause exists), so this is never absent on an inactive row.
+  deactivation_reason: string | null;
+  last_fired_at: string | null;
+  last_run: ScheduleLastRun | null;
+  created_at: string | null;
+}
+
+export function getSchedules(token: string): Promise<{ schedules: ScheduleItem[] }> {
+  return authedRequest("/api/v1/agents/schedules", token);
+}
+
+export function reactivateSchedule(token: string, agentId: string, scheduleId: string): Promise<ScheduleItem> {
+  return request(`/api/v1/agents/${agentId}/schedules/${scheduleId}/reactivate`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function deleteSchedule(token: string, agentId: string, scheduleId: string): Promise<unknown> {
+  return request(`/api/v1/agents/${agentId}/schedules/${scheduleId}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 export function offboardAgent(token: string, agentId: string): Promise<{ agent_id: string; agent_name: string; status: string }> {
   return request(`/api/v1/agents/${agentId}/offboard`, {
     method: "POST", headers: { Authorization: `Bearer ${token}` },

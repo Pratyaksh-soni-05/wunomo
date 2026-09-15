@@ -481,9 +481,35 @@ it reviews as one self-contained diff instead of riding along inside feature sli
    the seed's synthetic pipeline id after exhausting retries — landing in `PAUSED_FAILED_STEP`,
    re-surfacing correctly as a "blocked" row with the real failure text) rather than the approval
    resolving while the task stayed silently stuck.
-10. **Scheduled screen.** Aggregate pipeline `schedule_cron` + `ScheduledAgentTask`. Confirm the
-    list-endpoint gap from §3/§5 first — this is the one slice with a real chance of needing a small
-    backend addition. **Size: M.**
+10. ✅ **SHIPPED 2026-09-15.** Scheduled — replaces the StubPage with the real, tenant-wide
+    `ScheduledAgentTask` list. Scope corrected from the original description: pipeline `schedule_cron`
+    deliberately **not** aggregated in — an unrelated mechanism with no `deactivation_reason` concept
+    at all, already has a correct home in each project's Workbench Pipelines tab (schedule column,
+    Pause/Activate, built in 6b); bolting it into this table would mean an "Agent" column empty for
+    every pipeline row and a deactivation feature that only ever applies to half the list. The
+    list-endpoint gap was real, confirmed by reading the code: `GET /{agent_id}/schedules` existed
+    but only per-agent, no tenant-wide view. New `GET /api/v1/agents/schedules`, same bulk-fetch
+    shape `GET /tasks/active` already established — one query for schedule+agent+project via
+    outerjoins, one bulk query for every `Task` matching `originating_schedule_id`, reduced to
+    "most recent per schedule" in Python, not a per-schedule round trip. `deactivation_reason` shown
+    verbatim (already real, written prose from `validate_schedule_can_run`) — the preview's own
+    "re-point it at a live source" copy was checked against the real code and found inaccurate:
+    `tool_args` are immutable once a schedule exists, no edit endpoint exists, every real validation
+    message says "delete this schedule and create a new one," not "edit" — shown as-is instead of
+    reproducing the preview's wrong phrasing. "On" is a static badge, not a toggle — confirmed no
+    manual pause endpoint exists, only automatic deactivation, so a switch would imply a control that
+    isn't there. No create button: `ScheduledAgentTask`'s own docstring already called that UI "its
+    own later slice" when the backend was built; confirmed why by reading `TASK_SHAPE_ALLOWED_TOOLS` —
+    `tool_args`' real shape differs per tool across ~14 schedulable tools with no single schema to
+    render a generic form from, real scope logged as findings item 100 rather than shipped as a
+    guessed form. Empty state explains what a schedule is and states plainly it's created via the API
+    today, with the real endpoint shown, rather than reading as an unfinished screen.
+    **Verified**: seeded a real schedule via the actual creation endpoint, deleted its source via the
+    real delete endpoint, then ran the actual `validate_schedule_can_run` to deactivate it (not a
+    guessed message) — confirmed the real reason renders verbatim in the UI; clicked Reactivate with
+    the cause still genuinely unfixed and confirmed it fails at the click with the same live
+    validation error (not silently, not at the next firing), and the row's "off" state is unchanged
+    afterward. Both themes.
 11. **3-tab `ContextPanel`.** Formalize the existing 3 stacked sections into real tabs. Pure
     presentation change over already-fetched data. **Size: S.**
 12. **Placement decisions cleanup.** Resolve and implement wherever you land on: `/ai-employees`

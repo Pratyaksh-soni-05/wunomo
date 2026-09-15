@@ -67,9 +67,11 @@ export const ICON_NEW_PROJECT = (
  * not at new routes invented for this slice — "point at what's real" (see
  * docs/design/UI_REBUILD_INVENTORY.md, slice 3). Needs you is /approvals,
  * rebuilt in slice 9 into the real combined screen this label always
- * implied — same route, real content now. Scheduled has no existing
- * equivalent at all, so it's the one genuinely new route, landing on a
- * StubPage until slice 10.
+ * implied — same route, real content now. Scheduled had no existing
+ * equivalent at all, so it was the one genuinely new route — real as of
+ * slice 10 (2026-09-15): the tenant-wide ScheduledAgentTask list, agent
+ * schedules only (pipeline schedule_cron stays in Workbench, its own
+ * unrelated mechanism with no deactivation-reason concept).
  * Settings and Team both already exist unchanged; the "& billing" half of
  * Team's label is a rail-copy decision only in this slice — the actual
  * Billing page content hasn't merged into /team yet (see the

@@ -26,7 +26,7 @@ from typing import Optional
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, desc, func, select
 
 from .auth import get_current_user, require_permission
 from database import AsyncSessionLocal
@@ -175,6 +175,65 @@ async def _get_schedule(db, tenant_id: str, agent_id: str, schedule_id: str) -> 
     if schedule is None:
         raise HTTPException(status_code=404, detail="Schedule not found.")
     return schedule
+
+
+@router.get("/schedules")
+async def list_all_schedules(user=Depends(require_permission("agents.manage"))):
+    """Tenant-wide schedule list (Wunomo UI-rebuild slice 10, 2026-09-15) --
+    GET /{agent_id}/schedules below is per-agent only, the same gap
+    GET /tasks/active closed for tasks. Same bulk-fetch shape as that
+    endpoint: one query for schedule+agent+project via outerjoins (agent
+    belongs to zero or one project by convention, same caveat as
+    GET /tasks/active's own join), then one bulk query for every Task
+    with a matching originating_schedule_id, reduced to "most recent per
+    schedule" in Python -- not a per-schedule round trip.
+
+    No route-order concern with GET /{agent_id}/schedules just below:
+    "/schedules" and "/{agent_id}/schedules" are different path shapes
+    (one segment vs. two), unlike GET /tasks/all|/active vs. /{task_id},
+    which needed explicit ordering because all three were single-segment
+    siblings under the same router."""
+    tenant_id = user["tenant_id"]
+    async with AsyncSessionLocal() as db:
+        query = (
+            select(ScheduledAgentTask, AgentInstance.name, Project.id, Project.name)
+            .outerjoin(AgentInstance, ScheduledAgentTask.agent_id == AgentInstance.id)
+            .outerjoin(ProjectAgent, ScheduledAgentTask.agent_id == ProjectAgent.agent_id)
+            .outerjoin(Project, ProjectAgent.project_id == Project.id)
+            .where(ScheduledAgentTask.tenant_id == tenant_id)
+            .order_by(ScheduledAgentTask.created_at.desc())
+        )
+        rows = (await db.execute(query)).all()
+
+        schedule_ids = [row[0].id for row in rows]
+        last_task_by_schedule: dict[str, Task] = {}
+        if schedule_ids:
+            r = await db.execute(
+                select(Task)
+                .where(Task.originating_schedule_id.in_(schedule_ids))
+                .order_by(desc(Task.created_at))
+            )
+            for task in r.scalars().all():
+                if task.originating_schedule_id not in last_task_by_schedule:
+                    last_task_by_schedule[task.originating_schedule_id] = task
+
+    items = []
+    for schedule, agent_name, project_id, project_name in rows:
+        last_task = last_task_by_schedule.get(schedule.id)
+        items.append({
+            **_serialize_schedule(schedule),
+            "agent_name": agent_name,
+            "project_id": project_id,
+            "project_name": project_name,
+            "last_run": {
+                "task_id": last_task.id,
+                "status": last_task.status.value,
+                "completed_at": last_task.completed_at.isoformat() if last_task.completed_at else None,
+                "created_at": last_task.created_at.isoformat() if last_task.created_at else None,
+            } if last_task else None,
+        })
+
+    return {"schedules": items}
 
 
 @router.post("/{agent_id}/schedules")
