@@ -49,8 +49,16 @@ async def create_source(
     _perm=Depends(require_permission("sources.create")),
     user=Depends(enforce_quota("data_sources")),
 ):
-    return await ConnectorManager(user["tenant_id"]).register_source(
+    result = await ConnectorManager(user["tenant_id"]).register_source(
         req.name, req.source_type, req.connection_config)
+    # register_source signals refusal -- a source pointing at the app's own
+    # database, or a duplicate name -- as {"error": ...}. Returned as-is that
+    # is an HTTP 200, so the frontend toasted "created", closed the modal,
+    # and showed a list the row was never in. Same convention
+    # transformations.py already applies to the runners' {"error"} shape.
+    if isinstance(result, dict) and "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 @router.get("/{source_id}")
 async def get_source(source_id: str, user=Depends(get_current_user)):
