@@ -68,6 +68,40 @@ def test_validate_llm_config_catches_a_model_the_provider_does_not_have(monkeypa
     assert any("FALLBACK" in p and "llama-3.3-70b-versatile" in p for p in problems), problems
 
 
+def test_every_override_option_exists_at_its_provider():
+    """The Settings -> AI Model picker offers exactly SUPPORTED_MODEL_OVERRIDES.
+    On 2026-09-16 that list still carried llama-3.3-70b-versatile, six days
+    after the FALLBACK fix proved the account does not serve it; a tenant who
+    chose it got a 404 on every turn and a silent fallback (measured live).
+    Same check as the PRIMARY/FALLBACK one, same reason."""
+    from services.llm_service import SUPPORTED_MODEL_OVERRIDES, _provider_for_model
+    assert SUPPORTED_MODEL_OVERRIDES, "an empty override list disables the feature silently"
+    for model in SUPPORTED_MODEL_OVERRIDES:
+        provider = _provider_for_model(model)
+        available = _catalogue(provider)
+        assert model in available, (
+            f"override option {model!r} is not available to the configured "
+            f"{provider} credentials. Available: {sorted(available)}")
+
+
+def test_validate_llm_config_catches_a_stale_override_entry(monkeypatch):
+    """The exact value that was really on offer, put back, must be reported
+    under its own label so the boot log says which option is broken."""
+    from services import llm_service
+    _catalogue("groq")
+    monkeypatch.setattr(llm_service, "SUPPORTED_MODEL_OVERRIDES",
+                        ["gemini-3.5-flash", "llama-3.3-70b-versatile"])
+    problems = validate_llm_config()
+    assert any("OVERRIDE" in p and "llama-3.3-70b-versatile" in p for p in problems), problems
+    assert not any("gemini-3.5-flash" in p for p in problems), problems
+
+
+def test_stale_override_is_no_longer_on_offer():
+    from services.llm_service import SUPPORTED_MODEL_OVERRIDES, supported_model_overrides
+    assert "llama-3.3-70b-versatile" not in SUPPORTED_MODEL_OVERRIDES
+    assert [m["value"] for m in supported_model_overrides()] == SUPPORTED_MODEL_OVERRIDES
+
+
 # ── Routing ──────────────────────────────────────────────────────────────────
 
 def test_primary_and_fallback_route_to_different_real_providers():

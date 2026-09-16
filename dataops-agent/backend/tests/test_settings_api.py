@@ -74,12 +74,43 @@ async def test_owner_can_patch_ai_model_override(client):
     token, _, _ = await _register(client)
     headers = {"Authorization": f"Bearer {token}"}
 
-    r = await client.patch("/api/v1/settings/", json={"ai_model_override": "llama-3.3-70b-versatile"}, headers=headers)
+    r = await client.patch("/api/v1/settings/", json={"ai_model_override": "gemini-3.5-flash"}, headers=headers)
     assert r.status_code == 200
-    assert r.json()["settings"]["ai_model_override"] == "llama-3.3-70b-versatile"
+    assert r.json()["settings"]["ai_model_override"] == "gemini-3.5-flash"
 
     get_r = await client.get("/api/v1/settings/", headers=headers)
-    assert get_r.json()["settings"]["ai_model_override"] == "llama-3.3-70b-versatile"
+    assert get_r.json()["settings"]["ai_model_override"] == "gemini-3.5-flash"
+
+
+@pytest.mark.asyncio
+async def test_patch_rejects_the_model_the_account_does_not_serve(client):
+    """The live-tenant scenario from the 2026-09-16 audit finding, re-run:
+    selecting llama-3.3-70b-versatile used to be accepted and then silently
+    served gpt-oss on every turn. It is now refused at the setting."""
+    token, _, _ = await _register(client)
+    r = await client.patch("/api/v1/settings/", json={"ai_model_override": "llama-3.3-70b-versatile"},
+                           headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 400, r.text
+    assert "llama-3.3-70b-versatile" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_ai_models_endpoint_is_the_backend_allowlist(client):
+    """One source of truth: what the picker offers is exactly what PATCH
+    accepts, and every option is on the provider's live catalogue (the
+    routing tests assert that half)."""
+    from services.llm_service import SUPPORTED_MODEL_OVERRIDES
+    from config import settings
+    token, _, _ = await _register(client)
+    r = await client.get("/api/v1/settings/ai-models", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [m["value"] for m in body["models"]] == SUPPORTED_MODEL_OVERRIDES
+    assert all(m["label"] and m["provider"] in ("gemini", "groq") for m in body["models"])
+    assert body["default"] == settings.PRIMARY_LLM_MODEL
+    assert "llama-3.3-70b-versatile" not in r.text
+    # unauthenticated: not offered
+    assert (await client.get("/api/v1/settings/ai-models")).status_code == 401
 
 
 @pytest.mark.asyncio
