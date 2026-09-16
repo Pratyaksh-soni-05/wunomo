@@ -25,7 +25,30 @@ log = structlog.get_logger()
 # in a way that looks like an unrelated bug). Kept in this one place -
 # extend it only once a new model is actually proven working here, not
 # just because a provider released it.
-SUPPORTED_MODEL_OVERRIDES = ["gemini-3.5-flash", "llama-3.3-70b-versatile"]
+SUPPORTED_MODEL_OVERRIDES = ["gemini-3.5-flash"]
+# `llama-3.3-70b-versatile` was removed 2026-09-16: it is not served by this
+# Groq account (the same finding that fixed the FALLBACK on 2026-09-10), and
+# a tenant who selected it got a 404 on every primary attempt and a silent
+# fallback to openai/gpt-oss-120b -- measured live, recorded in GOTCHAS. Not
+# replaced with another Groq name: the only Groq model live-verified for
+# tool-calling here IS the fallback, and offering it as a distinct "override"
+# would be a false choice. Every entry in this list is now checked against
+# the provider's live catalogue at boot by validate_llm_config().
+
+MODEL_LABELS = {
+    "gemini-3.5-flash": "Gemini 3.5 Flash",
+    "openai/gpt-oss-120b": "GPT-OSS 120B (Groq)",
+}
+
+
+def supported_model_overrides() -> list[dict]:
+    """The one source of truth for the Settings -> AI Model picker
+    (GET /api/v1/settings/ai-models). The frontend used to carry its own
+    hard-coded copy of this list, which is how a model the account does not
+    serve stayed on offer for six days after the backend learned it did not
+    exist."""
+    return [{"value": m, "label": MODEL_LABELS.get(m, m), "provider": _provider_for_model(m)}
+            for m in SUPPORTED_MODEL_OVERRIDES]
 
 
 # Model-name shapes that identify a Groq-hosted model, used ONLY when a caller
@@ -442,17 +465,30 @@ def validate_llm_config() -> list[str]:
     surfaced as a 404 at the exact moment the primary was already failing.
     """
     problems: list[str] = []
-    for label, provider, model in (
+    checks = [
         ("PRIMARY", settings.PRIMARY_LLM_PROVIDER, settings.PRIMARY_LLM_MODEL),
         ("FALLBACK", settings.FALLBACK_LLM_PROVIDER, settings.FALLBACK_LLM_MODEL),
-    ):
+    ]
+    # Every per-tenant override option too (2026-09-16). These are what the
+    # Settings -> AI Model picker offers, and one of them was a model the
+    # account did not serve: a tenant who chose it got a 404 on every turn
+    # and a silent fallback. Same rule as PRIMARY/FALLBACK -- a name nobody
+    # validates against the catalogue fails only at the moment it is needed.
+    checks += [(f"OVERRIDE {m!r}", _provider_for_model(m), m) for m in SUPPORTED_MODEL_OVERRIDES]
+
+    catalogues: dict[str, set[str] | None] = {}
+    for label, provider, model in checks:
         if provider not in ("groq", "gemini"):
             problems.append(f"{label}: unknown provider {provider!r}")
             continue
-        try:
-            available = _live_models(provider)
-        except Exception as exc:
-            log.warning("llm_config_check_unreachable", provider=provider, error=str(exc))
+        if provider not in catalogues:
+            try:
+                catalogues[provider] = _live_models(provider)
+            except Exception as exc:
+                log.warning("llm_config_check_unreachable", provider=provider, error=str(exc))
+                catalogues[provider] = None
+        available = catalogues[provider]
+        if available is None:
             continue
         if model not in available:
             problems.append(
