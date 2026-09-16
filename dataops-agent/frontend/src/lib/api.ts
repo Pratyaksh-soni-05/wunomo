@@ -876,6 +876,20 @@ export function getSettings(token: string): Promise<{ settings: TenantSettings }
   return authedRequest("/api/v1/settings/", token);
 }
 
+// The AI Model picker's options, served from the backend allowlist that
+// PATCH /settings validates against (SUPPORTED_MODEL_OVERRIDES). Replaces a
+// hard-coded copy that drifted: it kept offering a Groq model the account
+// did not serve for six days after the backend knew (2026-09-16).
+export interface AiModelOption {
+  value: string;
+  label: string;
+  provider: "gemini" | "groq";
+}
+
+export function getAiModels(token: string): Promise<{ models: AiModelOption[]; default: string }> {
+  return authedRequest("/api/v1/settings/ai-models", token);
+}
+
 // Item 25: server-side test send, gating the Notifications tab's Save
 // button in the frontend until a changed Slack URL has passed this.
 export function testSlackWebhook(token: string, webhook_url: string): Promise<{ ok: boolean; error?: string }> {

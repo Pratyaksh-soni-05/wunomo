@@ -25,6 +25,16 @@ async def get_settings(user=Depends(get_current_user)):
     return {"settings": await get_tenant_settings(user["tenant_id"])}
 
 
+@router.get("/ai-models")
+async def list_ai_models(user=Depends(get_current_user)):
+    """The AI Model picker's options, from the backend allowlist that
+    PATCH / validates against -- one list, not two (2026-09-16)."""
+    from config import settings
+    from services.llm_service import supported_model_overrides
+    return {"models": supported_model_overrides(),
+            "default": settings.PRIMARY_LLM_MODEL}
+
+
 @router.patch("/")
 async def patch_settings(
     body: SettingsUpdate,

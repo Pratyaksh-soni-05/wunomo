@@ -6,7 +6,7 @@ import {
   Card, Badge, Button, Modal, Input, Select, Tabs, Skeleton, useToast, RowActionsMenu,
 } from "@/components/ui";
 import {
-  getToken, decodeUserFromToken, getSettings, updateSettings,
+  getToken, decodeUserFromToken, getSettings, updateSettings, getAiModels,
   createApiKey, listApiKeys, revokeApiKey, getOnboardingProfile, testSlackWebhook,
   getMe, requestEmailVerifyCode, verifyEmailVerifyCode, saveSession, isChoose, isNoAccount,
   type NotifyOn, type ApiKeyItem,
@@ -14,17 +14,6 @@ import {
 import { applyTheme, getStoredTheme, resolveEffectiveTheme, type ThemePreference } from "@/lib/theme";
 import { formatApiDateOnly } from "@/lib/dates";
 import { applyTimezone, detectBrowserTimezone, timezoneOptionsWithDetected } from "@/lib/timezone";
-
-// Kept in sync manually with backend/services/llm_service.py's
-// SUPPORTED_MODEL_OVERRIDES - there's no list endpoint to fetch this from
-// (see CLAUDE.md's Known-broken/tech-debt entry: this list will silently
-// drift out of sync with the backend allowlist if either changes without
-// updating the other).
-const MODEL_OPTIONS = [
-  { value: "", label: "Use plan default" },
-  { value: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
-  { value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (Groq)" },
-];
 
 const NOTIFY_ON_LABELS: Record<keyof NotifyOn, string> = {
   incident_created: "Incident created",
@@ -83,7 +72,7 @@ export default function SettingsPage() {
               <NotificationsTab token={token} prefs={s?.notification_prefs} canManage={canManage} onSave={(u) => saveMut.mutate(u)} saving={saveMut.isPending} />
             )}
             {tab === "ai-model" && (
-              <AiModelTab current={s?.ai_model_override ?? null} canManage={canManage} onSave={(u) => saveMut.mutate(u)} saving={saveMut.isPending} />
+              <AiModelTab token={token} current={s?.ai_model_override ?? null} canManage={canManage} onSave={(u) => saveMut.mutate(u)} saving={saveMut.isPending} />
             )}
             {tab === "theme" && <ThemeTab token={token} />}
             {tab === "api-keys" && <ApiKeysTab token={token} canManage={canManage} />}
@@ -435,16 +424,26 @@ function NotificationsTab({
 // ---------- AI Model ----------
 
 function AiModelTab({
-  current, canManage, onSave, saving,
+  token, current, canManage, onSave, saving,
 }: {
+  token: string;
   current: string | null;
   canManage: boolean;
   onSave: (u: { ai_model_override: string | null }) => void;
   saving: boolean;
 }) {
   const [value, setValue] = useState("");
+  // Options come from the backend allowlist (one source of truth); the
+  // previous hard-coded copy offered a model the account did not serve.
+  const models = useQuery({ queryKey: ["ai-models"], queryFn: () => getAiModels(token) });
 
   useEffect(() => { setValue(current ?? ""); }, [current]);
+
+  const options = models.data?.models ?? [];
+  // A stored override the backend no longer offers reads back as null from
+  // the API, so `current` can never point at a missing option -- but guard
+  // the select anyway so it never renders a value with no matching option.
+  const currentIsOffered = value === "" || options.some((m) => m.value === value);
 
   return (
     <Card>
@@ -453,8 +452,14 @@ function AiModelTab({
         <p className="text-muted text-sm">
           Overrides which LLM AXIOM uses for this workspace. Leave on plan default unless you have a specific reason to pin one.
         </p>
-        <Select label="Model" value={value} disabled={!canManage} onChange={(e) => setValue(e.target.value)}>
-          {MODEL_OPTIONS.map((m) => (
+        {models.isError && (
+          <p className="text-sm text-danger">
+            Could not load the available models. The plan default is still in effect.
+          </p>
+        )}
+        <Select label="Model" value={currentIsOffered ? value : ""} disabled={!canManage || models.isLoading || models.isError} onChange={(e) => setValue(e.target.value)}>
+          <option value="">{`Use plan default${models.data?.default ? ` (${models.data.default})` : ""}`}</option>
+          {options.map((m) => (
             <option key={m.value} value={m.value}>{m.label}</option>
           ))}
         </Select>
