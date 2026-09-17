@@ -57,9 +57,10 @@ async def list_merged_approvals(
 
     Excludes PolicyEngine requests with action_name == "cicd_pipeline_deployment":
     services/cicd_tasks.py creates one of these alongside every high-risk
-    commit's gate_decision, but "cicd_pipeline_deployment" was never added to
-    PolicyEngine.TOOL_REGISTRY — approving it always fails execution (no
-    deploy triggered) while leaving the real gate_decision stuck pending, so
+    commit's gate_decision, but "cicd_pipeline_deployment" is not a tool in
+    agent.tools.ALL_TOOLS (the approval dispatch registry since 2026-09-17;
+    previously a hand-kept TOOL_REGISTRY, same outcome) — approving it always
+    fails execution (no deploy triggered) while leaving the real gate_decision stuck pending, so
     showing it as an actionable item would be actively misleading. The
     PipelineCommit side is the one real, tested, role-gated action for this
     event; this exclusion is a read-side dedupe only, not a fix to the

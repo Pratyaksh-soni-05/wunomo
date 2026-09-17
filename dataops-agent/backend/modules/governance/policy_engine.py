@@ -1,4 +1,3 @@
-import importlib
 import structlog
 from datetime import datetime, timezone
 from sqlalchemy import select, desc
@@ -20,76 +19,16 @@ RISK_DESCRIPTIONS = {
     "high": "High-risk destructive or schema-altering operation",
 }
 
-# Tool registry: maps action_name -> the real target to dispatch to.
-#
-# Every target below is an instance method (tenant_id always goes to the
-# constructor, never the method call) except "update_contract", whose
-# target (_noop) is a real module-level function ("class": None). Any
-# name in "constructor_args" is pulled out of the approval's action_args
-# and passed to the constructor instead of the method call — needed
-# because SchemaProfiler.__init__ requires source_id up front, unlike
-# every other target class here.
-#
-# This replaced a (module_path, function_name) shape that resolved via a
-# bare module-level getattr() — which can never find an instance method,
-# so every entry failed dispatch regardless of role/approval state. See
-# CLAUDE.md's "PolicyEngine.execute_approved_action()" Known-broken row
-# for the full history, including two entries that had a second,
-# independent bug even after the module/instance issue: "pause_pipeline"
-# named a method ("pause") that doesn't exist even as an instance method
-# (the real one is pause_pipeline), and "modify_business_rule" targeted
-# a method (BusinessRules.update_rule) that doesn't exist under any name
-# — there is no real "modify a business rule" capability anywhere in
-# this codebase, so that entry is removed rather than papered over; a
-# request for it now correctly surfaces "not registered".
-TOOL_REGISTRY: dict[str, dict] = {
-    # Ingestion
-    "profile_schema": {
-        "module": "modules.ingestion.schema_profiler", "class": "SchemaProfiler",
-        "method": "profile", "constructor_args": ["source_id"],
-    },
-    "sync_source": {
-        "module": "modules.ingestion.connector_manager", "class": "ConnectorManager",
-        "method": "sync", "constructor_args": [],
-    },
-    # Orchestration
-    "rerun_pipeline": {
-        "module": "modules.orchestration.dag_manager", "class": "DAGManager",
-        "method": "trigger_run", "constructor_args": [],
-    },
-    "backfill_pipeline": {
-        "module": "modules.orchestration.dag_manager", "class": "DAGManager",
-        "method": "backfill", "constructor_args": [],
-    },
-    "pause_pipeline": {
-        "module": "modules.orchestration.dag_manager", "class": "DAGManager",
-        "method": "pause_pipeline", "constructor_args": [],
-    },
-    # Quality
-    "run_quality_check": {
-        "module": "modules.quality.rule_engine", "class": "QualityRuleEngine",
-        "method": "run_checks", "constructor_args": [],
-    },
-    # Observability
-    "resolve_incident": {
-        "module": "modules.observability.incident_manager", "class": "IncidentManager",
-        "method": "resolve_incident", "constructor_args": [],
-    },
-    "triage_incident": {
-        "module": "modules.observability.incident_manager", "class": "IncidentManager",
-        "method": "triage_incident", "constructor_args": [],
-    },
-    # Governance
-    "update_contract": {
-        "module": "modules.governance.policy_engine", "class": None,
-        "method": "_noop", "constructor_args": [],
-    },
-    # Reporting
-    "generate_report": {
-        "module": "modules.reporting.report_generator", "class": "ReportGenerator",
-        "method": "generate_status_report", "constructor_args": [],
-    },
-}
+# Approved actions are dispatched through agent/approval_executor.py, which
+# resolves the action_name against agent.tools.ALL_TOOLS -- the same registry
+# the chat graph and the Tasks executor already use. There used to be a
+# second, hand-maintained map here (TOOL_REGISTRY: action_name -> module /
+# class / method / constructor_args). Retired 2026-09-17: measured against
+# RISK_ACTIONS it covered 6 of the 20 tools that actually require approval,
+# and 4 of its 10 entries were not tool names at all, so approving any of
+# the other 14 -- detect_schema_drift, run_python_transform, create_pipeline,
+# ... -- ended in "not registered in TOOL_REGISTRY". Two lists that describe
+# the same thing drift; there is now one. See GOTCHAS, 2026-09-17.
 
 
 @tenant_scoped
@@ -129,7 +68,7 @@ class PolicyEngine:
         Args:
             user_id: UUID of requesting user
             session_id: chat session UUID
-            action_name: tool name from TOOL_REGISTRY (e.g. "rerun_pipeline")
+            action_name: a tool name from agent.tools.ALL_TOOLS (e.g. "run_pipeline")
             action_args: kwargs to pass to the tool on execution
             risk_level: "low" | "medium" | "high"
             reason: agent's explanation of why this action is needed
@@ -369,74 +308,48 @@ class PolicyEngine:
     # ------------------------------------------------------------------
 
     async def execute_approved_action(self, approval: ApprovalRequest) -> dict:
+        """Run the real @tool for an approved action. Never raises -- always
+        returns a dict; "error" in it marks the approval FAILED.
+
+        Identity arguments are FORCED from the approval row, never trusted
+        from the stored action_args -- the same rule agent_node applies to
+        every live tool call. The stored args were written by the model (via
+        the chat gate) or the task planner; the row's tenant_id/user_id/
+        session_id are what the server recorded when the request was made.
         """
-        Resolves and calls the real target for an approved action — either
-        an instance method (constructed with tenant_id, plus anything in
-        "constructor_args" pulled out of action_args) or a plain module-level
-        function ("class": None). Never raises — always returns a dict.
-        """
+        from agent.approval_executor import TOOL_MAP
+
         action_name = approval.action_name
         action_args = dict(approval.action_args or {})
+        log.info("policy.execute_approved_action",
+                 action_name=action_name, approval_id=str(approval.id))
 
-        log.info(
-            "policy.execute_approved_action",
-            action_name=action_name,
-            approval_id=str(approval.id),
-        )
+        tool = TOOL_MAP.get(action_name)
+        if tool is None:
+            return {"error": f"Action '{action_name}' is not a registered tool",
+                    "available_actions": sorted(TOOL_MAP)}
 
-        if action_name not in TOOL_REGISTRY:
-            return {
-                "error": f"Action '{action_name}' is not registered in TOOL_REGISTRY",
-                "available_actions": list(TOOL_REGISTRY.keys()),
-            }
-
-        spec = TOOL_REGISTRY[action_name]
-
-        try:
-            module = importlib.import_module(spec["module"])
-        except ImportError as e:
-            return {"error": f"Could not import module '{spec['module']}': {str(e)}"}
-
-        class_name = spec.get("class")
-        fn_name = spec["method"]
+        declared = set(getattr(tool, "args", {}) or {})
+        identity = {"tenant_id": self.tenant_id,
+                    "user_id": approval.user_id, "session_id": approval.session_id}
+        for key, value in identity.items():
+            if key in declared:
+                action_args[key] = value
+        unknown = sorted(k for k in action_args if k not in declared)
+        for k in unknown:
+            action_args.pop(k)   # a stale or planner-invented argument must not 500 the call
 
         try:
-            if class_name is None:
-                fn = getattr(module, fn_name, None)
-                if fn is None:
-                    return {"error": f"Function '{fn_name}' not found in module '{spec['module']}'"}
-                result = await fn(**action_args)
-            else:
-                cls = getattr(module, class_name, None)
-                if cls is None:
-                    return {"error": f"Class '{class_name}' not found in module '{spec['module']}'"}
-
-                constructor_kwargs = {"tenant_id": self.tenant_id}
-                method_kwargs = dict(action_args)
-                for arg_name in spec.get("constructor_args", []):
-                    if arg_name in method_kwargs:
-                        constructor_kwargs[arg_name] = method_kwargs.pop(arg_name)
-
-                instance = cls(**constructor_kwargs)
-                method = getattr(instance, fn_name, None)
-                if method is None:
-                    return {"error": f"Method '{fn_name}' not found on {class_name}"}
-                result = await method(**method_kwargs)
-
-            log.info(
-                "policy.execute_approved_action.done",
-                action_name=action_name,
-                success="error" not in (result or {}),
-            )
-            return result if isinstance(result, dict) else {"result": result}
-
+            result = await tool.ainvoke(action_args)
         except Exception as exc:
-            log.error(
-                "policy.execute_approved_action.error",
-                action_name=action_name,
-                error=str(exc),
-            )
-            return {"error": f"Execution failed: {str(exc)}"}
+            log.error("policy.execute_approved_action.error",
+                      action_name=action_name, error=str(exc))
+            return {"error": f"Execution failed: {exc}"}
+        if not isinstance(result, dict):
+            result = {"result": result}
+        log.info("policy.execute_approved_action.done",
+                 action_name=action_name, success="error" not in result)
+        return result
 
     # ------------------------------------------------------------------
     # Helper
@@ -460,12 +373,3 @@ class PolicyEngine:
             "resolved_at": req.resolved_at.isoformat() if req.resolved_at else None,
         }
 
-
-async def _noop(**kwargs) -> dict:
-    """Placeholder for actions not yet fully wired. Must be async: this is
-    called via `await fn(**kwargs)` like every other TOOL_REGISTRY target
-    -- it was a plain `def` before, which made `update_contract` raise
-    `TypeError: object dict can't be used in 'await' expression` on every
-    approval, not silently succeed (see CLAUDE.md's Known-broken row for
-    the corrected account of this)."""
-    return {"status": "noop", "kwargs": kwargs}

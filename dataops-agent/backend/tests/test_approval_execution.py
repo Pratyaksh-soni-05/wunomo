@@ -94,11 +94,13 @@ async def test_approving_resolve_incident_actually_resolves_it(client):
     engine = PolicyEngine(tenant_id)
     request = await engine.create_request(
         user_id=reg["user_id"], session_id="s1", action_name="resolve_incident",
-        # IncidentManager.resolve_incident()'s real parameter is `notes`,
-        # not `resolution_notes` -- action_args must match the real
-        # target method's parameter names exactly, since they're passed
-        # straight through as **kwargs.
-        action_args={"incident_id": incident_id, "notes": "fixed for real"},
+        # action_args are TOOL-call args -- what the model (or the task
+        # planner) supplied, keyed by the @tool's parameter names. Since
+        # 2026-09-17 approval dispatch runs the real tool, so the key is
+        # the tool's `resolution_notes`, not the service method's `notes`
+        # (the old hand-kept registry passed straight to the method, which
+        # is why this test used to carry the service's name).
+        action_args={"incident_id": incident_id, "resolution_notes": "fixed for real"},
         risk_level="medium", reason="test",
     )
     result = await engine.approve(request["approval_id"], reviewer="test@example.com")

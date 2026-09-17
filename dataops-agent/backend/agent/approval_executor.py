@@ -1,3 +1,11 @@
+"""The one place an action_name becomes a callable for the approval path.
+
+TOOL_MAP is derived from agent.tools.ALL_TOOLS, the same registry the chat
+graph binds and the Tasks executor resolves through, so a tool that can be
+gated can always be executed after approval -- by construction, not by
+someone remembering to add a second entry elsewhere. PolicyEngine.
+execute_approved_action() dispatches through this map (2026-09-17).
+"""
 from agent.tools import ALL_TOOLS
 import structlog
 
