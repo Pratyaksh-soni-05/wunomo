@@ -45,6 +45,19 @@ the end before you close the browser.
 Open PowerShell (Windows Start button → type `powershell` → Enter) and
 run:
 
+**PowerShell or the plain `cmd` prompt both work** — every `docker` and
+`curl` command below runs unchanged in either. The one difference is how
+a saved login token is written, and the guide shows both forms wherever
+it matters:
+
+- PowerShell: `$TOKEN = "eyJ..."` to save, `$TOKEN` to use
+- cmd: `set TOKEN=eyJ...` to save (no quotes, no spaces), `%TOKEN%` to use
+
+Using the wrong form doesn't error — it silently sends nothing, and the
+next `curl` answers `{"detail":"Invalid token"}`. If you see that, it's
+the shell form, not the product. Tokens also expire after 60 minutes;
+just log in again.
+
 ```
 cd "C:\Users\ASUS\OneDrive\Desktop\STARTUP\ai workforce version 2\dataops-agent"
 docker compose ps
@@ -238,9 +251,15 @@ curl -s -X POST http://localhost:8000/api/v1/auth/login -d "username=sectest1@ex
 form body — `username=...&password=...` — not JSON; the `username` is
 your email.) Find the long value after `"access_token":"` and copy it (everything up to the next `"`). Then:
 
+PowerShell:
 ```
 $TOKEN = "paste-the-token-here"
 curl -s http://localhost:8000/api/v1/sources/ -H "Authorization: Bearer $TOKEN"
+```
+cmd:
+```
+set TOKEN=paste-the-token-here
+curl -s http://localhost:8000/api/v1/sources/ -H "Authorization: Bearer %TOKEN%"
 ```
 
 Find the `id` of `Encryption Test` in that output, then:
@@ -248,6 +267,7 @@ Find the `id` of `Encryption Test` in that output, then:
 ```
 curl -s http://localhost:8000/api/v1/sources/PASTE-THE-ID-HERE -H "Authorization: Bearer $TOKEN"
 ```
+(in cmd, write `%TOKEN%` instead of `$TOKEN` — same for every later step)
 
 **What you should see:** the `connection_config` comes back with
 `"password":"********"` — and `"host":"warehouse-test-host"` still visible, because
@@ -255,7 +275,7 @@ the host isn't a secret.
 
 **What you should NOT see:** `SuperSecret_Pa55word!`.
 
-**Keep `$TOKEN` — several later items reuse it.** If you close
+**Keep the token — several later items reuse it.** If you close
 PowerShell, just re-run the login command to get a new one.
 
 ---
@@ -299,9 +319,15 @@ curl -s -X POST http://localhost:8000/api/v1/auth/login -d "username=sectest2@ex
 Copy that token, then ask it for workspace one's source (the ID you used
 in 1.3):
 
+PowerShell:
 ```
 $TOKEN2 = "paste-second-token-here"
 curl -s -i http://localhost:8000/api/v1/sources/PASTE-THE-ID-HERE -H "Authorization: Bearer $TOKEN2"
+```
+cmd:
+```
+set TOKEN2=paste-second-token-here
+curl -s -i http://localhost:8000/api/v1/sources/PASTE-THE-ID-HERE -H "Authorization: Bearer %TOKEN2%"
 ```
 
 **What you should see:** `HTTP/1.1 404 Not Found` and a body saying the
@@ -331,6 +357,16 @@ whole block:
   Write-Host "attempt $_ -> $r"
 }
 ```
+In cmd, loops are awkward to type at the prompt, so save these two
+lines as a file called `ratelimit.cmd` (Notepad is fine; the doubled
+`%%` is deliberate — that's how cmd writes it inside a script file):
+```
+@echo off
+for /L %%i in (1,1,13) do @curl -s -o NUL -w "attempt %%i: %%{http_code}
+" -X POST http://localhost:8000/api/v1/auth/login -d "username=sectest1@example.com&password=wrong-on-purpose"
+```
+then run it with `ratelimit.cmd` from the folder you saved it in. Output
+is `attempt 1: 400`, `attempt 2: 400`, … flipping to `429`.
 
 **What you should see:** the first several attempts print `400` (wrong
 password, correctly rejected — this endpoint answers 400 "Invalid
@@ -346,6 +382,10 @@ or the terminal hanging, or a `500`.
 
 ```
 curl.exe -s -i -X POST http://localhost:8000/api/v1/auth/login -d "username=sectest1@example.com&password=wrong-on-purpose" | Select-String -Pattern "HTTP/|retry-after|detail"
+```
+cmd (`findstr` is cmd's Select-String):
+```
+curl -s -i -X POST http://localhost:8000/api/v1/auth/login -d "username=sectest1@example.com&password=wrong-on-purpose" | findstr /i "HTTP/ retry-after detail"
 ```
 
 **What you should see:** `HTTP/1.1 429`, a `retry-after:` header with a
@@ -758,13 +798,21 @@ You already uploaded and profiled `sectest_customers.csv` in Item #5. Its
 ### 10.1 Confirm the columns were flagged
 
 ```
-docker exec dataops_postgres psql -U dataops_user -d dataops -c "SELECT jsonb_pretty(jsonb_path_query_array(schema_snapshot::jsonb, '\$.main.columns[*] ? (@.sensitivity <> \"none\")')) FROM data_sources WHERE name LIKE 'sectest_customers%';"
+docker exec dataops_postgres psql -U dataops_user -d dataops -c "SELECT c->>'column_name' AS col, c->>'sensitivity' AS level, c->>'sensitivity_source' AS src, c->>'sensitivity_reason' AS reason FROM data_sources, jsonb_array_elements(schema_snapshot::jsonb->'main'->'columns') c WHERE name LIKE 'sectest_customers%' AND c->>'sensitivity' <> 'none';"
 ```
 
-**What you should see:** a small block of JSON listing `customer_email`
-and `ssn`, each with `"sensitivity": "pii"`, a `"sensitivity_source":
-"auto"`, and a plain-English `sensitivity_reason` such as
-`name token 'ssn'`.
+(This query deliberately contains no `$` and no inner double-quotes, so
+it pastes cleanly into both PowerShell and the plain `cmd` prompt — an
+earlier version used a `$`-based JSON path that both shells mangled.)
+
+**What you should see:** a two-row table:
+
+```
+      col       | level | src  |       reason
+----------------+-------+------+--------------------
+ customer_email | pii   | auto | name token 'email'
+ ssn            | pii   | auto | name token 'ssn'
+```
 
 **What you should NOT see:** any of the actual email addresses or SSN
 values in that output. The detector looks at sample values but never
@@ -776,7 +824,8 @@ stores them.
 curl -s http://localhost:8000/api/v1/sources/PASTE-CSV-SOURCE-ID-HERE/preview -H "Authorization: Bearer $TOKEN"
 ```
 
-(Get the CSV source's ID the same way as in 1.3.)
+(Get the CSV source's ID the same way as in 1.3; `%TOKEN%` in cmd. If
+you get `{"detail":"Invalid token"}`, log in again — see 0.1.)
 
 **What you should see:** rows where `customer_email` and `ssn` are
 `***`, while `product_name`, `amount` and `region` show their real
@@ -835,8 +884,11 @@ sentences.
 ### 11.2 Confirm the current setting (one command)
 
 ```
-docker compose logs backend --tail 60 | Select-String -Pattern "llm_data_residency"
+docker compose logs backend | findstr "llm_data_residency"
 ```
+(`findstr` works in both PowerShell and cmd. No `--tail` here on
+purpose: the line is written once at startup, and if the backend has
+been logging for a while it won't be in the last 60 lines.)
 
 **What you should see:** `mode=global`, `outbound_llm_allowed=True`, and
 a note saying inference runs at the configured providers' own regions.
@@ -997,6 +1049,15 @@ and token totals. That's the dogfooding data.
   it's only reachable by asking AXIOM, which is what Item #7 tests.
 - **Startup logs are full of SQL.** Normal at `env=development`. Only
   `[error]` lines matter.
+- **"Code rejected: the transformation is not valid Python" on a script
+  copied from this guide.** That's a paste problem, not the sandbox: the
+  straight quotes `'` in the code turned into curly quotes `‘ ’` on the
+  way (rendered previews, chat windows and note apps do this), and Python
+  rejects them before any security check runs. Retype the line by hand,
+  or copy it from the raw `.md` file in a plain text editor. The sandbox
+  messages you're actually testing for name the rule broken — "imports
+  outside the allowed list", "private or internal attribute access",
+  "classified as sensitive" — never "not valid Python".
 - **A CSV source and a Postgres source behave differently in Transforms.**
   Expected — the SQL editor targets a real database; on a CSV source some
   SQL will legitimately fail. Use the Python editor for CSVs.
