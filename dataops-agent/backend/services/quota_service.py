@@ -98,39 +98,56 @@ WARNING_THRESHOLD = 0.8
 # cap should not silently shrink by ~10% in February.
 DAYS_PER_BILLING_MONTH = 30
 
-#   ⚠️  credits_per_day_per_user IS STOPGAP-CALIBRATED (2026-09-02).
-#       NOT FINAL. Replace once dogfooding supplies the real multiplier.
+#   ⚠️  credits_per_day_per_user IS INTERIM-CALIBRATED (2026-09-17).
+#       Better than the 2026-09-02 stopgap, still NOT FINAL.
 #
 # Derivation, so the numbers can be re-derived rather than guessed at:
 #
-#     credits_per_turn        = 5,108 x 4 = 20,432
+#     credits_per_turn        = 5,108 x 3 = 15,324
 #                               |          |
-#                               |          +-- calls per turn: AN ESTIMATE,
-#                               |              n=3, the weak factor. This is
-#                               |              the number that must be replaced.
+#                               |          +-- calls per turn: INTERIM. The first
+#                               |              real measurement (2026-09-17, one
+#                               |              user, 26 calls / 14 real turns)
+#                               |              gave 1.86, median 2, max 3 -- but
+#                               |              on a security-test script biased
+#                               |              toward one-tool asks and refusals,
+#                               |              so it is a floor, not a centre. 3
+#                               |              sits above that floor and 25% below
+#                               |              the old n=3 guess of 4. See GOTCHAS
+#                               |              2026-09-17 for the recalibration
+#                               |              threshold before this is "final".
 #                               +------------- credits per real agent_chat LLM
 #                                              call: GROUNDED, n=76 measured
-#                                              events, continuous distribution.
+#                                              events, RECONFIRMED 2026-09-17 at
+#                                              5,114 on 19 fresh Gemini calls.
 #
-#     credits_per_day_per_user = turns_per_day_per_user x 20,432
+#     credits_per_day_per_user = turns_per_day_per_user x 15,324
 #
 # turns_per_day_per_user comes from the pricing model (25 / 25 / 30 / 35). The
 # arithmetic is exact, not hand-rounded, and is self-consistent by construction:
 # a single-seat Standard tenant's monthly pool divided by credits_per_turn comes
 # back to exactly 750 turns, i.e. the 25/day it was sold.
 #
+# Margin note (2026-09-17, from Wunomo_Pricing_Costing_Strategy): that document
+# costs a "turn" at 5,000 tokens, but its 235-event sample was per LLM CALL, and
+# a real turn is ~1.9 calls -- so a customer who burns this whole credit cap
+# consumes ~3x the tokens the pricing model costed per sold turn. On the
+# document's own cost basis Premium goes negative at full-cap consumption
+# (break-even is ~2.55 calls/turn); on today's measured input/output mix it
+# stays positive. Recorded in GOTCHAS; a pricing decision, not a code one.
+#
 # This REPLACES the previous placeholders (each tier's old flat
 # ai_credits_per_month / 30), which were wrong by 43-613x and left a Standard
 # tenant able to afford roughly ONE chat turn per month. See GOTCHAS.md.
 #
-#   What "stopgap" means concretely: the magnitude is now roughly right instead
-#   of roughly 1,000x wrong, but it rests on a 3-sample multiplier. Do not treat
-#   these as final, do not quote them to a customer, and do not derive anything
-#   else from them without re-reading the GOTCHAS entry first.
+#   What "interim" means concretely: the magnitude is right and the multiplier
+#   now has one real measurement behind it, from one person on one afternoon.
+#   Do not treat these as final, do not quote them to a customer, and do not
+#   derive anything else from them without re-reading the GOTCHAS entry first.
 PLANS: dict[str, dict[str, Optional[int]]] = {
     "standard": {
-        # stopgap 2026-09-02: 25 turns/day x 20,432 credits/turn. NOT FINAL.
-        "credits_per_day_per_user": 510_800,
+        # interim 2026-09-17: 25 turns/day x 15,324 credits/turn. NOT FINAL.
+        "credits_per_day_per_user": 383_100,
         "pipeline_runs_per_month": 100,
         "max_data_sources": 3,
         "max_team_members": 8,
@@ -140,24 +157,24 @@ PLANS: dict[str, dict[str, Optional[int]]] = {
     # inventing an intermediate number; it is the tier most in need of a real
     # figure once dogfooding data exists.
     "starter_plus": {
-        # stopgap 2026-09-02: 25 turns/day x 20,432 credits/turn. NOT FINAL.
+        # interim 2026-09-17: 25 turns/day x 15,324 credits/turn. NOT FINAL.
         # Matches standard by design — the pricing model sells both at 25/day.
-        "credits_per_day_per_user": 510_800,
+        "credits_per_day_per_user": 383_100,
         "pipeline_runs_per_month": 100,
         "max_data_sources": 3,
         "max_team_members": 8,
     },
     "premium": {
-        # stopgap 2026-09-02: 30 turns/day x 20,432 credits/turn. NOT FINAL.
-        "credits_per_day_per_user": 612_960,
+        # interim 2026-09-17: 30 turns/day x 15,324 credits/turn. NOT FINAL.
+        "credits_per_day_per_user": 459_720,
         "pipeline_runs_per_month": 1_000,
         "max_data_sources": 15,
         "max_team_members": 15,
     },
     "enterprise": {
-        # stopgap 2026-09-02: 35 turns/day x 20,432 credits/turn (base rate;
+        # interim 2026-09-17: 35 turns/day x 15,324 credits/turn (base rate;
         # per-seat scaling is unchanged and applies on top). NOT FINAL.
-        "credits_per_day_per_user": 715_120,
+        "credits_per_day_per_user": 536_340,
         "pipeline_runs_per_month": 10_000,
         "max_data_sources": None,  # unlimited
         # Unlimited on purpose. Enterprise scales *price* per seat beyond 25,
