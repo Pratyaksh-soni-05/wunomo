@@ -616,19 +616,41 @@ Check sectest_customers.csv for schema drift.
 have permission, and **no drift check happens**. The request is stripped
 before it ever reaches the tool.
 
-### 7.2 As the Owner — should run
+### 7.2 As the Owner — needs approval, then runs
 
 In the **Owner** window, send the same message.
 
-**What you should see:** AXIOM performs the check and reports back
-(most likely "no drift" — the file hasn't changed since you profiled
-it).
+**What you should see:** AXIOM does **not** run it straight away. The
+reply says **Approval Required** for `detect_schema_drift`, and the tool
+call in the chat view carries a **Needs approval** badge. This is the
+gate Item #7 added: in the default **Assisted** mode (the dropdown at the
+top right of the chat), every medium-risk action needs a human approval
+— for everyone, Owner included. The role gate (7.1) is what excludes a
+Viewer entirely; the approval gate is what stops silent execution for
+everyone else.
 
-**Optional, if you want to see the approval gate:** the middle roles
-(Data Analyst) can request it but must be approved first. Change
-`sectest4`'s role to **Data Analyst** in **Team**, have them ask again,
-and you should see a **Needs approval** badge on the tool call in the
-chat view, with the request waiting for you in sidebar → **Approvals**.
+Now approve it: sidebar → **Approvals** → find the `detect_schema_drift`
+request → click the **Approve** icon button in its row (the tick; hover shows "Approve").
+
+**What you should see:** back in the chat view, the tool call's badge
+changes to **Approved & executed**, and the result reports whether drift
+was found (most likely no drift — the file hasn't changed since you
+profiled it).
+
+**What would be a real bug:** the badge reading **Approved — execution
+failed**. That is exactly what the first tester saw on 2026-09-17: the
+Approvals centre used a hand-kept list of 10 executable actions that
+covered only 6 of the 20 tools that require approval, so approving this
+one (and 13 others) ended in "not registered". Fixed the same day; if you
+see it again, report it.
+
+**Note — the Data Analyst case is the same gate from the other side:** a
+Data Analyst can *request* the check (they pass the role gate) but cannot
+run it unapproved, exactly like the Owner above. If you want to see it,
+change `sectest4`'s role to **Data Analyst** in **Team**, have them ask
+again, and approve their request from the Owner window. It's the same
+mechanism, not a separate case — the only role-specific behaviour is the
+Viewer's outright refusal in 7.1.
 
 ---
 
