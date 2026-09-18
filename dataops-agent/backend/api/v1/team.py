@@ -176,6 +176,12 @@ async def change_member_role(
                 raise HTTPException(status_code=400, detail="Cannot demote the last owner")
 
         target.role = body.role
+        # Item #13: promotion into owner/admin starts the MFA enrolment grace
+        # clock from now, not from the account's creation date -- an old
+        # member promoted today must not be locked out today.
+        if body.role in ("owner", "admin") and not target.mfa_enabled and target.mfa_required_since is None:
+            from datetime import datetime as _dt
+            target.mfa_required_since = _dt.utcnow()
         await db.commit()
 
     # Revoke every token this member currently holds. get_current_user already

@@ -21,7 +21,13 @@ router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
+# Item #13: an owner/admin past their MFA enrolment deadline may still reach
+# these -- they are what enrolling, checking status, and logging out need.
+# Everything else answers 403 mfa_enrollment_required until MFA is enabled.
+MFA_ENROLLMENT_EXEMPT_PREFIXES = ("/api/v1/auth/",)
+
+
+async def get_current_user(request: Request, token: str = Depends(oauth2_scheme)) -> dict:
     """Decodes the JWT, then re-reads `is_active`/`role` fresh from the DB —
     exactly once per request (FastAPI caches a dependency's return value per
     request by default, and every other dependency in this file/every route
@@ -49,7 +55,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
         # not take effect until the token expired, the same staleness class as
         # the role gap this function exists to close.
         r = await db.execute(
-            select(User.is_active, User.role, User.tenant_id, Tenant.plan)
+            select(User.is_active, User.role, User.tenant_id, Tenant.plan,
+                   User.mfa_enabled, User.mfa_required_since, User.created_at)
             .join(Tenant, User.tenant_id == Tenant.id)
             .where(User.id == payload.get("sub"))
         )
@@ -73,8 +80,25 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     if payload.get("tenant_id") != row.tenant_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
+    # Item #13: MFA is mandatory for owners and admins. After the grace
+    # period an un-enrolled one is refused everywhere except the auth routes
+    # (status, setup, enable, me, revoke) -- a hard block on the privileged
+    # capability, with the way out left open. A grace period rather than an
+    # immediate block because the rule lands on existing accounts; a lockout
+    # nobody was warned about is an outage, not a control.
+    from services.mfa_service import enrollment_overdue
+    if enrollment_overdue(row.role, row.mfa_enabled, row.mfa_required_since, row.created_at) \
+            and not request.url.path.startswith(MFA_ENROLLMENT_EXEMPT_PREFIXES):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "mfa_enrollment_required",
+                    "message": "Multi-factor authentication is required for your role. "
+                               "Enable it under Settings -> Security to continue."},
+        )
+
     payload["role"] = row.role
     payload["plan"] = row.plan
+    payload["mfa_enabled"] = bool(row.mfa_enabled)
     return payload
 
 
@@ -189,6 +213,19 @@ async def register(req: RegisterRequest):
     }
 
 
+def _session_response(result: dict) -> dict:
+    """Item #13: a proven first factor is either a session or an MFA
+    challenge. Every route that used to build the access_token dict by hand
+    goes through this so none can forget the second-factor branch."""
+    if result["status"] == "mfa_required":
+        return {"status": "mfa_required", "mfa_token": result["mfa_token"],
+                "user_id": result["user_id"], "tenant_id": result["tenant_id"]}
+    return {
+        "access_token": result["token"], "token_type": "bearer",
+        "user_id": result["user_id"], "tenant_id": result["tenant_id"],
+    }
+
+
 @router.post("/login")
 async def login(form: OAuth2PasswordRequestForm = Depends(), tenant_id: Optional[str] = Form(None)):
     result = await resolve_password_login(form.username, form.password, tenant_id)
@@ -199,10 +236,7 @@ async def login(form: OAuth2PasswordRequestForm = Depends(), tenant_id: Optional
     if result["status"] == "choose":
         return {"status": "choose_workspace", "options": result["options"]}
 
-    return {
-        "access_token": result["token"], "token_type": "bearer",
-        "user_id": result["user_id"], "tenant_id": result["tenant_id"],
-    }
+    return _session_response(result)
 
 
 class EmailCodeRequest(BaseModel):
@@ -239,11 +273,8 @@ async def verify_email_code(req: EmailCodeVerify):
         req.email, "email_code", intended_tenant_id=effective_tenant_id,
     )
 
-    if identity["status"] == "single":
-        return {
-            "access_token": identity["token"], "token_type": "bearer",
-            "user_id": identity["user_id"], "tenant_id": identity["tenant_id"],
-        }
+    if identity["status"] in ("single", "mfa_required"):
+        return _session_response(identity)
     if identity["status"] == "choose":
         # The email code was already single-use consumed by verify_login_code()
         # above, so the client can't resubmit it a second time with a
@@ -299,11 +330,8 @@ async def google_callback(req: GoogleCallback):
         google_id=google_id, provider_email_verified=provider_email_verified,
     )
 
-    if identity["status"] == "single":
-        return {
-            "access_token": identity["token"], "token_type": "bearer",
-            "user_id": identity["user_id"], "tenant_id": identity["tenant_id"],
-        }
+    if identity["status"] in ("single", "mfa_required"):
+        return _session_response(identity)
     if identity["status"] == "choose":
         # Google's authorization code + state are both single-use and already
         # consumed above — same resolution-token handoff as email-code.
@@ -343,12 +371,9 @@ async def resolve_workspace(req: ResolveWorkspaceRequest):
     the original proof (email code, Google auth code) was already single-use
     consumed by the time multiple tenant matches were found."""
     result = await resolve_pending_identity(req.resolution_token, req.tenant_id)
-    if result["status"] != "single":
+    if result["status"] not in ("single", "mfa_required"):
         raise HTTPException(status_code=400, detail="Invalid or expired selection")
-    return {
-        "access_token": result["token"], "token_type": "bearer",
-        "user_id": result["user_id"], "tenant_id": result["tenant_id"],
-    }
+    return _session_response(result)
 
 
 @router.get("/my-workspaces")
@@ -378,6 +403,8 @@ async def switch_workspace_route(req: SwitchWorkspaceRequest, request: Request, 
         raise HTTPException(status_code=429, detail="Too many workspace switches recently — wait a bit and try again.")
     if result is None:
         raise HTTPException(status_code=403, detail="You don't have an active account in that workspace.")
+    if result.get("status") == "mfa_required":
+        return _session_response(result)
     return {"token_type": "bearer", **result}
 
 
@@ -397,9 +424,21 @@ async def me(user=Depends(get_current_user)):
     from models.all_models import User
     from sqlalchemy import select
     async with AsyncSessionLocal() as db:
-        r = await db.execute(select(User.theme, User.email_verified).where(User.id == user["sub"]))
+        r = await db.execute(select(User.theme, User.email_verified, User.role, User.mfa_enabled,
+                                    User.mfa_required_since, User.created_at).where(User.id == user["sub"]))
         row = r.one()
-    return {**user, "theme": row.theme, "email_verified": bool(row.email_verified)}
+    # Item #13: enough for the UI to nag an owner/admin before their deadline.
+    from services.mfa_service import enrollment_overdue, is_mandatory_for_role
+    from datetime import timedelta as _td
+    from config import settings as _settings
+    mfa_deadline = None
+    if is_mandatory_for_role(row.role) and not row.mfa_enabled:
+        since = row.mfa_required_since or row.created_at
+        mfa_deadline = (since + _td(days=_settings.MFA_GRACE_DAYS)).isoformat() if since else None
+    return {**user, "theme": row.theme, "email_verified": bool(row.email_verified),
+            "mfa_enabled": bool(row.mfa_enabled), "mfa_required": is_mandatory_for_role(row.role),
+            "mfa_enrollment_deadline": mfa_deadline,
+            "mfa_overdue": enrollment_overdue(row.role, row.mfa_enabled, row.mfa_required_since, row.created_at)}
 
 
 class MeUpdate(BaseModel):

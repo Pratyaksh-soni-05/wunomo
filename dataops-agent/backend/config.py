@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # import so a typo cannot boot as "global".
     LLM_DATA_RESIDENCY_MODE: str = "global"
     LLM_SELF_HOSTED_ENDPOINT: str = ""
+    # Security Master Ranking Item #13 (MFA). TOTP is mandatory for owners and
+    # admins; they get this many days from becoming one (or from the deploy
+    # that introduced the rule) to enrol before privileged routes refuse them.
+    MFA_GRACE_DAYS: int = 7
+    MFA_ISSUER: str = "Wunomo"
     JWT_SECRET: str = "dev-jwt-secret"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60

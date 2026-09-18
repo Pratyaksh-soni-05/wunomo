@@ -164,6 +164,29 @@ def issue_token_for_user(user: User, auth_method: str, epoch: int = 0) -> str:
     })
 
 
+async def establish_session(user: User, auth_method: str) -> dict:
+    """Item #13: the ONE place a proven first factor becomes a session.
+
+    Every login path -- password, email-code, Google, the pending-identity
+    finalisation, and workspace switch -- ends here. If the user has MFA
+    enabled, no JWT is minted: a short-lived single-use challenge is created
+    instead and the caller returns {"status": "mfa_required"}; the JWT is
+    minted only by POST /auth/mfa/verify against that challenge. Putting the
+    fork here rather than in each route means a login path added later
+    cannot skip the second factor by omission.
+    """
+    if user.mfa_enabled:
+        from services.mfa_service import create_challenge
+        return {
+            "status": "mfa_required", "mfa_token": await create_challenge(user, auth_method),
+            "user_id": user.id, "tenant_id": user.tenant_id,
+        }
+    return {
+        "status": "single", "token": await issue_token_and_remember(user, auth_method),
+        "user_id": user.id, "tenant_id": user.tenant_id,
+    }
+
+
 async def issue_token_and_remember(user: User, auth_method: str) -> str:
     """Item 1: wraps issue_token_for_user() with the "remember the last
     workspace used" write, for the real login/signup/invite-accept/switch
@@ -252,6 +275,7 @@ async def create_new_tenant_and_user(
             hashed_password=hashed_password, google_id=google_id,
             email_verified=email_verified, full_name=full_name or email.split("@")[0],
             role="owner", created_at=utcnow(),
+            mfa_required_since=utcnow(),   # Item #13: owners must enrol within the grace period
         )
         db.add(user)
         await db.commit()
@@ -339,7 +363,13 @@ async def switch_workspace(
         user = r.scalars().first()
         if user is None:
             return None
-        token = await issue_token_and_remember(user, "switch_workspace")
+        # The caller proved identity for the CURRENT tenant's account; the
+        # target tenant's account is a separate row that may have MFA
+        # enabled independently, so it gets the same second-factor gate.
+        session = await establish_session(user, "switch_workspace")
+        if session["status"] == "mfa_required":
+            return session
+        token = session["token"]
 
     from modules.governance.audit_trail import AuditTrail
     await AuditTrail(from_tenant_id).log_action(
@@ -377,18 +407,11 @@ async def resolve_password_login(email: str, password: str, tenant_id: Optional[
     if not matches:
         return {"status": "invalid"}
     if len(matches) == 1:
-        user = matches[0]
-        return {
-            "status": "single", "token": await issue_token_and_remember(user, "password"),
-            "user_id": user.id, "tenant_id": user.tenant_id,
-        }
+        return await establish_session(matches[0], "password")
 
     remembered = await _match_remembered(email, matches)
     if remembered:
-        return {
-            "status": "single", "token": await issue_token_and_remember(remembered, "password"),
-            "user_id": remembered.id, "tenant_id": remembered.tenant_id,
-        }
+        return await establish_session(remembered, "password")
 
     async with AsyncSessionLocal() as db:
         tr = await db.execute(select(Tenant).where(Tenant.id.in_([u.tenant_id for u in matches])))
@@ -469,10 +492,7 @@ async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_
         db.add(user)
         await db.commit()
 
-    return {
-        "status": "single", "token": await issue_token_and_remember(user, auth_method),
-        "user_id": user.id, "tenant_id": user.tenant_id,
-    }
+    return await establish_session(user, auth_method)
 
 
 # ---------------------------------------------------------------------------

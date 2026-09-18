@@ -163,6 +163,8 @@ async def accept_invite(*, token: str, password: str, full_name: str) -> dict:
             hashed_password=hash_password(password), email_verified=False,
             full_name=full_name or invite.email.split("@")[0],
             role=invite.role, created_at=utcnow(),
+            # Item #13: an invite straight into owner/admin starts the MFA grace clock
+            mfa_required_since=utcnow() if invite.role in ("owner", "admin") else None,
         )
         db.add(user)
         invite.status = "accepted"

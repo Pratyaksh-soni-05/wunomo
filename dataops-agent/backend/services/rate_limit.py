@@ -111,6 +111,10 @@ UNAUTH_BACKSTOP_RPM_PER_IP = 240
 PREAUTH_PATHS = (
     "/api/v1/auth/login",
     "/api/v1/auth/register",
+    # Item #13: the MFA second step is pre-auth and a natural guessing target;
+    # same per-IP bucket as login, plus a per-challenge attempt cap in
+    # services/mfa_service.py.
+    "/api/v1/auth/mfa/verify",
     "/api/v1/auth/password-reset",
     "/api/v1/auth/forgot-password",
 )
