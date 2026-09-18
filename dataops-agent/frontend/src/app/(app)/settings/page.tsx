@@ -8,10 +8,12 @@ import {
 import {
   getToken, decodeUserFromToken, getSettings, updateSettings, getAiModels,
   createApiKey, listApiKeys, revokeApiKey, getOnboardingProfile, testSlackWebhook,
-  getMe, requestEmailVerifyCode, verifyEmailVerifyCode, saveSession, isChoose, isNoAccount,
+  getMe, requestEmailVerifyCode, verifyEmailVerifyCode, saveSession, isChoose, isNoAccount, isMfaRequired,
+  getMfaStatus, mfaSetup, mfaEnable, mfaDisable, mfaRegenerateBackupCodes, getToken as readToken, ApiError,
   type NotifyOn, type ApiKeyItem,
 } from "@/lib/api";
 import { applyTheme, getStoredTheme, resolveEffectiveTheme, type ThemePreference } from "@/lib/theme";
+import { QRCodeSVG } from "qrcode.react";
 import { formatApiDateOnly } from "@/lib/dates";
 import { applyTimezone, detectBrowserTimezone, timezoneOptionsWithDetected } from "@/lib/timezone";
 
@@ -25,6 +27,7 @@ const NOTIFY_ON_LABELS: Record<keyof NotifyOn, string> = {
 const TABS = [
   { id: "workspace", label: "Workspace" },
   { id: "profile", label: "Profile" },
+  { id: "security", label: "Security" },
   { id: "notifications", label: "Notifications" },
   { id: "ai-model", label: "AI Model" },
   { id: "theme", label: "Theme" },
@@ -74,6 +77,7 @@ export default function SettingsPage() {
             {tab === "ai-model" && (
               <AiModelTab token={token} current={s?.ai_model_override ?? null} canManage={canManage} onSave={(u) => saveMut.mutate(u)} saving={saveMut.isPending} />
             )}
+            {tab === "security" && <SecurityTab token={token} />}
             {tab === "theme" && <ThemeTab token={token} />}
             {tab === "api-keys" && <ApiKeysTab token={token} canManage={canManage} />}
           </>
@@ -218,7 +222,10 @@ function EmailVerificationCard({ token }: { token: string }) {
         toast.push("Couldn't verify — try requesting a new code.", "danger");
         return;
       }
-      saveSession(result.access_token, result.tenant_id, result.user_id);
+      // Item #13: the email is marked verified server-side before the session
+      // decision is made, so an MFA challenge here just means "keep the
+      // session you already have" -- the caller is logged in already.
+      if (!isMfaRequired(result)) saveSession(result.access_token, result.tenant_id, result.user_id);
       qc.invalidateQueries({ queryKey: ["me"] });
       toast.push("Email verified.", "success");
       setSent(false);
@@ -468,6 +475,147 @@ function AiModelTab({
             <Button size="sm" disabled={saving} onClick={() => onSave({ ai_model_override: value || null })}>
               {saving ? "Saving…" : "Save"}
             </Button>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+
+// ---------- Security (Item #13: MFA) ----------
+
+function SecurityTab({ token }: { token: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const status = useQuery({ queryKey: ["mfa-status"], queryFn: () => getMfaStatus(readToken() ?? token) });
+  const [setup, setSetup] = useState<{ secret: string; provisioning_uri: string } | null>(null);
+  const [code, setCode] = useState("");
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Enable / disable / regenerate each bump the token epoch server-side and
+  // hand back a fresh token; store it or the very next request is a 401.
+  function adoptToken(access_token: string) {
+    saveSession(access_token, localStorage.getItem("axiom_tenant_id") ?? "", localStorage.getItem("axiom_user_id") ?? "");
+  }
+  function fail(e: unknown, fallback: string) {
+    const d = e instanceof ApiError ? e.detail : null;
+    toast.push(typeof d === "string" ? d : fallback, "danger");
+  }
+
+  async function startSetup() {
+    setBusy(true);
+    try { setSetup(await mfaSetup(readToken() ?? token)); setCode(""); }
+    catch (e) { fail(e, "Could not start setup."); }
+    finally { setBusy(false); }
+  }
+
+  async function confirmEnable() {
+    setBusy(true);
+    try {
+      const r = await mfaEnable(readToken() ?? token, code);
+      adoptToken(r.access_token);
+      setBackupCodes(r.backup_codes);
+      setSetup(null); setCode("");
+      qc.invalidateQueries({ queryKey: ["mfa-status"] });
+      qc.invalidateQueries({ queryKey: ["me"] });
+      toast.push("Two-factor authentication is on. Other sessions have been signed out.", "success");
+    } catch (e) { fail(e, "That code was not accepted."); }
+    finally { setBusy(false); }
+  }
+
+  async function disable() {
+    setBusy(true);
+    try {
+      const r = await mfaDisable(readToken() ?? token, code);
+      adoptToken(r.access_token); setCode("");
+      qc.invalidateQueries({ queryKey: ["mfa-status"] });
+      qc.invalidateQueries({ queryKey: ["me"] });
+      toast.push("Two-factor authentication is off.", "default");
+    } catch (e) { fail(e, "Could not disable."); }
+    finally { setBusy(false); }
+  }
+
+  async function regenerate() {
+    setBusy(true);
+    try {
+      const r = await mfaRegenerateBackupCodes(readToken() ?? token, code);
+      adoptToken(r.access_token); setCode("");
+      setBackupCodes(r.backup_codes);
+      qc.invalidateQueries({ queryKey: ["mfa-status"] });
+      toast.push("New backup codes issued. The old ones no longer work.", "success");
+    } catch (e) { fail(e, "Could not regenerate."); }
+    finally { setBusy(false); }
+  }
+
+  const s = status.data;
+  return (
+    <Card>
+      <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 560 }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="font-medium">Two-factor authentication (TOTP)</div>
+            <p className="text-muted text-sm">
+              A 6-digit code from an authenticator app (Google Authenticator, 1Password, Authy…) is required at every login.
+            </p>
+          </div>
+          {s && <Badge variant={s.enabled ? "success" : s.overdue ? "danger" : s.required ? "warning" : "gray"}>
+            {s.enabled ? "On" : s.overdue ? "Required — overdue" : s.required ? "Required" : "Off"}
+          </Badge>}
+        </div>
+
+        {s && s.required && !s.enabled && (
+          <p className={`text-sm${s.overdue ? " text-danger" : ""}`}>
+            {s.overdue
+              ? "Your role requires two-factor authentication and the grace period has ended: everything except this page is blocked until you enable it."
+              : `Your role (owner/admin) requires two-factor authentication${s.enrollment_deadline ? ` by ${formatApiDateOnly(s.enrollment_deadline)}` : ""}.`}
+          </p>
+        )}
+
+        {backupCodes && (
+          <Card style={{ background: "var(--surface-hover)" }}>
+            <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="font-medium text-sm">Backup codes — save these now, they are not shown again</div>
+              <p className="text-muted text-xs">Each works once, in place of an authenticator code, if you lose your device.</p>
+              <pre className="code-block" style={{ fontSize: 13 }}>{backupCodes.join("\n")}</pre>
+              <div><Button size="sm" variant="secondary" onClick={() => setBackupCodes(null)}>I have saved them</Button></div>
+            </div>
+          </Card>
+        )}
+
+        {s && !s.enabled && !setup && (
+          <div><Button size="sm" disabled={busy} onClick={startSetup}>Set up two-factor authentication</Button></div>
+        )}
+
+        {setup && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <p className="text-sm">1. Scan this with your authenticator app:</p>
+            <div style={{ background: "#fff", padding: 12, borderRadius: 8, width: "fit-content" }}>
+              <QRCodeSVG value={setup.provisioning_uri} size={176} />
+            </div>
+            <p className="text-muted text-xs">Can&apos;t scan? Enter this key manually: <code className="mono">{setup.secret}</code></p>
+            <p className="text-sm">2. Enter the 6-digit code the app shows, to confirm it works:</p>
+            <div className="flex gap-2 items-end">
+              <Input label="Code" value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} placeholder="123456" />
+              <Button size="sm" disabled={busy || code.trim().length !== 6} onClick={confirmEnable}>Verify &amp; enable</Button>
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setSetup(null); setCode(""); }}>Cancel</Button>
+            </div>
+            <p className="text-muted text-xs">Nothing is enabled until a code from your app is accepted, so you can&apos;t lock yourself out with a key that never worked.</p>
+          </div>
+        )}
+
+        {s && s.enabled && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <p className="text-sm text-muted">Backup codes remaining: <strong>{s.backup_codes_remaining}</strong></p>
+            <div className="flex gap-2 items-end">
+              <Input label="Current code (authenticator or backup)" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456 or XXXXX-XXXXX" />
+              <Button size="sm" variant="secondary" disabled={busy || !code.trim()} onClick={regenerate}>New backup codes</Button>
+              {!s.required && (
+                <Button size="sm" variant="ghost" disabled={busy || !code.trim()} onClick={disable}>Turn off</Button>
+              )}
+            </div>
+            {s.required && <p className="text-muted text-xs">Two-factor authentication cannot be turned off for owners and admins.</p>}
           </div>
         )}
       </div>

@@ -8,7 +8,7 @@ import { AuthShell } from "@/components/auth/AuthShell";
 import { WorkspacePicker } from "@/components/auth/WorkspacePicker";
 import {
   register, requestEmailCode, verifyEmailCode, googleLoginUrl, resolveWorkspace,
-  saveSession, getOnboarding, isChoose, isNoAccount,
+  saveSession, getOnboarding, isChoose, isNoAccount, isMfaRequired,
   ApiError, type WorkspaceOption,
 } from "@/lib/api";
 
@@ -92,12 +92,24 @@ export default function SignupPage() {
         const resolutionToken = result.resolution_token;
         pendingResubmit.current = async (tenantId: string) => {
           const r = await resolveWorkspace(resolutionToken!, tenantId);
+          if (isMfaRequired(r)) {
+            // Item #13: the target account has MFA; the code box lives on /login.
+            try { sessionStorage.setItem("wunomo_mfa_token", r.mfa_token); } catch { /* storage unavailable */ }
+            router.replace("/login");
+            return;
+          }
           await completeAuth(r.access_token, r.tenant_id, r.user_id, router);
         };
         return;
       }
       if (isNoAccount(result)) {
         toast.push("Something went wrong creating your workspace. Try again.", "danger");
+        return;
+      }
+      if (isMfaRequired(result)) {
+        // An existing MFA-protected account for this email: finish on /login.
+        try { sessionStorage.setItem("wunomo_mfa_token", result.mfa_token); } catch { /* storage unavailable */ }
+        router.replace("/login");
         return;
       }
       await completeAuth(result.access_token, result.tenant_id, result.user_id, router);

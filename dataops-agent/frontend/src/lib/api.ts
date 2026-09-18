@@ -81,7 +81,17 @@ export interface NoAccount {
   detail: string;
 }
 
-export type IdentityResult = AuthSuccess | ChooseWorkspace | NoAccount;
+// Item #13: the first factor was accepted but the account has MFA enabled.
+// No access_token is issued until POST /auth/mfa/verify succeeds against
+// this short-lived, single-use challenge token.
+export interface MfaRequired {
+  status: "mfa_required";
+  mfa_token: string;
+  user_id: string;
+  tenant_id: string;
+}
+
+export type IdentityResult = AuthSuccess | ChooseWorkspace | NoAccount | MfaRequired;
 
 function isChoose(r: IdentityResult): r is ChooseWorkspace {
   return (r as ChooseWorkspace).status === "choose_workspace";
@@ -89,7 +99,51 @@ function isChoose(r: IdentityResult): r is ChooseWorkspace {
 function isNoAccount(r: IdentityResult): r is NoAccount {
   return (r as NoAccount).status === "no_account";
 }
-export { isChoose, isNoAccount };
+function isMfaRequired(r: IdentityResult): r is MfaRequired {
+  return (r as MfaRequired).status === "mfa_required";
+}
+export { isChoose, isNoAccount, isMfaRequired };
+
+// ---------- MFA (Item #13) ----------
+
+export function mfaVerify(mfa_token: string, code: string): Promise<AuthSuccess & { factor: "totp" | "backup"; backup_codes_remaining: number | null }> {
+  return request("/api/v1/auth/mfa/verify", { method: "POST", body: JSON.stringify({ mfa_token, code }) });
+}
+
+export interface MfaStatus {
+  enabled: boolean;
+  enabled_at: string | null;
+  backup_codes_remaining: number;
+  required: boolean;
+  enrollment_deadline: string | null;
+  overdue: boolean;
+}
+
+export function getMfaStatus(token: string): Promise<MfaStatus> {
+  return authedRequest("/api/v1/auth/mfa/status", token);
+}
+
+export function mfaSetup(token: string): Promise<{ secret: string; provisioning_uri: string; expires_in: number }> {
+  return request("/api/v1/auth/mfa/setup", { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
+export function mfaEnable(token: string, code: string): Promise<{ enabled: true; backup_codes: string[]; access_token: string }> {
+  return request("/api/v1/auth/mfa/enable", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ code }),
+  });
+}
+
+export function mfaDisable(token: string, code: string): Promise<{ enabled: false; access_token: string }> {
+  return request("/api/v1/auth/mfa/disable", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ code }),
+  });
+}
+
+export function mfaRegenerateBackupCodes(token: string, code: string): Promise<{ backup_codes: string[]; access_token: string }> {
+  return request("/api/v1/auth/mfa/backup-codes/regenerate", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ code }),
+  });
+}
 
 // ---------- Password ----------
 
@@ -106,7 +160,7 @@ export async function login(
   username: string,
   password: string,
   tenant_id?: string
-): Promise<AuthSuccess | ChooseWorkspace> {
+): Promise<AuthSuccess | ChooseWorkspace | MfaRequired> {
   const form = new URLSearchParams();
   form.set("username", username);
   form.set("password", password);
@@ -154,7 +208,7 @@ export async function googleCallback(params: {
   return request("/api/v1/auth/google/callback", { method: "POST", body: JSON.stringify(params) });
 }
 
-export async function resolveWorkspace(resolution_token: string, tenant_id: string): Promise<AuthSuccess> {
+export async function resolveWorkspace(resolution_token: string, tenant_id: string): Promise<AuthSuccess | MfaRequired> {
   return request("/api/v1/auth/resolve-workspace", {
     method: "POST",
     body: JSON.stringify({ resolution_token, tenant_id }),

@@ -8,7 +8,7 @@ import { AuthShell } from "@/components/auth/AuthShell";
 import { WorkspacePicker } from "@/components/auth/WorkspacePicker";
 import {
   login, requestEmailCode, verifyEmailCode, googleLoginUrl, resolveWorkspace,
-  saveSession, getOnboarding, isChoose, isNoAccount,
+  saveSession, getOnboarding, isChoose, isNoAccount, isMfaRequired, mfaVerify,
   ApiError, type WorkspaceOption,
 } from "@/lib/api";
 
@@ -31,6 +31,38 @@ export default function LoginPage() {
   const [cooldown, setCooldown] = useState(0);
   const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceOption[] | null>(null);
   const pendingResubmit = useRef<((tenantId: string) => Promise<void>) | null>(null);
+  // Item #13: set when any first factor comes back "mfa_required"; the form
+  // then shows the code step and nothing else until verify succeeds.
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
+
+  useEffect(() => {
+    // The Google callback page cannot show a code box itself; it parks the
+    // challenge here and redirects.
+    try {
+      const parked = sessionStorage.getItem("wunomo_mfa_token");
+      if (parked) { sessionStorage.removeItem("wunomo_mfa_token"); setMfaToken(parked); }
+    } catch { /* storage unavailable */ }
+  }, []);
+
+  async function handleMfaSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!mfaToken) return;
+    setLoading(true);
+    try {
+      const r = await mfaVerify(mfaToken, mfaCode);
+      if (r.factor === "backup") {
+        toast.push(`Signed in with a backup code. ${r.backup_codes_remaining ?? 0} left.`, "warning");
+      }
+      await completeLogin(r.access_token, r.tenant_id, r.user_id, router);
+    } catch (err) {
+      const msg = err instanceof ApiError ? String(err.detail ?? "Incorrect code") : "Verification failed";
+      toast.push(msg, "danger");
+      if (/log in again/i.test(msg)) { setMfaToken(null); setMfaCode(""); }
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -56,10 +88,12 @@ export default function LoginPage() {
         setWorkspaceOptions(result.options);
         pendingResubmit.current = async (tenantId: string) => {
           const r = await login(email, password, tenantId);
+          if (isMfaRequired(r)) { setMfaToken(r.mfa_token); return; }
           if (!isChoose(r)) await completeLogin(r.access_token, r.tenant_id, r.user_id, router);
         };
         return;
       }
+      if (isMfaRequired(result)) { setMfaToken(result.mfa_token); return; }
       await completeLogin(result.access_token, result.tenant_id, result.user_id, router);
     } catch (err) {
       toast.push(err instanceof ApiError ? String(err.detail ?? "Invalid credentials") : "Login failed", "danger");
@@ -99,6 +133,7 @@ export default function LoginPage() {
           // The code is already single-use consumed at this point — finalize
           // against the resolution token, not by resubmitting the code.
           const r = await resolveWorkspace(resolutionToken!, tenantId);
+          if (isMfaRequired(r)) { setMfaToken(r.mfa_token); return; }
           await completeLogin(r.access_token, r.tenant_id, r.user_id, router);
         };
         return;
@@ -107,6 +142,7 @@ export default function LoginPage() {
         toast.push("No workspace found for this email. Sign up instead.", "warning");
         return;
       }
+      if (isMfaRequired(result)) { setMfaToken(result.mfa_token); return; }
       await completeLogin(result.access_token, result.tenant_id, result.user_id, router);
     } catch {
       toast.push("Invalid or expired code.", "danger");
@@ -143,7 +179,21 @@ export default function LoginPage() {
       <h2>Log in</h2>
       <p className="auth-subtitle">Access your workspace</p>
 
-      {mode === "password" && (
+      {mfaToken && (
+        <form onSubmit={handleMfaSubmit} className="flex flex-col gap-3">
+          <p className="text-sm text-muted">
+            Two-factor authentication is on for this account. Enter the 6-digit code from your authenticator app, or one of your backup codes.
+          </p>
+          <Input id="login-mfa-code" label="Authentication code" required autoFocus value={mfaCode}
+                 onChange={(e) => setMfaCode(e.target.value)} placeholder="123456 or XXXXX-XXXXX" />
+          <Button type="submit" disabled={loading} className="w-full mt-2">Verify &amp; log in</Button>
+          <button type="button" className="auth-link-btn" onClick={() => { setMfaToken(null); setMfaCode(""); }}>
+            Start over
+          </button>
+        </form>
+      )}
+
+      {!mfaToken && mode === "password" && (
         <form onSubmit={handlePasswordSubmit} className="flex flex-col gap-3">
           <Input id="login-email" label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           <Input id="login-password" label="Password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
@@ -154,7 +204,7 @@ export default function LoginPage() {
         </form>
       )}
 
-      {mode === "code-request" && (
+      {!mfaToken && mode === "code-request" && (
         <form onSubmit={handleRequestCode} className="flex flex-col gap-3">
           <Input id="login-code-email" label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           <Button type="submit" disabled={loading} className="w-full mt-2">Send code</Button>
@@ -164,7 +214,7 @@ export default function LoginPage() {
         </form>
       )}
 
-      {mode === "code-verify" && (
+      {!mfaToken && mode === "code-verify" && (
         <form onSubmit={handleVerifyCode} className="flex flex-col gap-3">
           <p className="text-sm text-muted">Enter the 6-digit code sent to {email}</p>
           <Input id="login-code" label="Code" required value={code} onChange={(e) => setCode(e.target.value)} maxLength={6} />

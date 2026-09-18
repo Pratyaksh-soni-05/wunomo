@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui";
 import { WorkspacePicker } from "@/components/auth/WorkspacePicker";
 import {
   googleCallback, resolveWorkspace, saveSession, getOnboarding,
-  isChoose, ApiError, type WorkspaceOption,
+  isChoose, isMfaRequired, ApiError, type WorkspaceOption,
 } from "@/lib/api";
 
 async function completeAuth(token: string, tenantId: string, userId: string, router: ReturnType<typeof useRouter>) {
@@ -47,11 +47,24 @@ function GoogleCallbackInner() {
 
     googleCallback({ code, state, new_tenant_name })
       .then(async (result) => {
+        if (isMfaRequired(result)) {
+          // Item #13: Google proved the first factor; the code box lives on
+          // /login, which picks the challenge up from sessionStorage.
+          try { sessionStorage.setItem("wunomo_mfa_token", result.mfa_token); } catch { /* storage unavailable */ }
+          router.replace("/login");
+          return;
+        }
         if (isChoose(result)) {
           setWorkspaceOptions(result.options);
           const resolutionToken = result.resolution_token;
           pendingResubmit.current = async (tenantId: string) => {
             const r = await resolveWorkspace(resolutionToken!, tenantId);
+            if (isMfaRequired(r)) {
+              // Item #13: the target account has MFA; the code box lives on /login.
+              try { sessionStorage.setItem("wunomo_mfa_token", r.mfa_token); } catch { /* storage unavailable */ }
+              router.replace("/login");
+              return;
+            }
             await completeAuth(r.access_token, r.tenant_id, r.user_id, router);
           };
           return;
