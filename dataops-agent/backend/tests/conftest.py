@@ -53,7 +53,10 @@ async def _reset_rate_limit_state():
     """
     import services.auth_service as auth_service
     redis = auth_service._redis()
-    for pattern in ("otp:*", "rl:*", "revoked:*"):
+    # `mfa:*` (Item #13): pending secrets, login challenges and the TOTP
+    # replay guard -- a used-code guard left over from one test would reject
+    # the same 30-second code in the next.
+    for pattern in ("otp:*", "rl:*", "revoked:*", "mfa:*"):
         async for key in redis.scan_iter(match=pattern):
             await redis.delete(key)
     yield
