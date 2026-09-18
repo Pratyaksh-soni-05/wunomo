@@ -130,6 +130,24 @@ class User(Base):
     # applied to personality_mode/operation_mode (Phase 3 decisions):
     # read fresh from the DB per-request via GET /auth/me instead.
     theme = Column(String(20), nullable=True)  # "light" | "dark" | "system" | None (unset)
+    # ── MFA / TOTP (Security Master Ranking Item #13) ────────────────────
+    # The TOTP secret goes through EncryptedJSON -- the same Fernet column
+    # type Item #1 built for source credentials -- as {"secret": "<base32>"}.
+    # Anyone who can read the secret can mint valid codes forever, so it is
+    # exactly as sensitive as a stored password and gets the same at-rest
+    # treatment. It is only written once a code from the user's app has been
+    # verified against it (the pending secret lives in Redis until then), so
+    # mfa_secret set <=> mfa_enabled; the boolean exists for cheap queries.
+    mfa_secret = Column(EncryptedJSON, nullable=True)
+    mfa_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    mfa_enabled_at = Column(DateTime, nullable=True)
+    # One-time recovery codes: keyed HMAC-SHA256 digests, never the codes.
+    # Removed from the list on use, so each is single-use by construction.
+    mfa_backup_codes = Column(JSON, nullable=True)
+    # When MFA became mandatory for this user (owner/admin): set on signup
+    # as owner, on promotion to owner/admin, and backfilled at deploy for
+    # existing holders. The enrolment deadline is this + MFA_GRACE_DAYS.
+    mfa_required_since = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     __table_args__ = (UniqueConstraint("tenant_id", "email"),)
     tenant = relationship("Tenant", back_populates="users")

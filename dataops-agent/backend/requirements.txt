@@ -64,6 +64,9 @@ requests==2.32.5
 # ─── Auth / Security ──────────────────────────────────────────────────────────
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# TOTP for MFA (Security Master Ranking Item #13). RFC 6238 only; secrets are
+# stored through the same Fernet column type as source credentials.
+pyotp==2.9.0
 # Fernet, for encrypting DataSource.connection_config credentials at rest
 # (services/encryption_service.py). Already present transitively via
 # python-jose[cryptography], but pinned explicitly here because it is now a
