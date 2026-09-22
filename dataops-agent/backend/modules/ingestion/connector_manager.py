@@ -1,3 +1,4 @@
+import os
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -11,10 +12,41 @@ from services import pii_classifier
 from models.all_models import DataSource, SourceType
 from config import settings
 from services.tenant_context import tenant_scoped
+from services.source_lock import acquire_source_lock, describe_holder, format_lock_denial, SourceLockHeld
 
 log = structlog.get_logger()
 
 def utcnow(): return datetime.now(timezone.utc).replace(tzinfo=None)
+
+# Canonical upload directory -- api/v1/uploads.py imports this rather than
+# defining its own copy, so there's exactly one place a file a human
+# actually uploaded can live. This is also what makes a file_path
+# "attach-only" checkable at all (see _resolve_uploaded_file_path below) --
+# an agent can reference a real upload, never an arbitrary path elsewhere
+# on the container's filesystem.
+UPLOAD_DIR = os.path.join(os.path.expanduser("~"), "dataops_uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def _resolve_uploaded_file_path(file_path: str) -> Path:
+    """Resolves file_path to a real file that's actually sitting under
+    UPLOAD_DIR -- i.e. something a human already put there via
+    POST /api/v1/uploads/ -- raising ValueError otherwise. This is the
+    entire enforcement mechanism behind "attach-only": ingest_file and
+    register_data_source (both chat-callable, both LLM-supplied paths)
+    can only ever reference a file that genuinely exists here, never an
+    arbitrary filesystem path (e.g. a path-traversal read of something
+    outside the upload directory)."""
+    resolved = Path(file_path).resolve()
+    upload_root = Path(UPLOAD_DIR).resolve()
+    if not resolved.is_relative_to(upload_root):
+        raise ValueError(
+            "file_path must be a file already uploaded via POST /api/v1/uploads/, "
+            "not an arbitrary path."
+        )
+    if not resolved.is_file():
+        raise ValueError(f"No uploaded file found at {file_path}.")
+    return resolved
 
 # Security guard: never let a tenant-registered source point at the app's own
 # control-plane database — that's every tenant's data, not just theirs.
@@ -32,6 +64,15 @@ SUPPORTED_EXTS = {
     "csv": SourceType.CSV, "xlsx": SourceType.EXCEL, "xls": SourceType.EXCEL,
     "json": SourceType.JSON, "pdf": SourceType.PDF, "docx": SourceType.DOCX
 }
+
+# PDF/DOCX can be parsed for text (see _ingest_pdf/_ingest_docx below) but
+# _get_connector has no branch for them -- registering one as a DataSource
+# succeeds today and only fails later, the first time anything (sync_source,
+# a scheduled pipeline run) tries to actually use it. Rejected at the one
+# chokepoint both upload_and_register (api/v1/uploads.py) and the
+# register_data_source chat tool funnel through, so neither path can create
+# this time bomb.
+_NO_CONNECTOR_TYPES = {SourceType.PDF, SourceType.DOCX}
 
 
 @tenant_scoped
@@ -69,6 +110,19 @@ class ConnectorManager:
             return {"error": "This connection points at the application's own internal "
                               "database, which holds every tenant's data. Registering it "
                               "as a source is not allowed."}
+        try:
+            resolved_type = SourceType(source_type)
+        except ValueError:
+            return {"error": f"Unknown source_type: {source_type}", "status_code": 422}
+        if resolved_type in _NO_CONNECTOR_TYPES:
+            return {
+                "error": f"{resolved_type.value} has no working connector yet -- its text can "
+                         f"be extracted (see ingest_file), but there's no destination data "
+                         f"model to sync or profile it into. Registering it as a source would "
+                         f"succeed now and only fail later, the first time anything tries to "
+                         f"sync or profile it.",
+                "status_code": 422,
+            }
         async with AsyncSessionLocal() as db:
             existing = await db.execute(select(DataSource).where(
                 DataSource.tenant_id == self.tenant_id,
@@ -102,9 +156,41 @@ class ConnectorManager:
 
             return {"id": source.id, "name": source.name, "source_type": source_type, "status": "registered"}
 
+    # ── REGISTER AN UPLOADED FILE (attach-only) ─────────────────────────────────
+    async def register_uploaded_file(self, name: str, file_path: str) -> dict:
+        """Wunomo Projects Phase 2, item 5: the chat-callable half of
+        register_data_source. file_path must resolve to a real file already
+        sitting under UPLOAD_DIR (see _resolve_uploaded_file_path) -- an
+        agent can attach an existing upload as a source, never invent a
+        source_type or connection_config the way the raw register_source()
+        call still allows callers who already have real, non-agent-supplied
+        values for those (api/v1/sources.py's POST /). Both are derived
+        here from the real file on disk instead."""
+        try:
+            resolved = _resolve_uploaded_file_path(file_path)
+        except ValueError as e:
+            return {"error": str(e), "status_code": 422}
+        ext = resolved.suffix.lower().lstrip(".")
+        source_type = SUPPORTED_EXTS.get(ext)
+        if source_type is None:
+            return {"error": f"Unsupported file type: .{ext}", "status_code": 422}
+        return await self.register_source(
+            name=name, source_type=source_type.value,
+            connection_config={"file_path": str(resolved), "original_name": resolved.name},
+        )
+
     # ── INGEST FILE ───────────────────────────────────────────────────────────
-    async def ingest_file(self, file_path: str, source_type: str, pipeline_id: Optional[str] = None) -> dict:
-        ext = Path(file_path).suffix.lower().lstrip(".")
+    async def ingest_file(self, file_path: str, pipeline_id: Optional[str] = None) -> dict:
+        # pipeline_id is unused in this method's own body -- kept only so
+        # services/agent_scope.py's TOOL_SCOPE_RESOLUTION["ingest_file"] has
+        # a real arg to resolve against agent_sources. Removing it would
+        # silently make this tool unscopeable, not just unused.
+        try:
+            resolved = _resolve_uploaded_file_path(file_path)
+        except ValueError as e:
+            return {"file": file_path, "status": "error", "error": str(e)}
+        file_path = str(resolved)
+        ext = resolved.suffix.lower().lstrip(".")
         result = {"file": file_path, "type": ext, "status": "ingested", "rows": 0, "columns": []}
         try:
             if ext == "csv":
@@ -186,7 +272,7 @@ class ConnectorManager:
 
     # ── PREVIEW ───────────────────────────────────────────────────────────────
     async def preview(self, source_id: str, table: str = "main", limit: int = 50,
-                      for_llm: bool = False) -> dict:
+                       agent_id: Optional[str] = None, for_llm: bool = False) -> dict:
         """Sample rows, with sensitive columns enforced (Item #10).
 
         This is the one choke point both consumers of row data pass through:
@@ -206,26 +292,36 @@ class ConnectorManager:
             if not source or source.tenant_id != self.tenant_id:
                 return {"error": "Source not found"}
             snapshot = source.schema_snapshot
-        try:
-            connector = self._get_connector(source)
-            result = await connector.preview(table, limit)
-        except Exception as e:
-            return {"error": str(e), "source_id": source_id}
+            try:
+                async with acquire_source_lock(source_id, agent_id):
+                    connector = self._get_connector(source)
+                    result = await connector.preview(table, limit)
+            except SourceLockHeld as e:
+                holder = await describe_holder(db, e.holder_agent_id)
+                return {"error": format_lock_denial(source_id, holder, e.started_at_iso),
+                        "source_id": source_id, "lock_conflict": True}
+            except Exception as e:
+                return {"error": str(e), "source_id": source_id}
         return pii_classifier.enforce_on_result(result, snapshot, table, strip=for_llm)
 
     # ── SYNC ──────────────────────────────────────────────────────────────────
-    async def sync(self, source_id: str, mode: str = "incremental") -> dict:
+    async def sync(self, source_id: str, mode: str = "incremental", agent_id: Optional[str] = None) -> dict:
         async with AsyncSessionLocal() as db:
             source = await db.get(DataSource, source_id)
             if not source or source.tenant_id != self.tenant_id:
                 return {"error": "Source not found"}
             try:
-                connector = self._get_connector(source)
-                result = await connector.sync(mode)
-                source.last_profiled_at = utcnow()
-                await db.commit()
-                log.info("source_synced", source_id=source_id, mode=mode)
-                return result
+                async with acquire_source_lock(source_id, agent_id):
+                    connector = self._get_connector(source)
+                    result = await connector.sync(mode)
+                    source.last_profiled_at = utcnow()
+                    await db.commit()
+                    log.info("source_synced", source_id=source_id, mode=mode)
+                    return result
+            except SourceLockHeld as e:
+                holder = await describe_holder(db, e.holder_agent_id)
+                return {"error": format_lock_denial(source_id, holder, e.started_at_iso),
+                        "source_id": source_id, "status": "failed", "lock_conflict": True}
             except Exception as e:
                 log.error("sync_error", source_id=source_id, error=str(e))
                 return {"error": str(e), "source_id": source_id, "status": "failed"}

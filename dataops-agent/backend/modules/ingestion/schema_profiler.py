@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Optional
 from sqlalchemy import select
 import structlog
 
@@ -6,6 +7,7 @@ from database import AsyncSessionLocal
 from models.all_models import DataSource, SourceType
 from services import pii_classifier
 from services.tenant_context import tenant_scoped
+from services.source_lock import acquire_source_lock, describe_holder, format_lock_denial, SourceLockHeld
 
 log = structlog.get_logger()
 
@@ -14,9 +16,10 @@ def utcnow(): return datetime.now(timezone.utc).replace(tzinfo=None)
 
 @tenant_scoped
 class SchemaProfiler:
-    def __init__(self, tenant_id: str, source_id: str):
+    def __init__(self, tenant_id: str, source_id: str, agent_id: Optional[str] = None):
         self.tenant_id = tenant_id
         self.source_id = source_id
+        self.agent_id = agent_id
         # Transient per-call sample values, {table: {column: [values]}}, filled
         # by the profiler branches from data they already loaded and consumed
         # by _finalize(). Never persisted: a snapshot holding sample PII would
@@ -45,20 +48,25 @@ class SchemaProfiler:
             if not source:
                 return {"error": "Source not found"}
             try:
-                schema = await self._profile_source(source)
-                old_snapshot = source.schema_snapshot or {}
-                schema = self._finalize(schema, old_snapshot)
-                source.schema_snapshot = schema
-                source.last_profiled_at = utcnow()
-                await db.commit()
-                log.info("schema_profiled", source_id=self.source_id)
-                return {
-                    "source_id": self.source_id,
-                    "source_name": source.name,
-                    "source_type": source.source_type,
-                    "profiled_at": utcnow().isoformat(),
-                    "schema": schema
-                }
+                async with acquire_source_lock(self.source_id, self.agent_id):
+                    schema = await self._profile_source(source)
+                    old_snapshot = source.schema_snapshot or {}
+                    schema = self._finalize(schema, old_snapshot)
+                    source.schema_snapshot = schema
+                    source.last_profiled_at = utcnow()
+                    await db.commit()
+                    log.info("schema_profiled", source_id=self.source_id)
+                    return {
+                        "source_id": self.source_id,
+                        "source_name": source.name,
+                        "source_type": source.source_type,
+                        "profiled_at": utcnow().isoformat(),
+                        "schema": schema
+                    }
+            except SourceLockHeld as e:
+                holder = await describe_holder(db, e.holder_agent_id)
+                return {"error": format_lock_denial(self.source_id, holder, e.started_at_iso),
+                        "source_id": self.source_id, "lock_conflict": True}
             except Exception as e:
                 log.error("profile_error", source_id=self.source_id, error=str(e))
                 return {"error": str(e), "source_id": self.source_id}
@@ -72,13 +80,18 @@ class SchemaProfiler:
             if not old:
                 return {"message": "No previous snapshot. Run profile first.", "drift": False}
             try:
-                current = await self._profile_source(source)
-                drift = self._compare_schemas(old, current)
-                if drift["has_drift"]:
-                    source.schema_snapshot = self._finalize(current, old)
-                    source.last_profiled_at = utcnow()
-                    await db.commit()
-                return drift
+                async with acquire_source_lock(self.source_id, self.agent_id):
+                    current = await self._profile_source(source)
+                    drift = self._compare_schemas(old, current)
+                    if drift["has_drift"]:
+                        source.schema_snapshot = self._finalize(current, old)
+                        source.last_profiled_at = utcnow()
+                        await db.commit()
+                    return drift
+            except SourceLockHeld as e:
+                holder = await describe_holder(db, e.holder_agent_id)
+                return {"error": format_lock_denial(self.source_id, holder, e.started_at_iso),
+                        "lock_conflict": True}
             except Exception as e:
                 return {"error": str(e)}
 
