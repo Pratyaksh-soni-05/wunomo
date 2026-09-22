@@ -153,12 +153,24 @@ async def deactivate_schedule(db, schedule: ScheduledAgentTask, cause: str, mess
     await _notify_schedule_deactivated(schedule, cause, message)
 
 
-async def fire_scheduled_task(schedule_id: str) -> dict:
+async def fire_scheduled_task(schedule_id: str, tenant_id: str) -> dict:
     """The real per-schedule work dispatched by check_scheduled_agent_tasks
     (services/tasks.py) -- one Celery subtask per due schedule, the same
     dispatch-not-inline pattern check_scheduled_pipelines/
     advance_active_tasks already established (item 74's own lesson: never
     do the real work inline in the beat tick itself).
+
+    tenant_id (Integration Phase 4 fix): the caller (services/tasks.py's
+    fire_scheduled_agent_task) already establishes this tenant's RLS
+    context via tenant_context(tenant_id) before calling in, so the lookup
+    below would already be correctly scoped by RLS alone -- the explicit
+    filter here is defense in depth, the same belt-and-suspenders pattern
+    every other tenant-scoped lookup in this codebase already uses (e.g.
+    SchemaProfiler._get_source's DataSource.id == ... AND tenant_id == ...),
+    not something RLS makes redundant. Before this fix, no tenant context
+    was ever established around this function at all, and the id-alone
+    lookup silently returned nothing for every schedule, always -- see
+    GOTCHAS.md's Phase 3 TEST C entry.
 
     Skips (no Task created, no notification -- this is normal, expected
     behavior, not a failure) while a previous Task from this same
@@ -167,7 +179,9 @@ async def fire_scheduled_task(schedule_id: str) -> dict:
     fourth pending approval before the first's 48-hour window even
     closes."""
     async with AsyncSessionLocal() as db:
-        r = await db.execute(select(ScheduledAgentTask).where(ScheduledAgentTask.id == schedule_id))
+        r = await db.execute(select(ScheduledAgentTask).where(
+            ScheduledAgentTask.id == schedule_id, ScheduledAgentTask.tenant_id == tenant_id,
+        ))
         schedule = r.scalar_one_or_none()
         if schedule is None or not schedule.active:
             return {"outcome": "not_found_or_inactive"}
@@ -207,7 +221,8 @@ async def fire_scheduled_task(schedule_id: str) -> dict:
         db.add(task)
         await db.flush()
         db.add(TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=0, description=schedule.description,
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=task.tenant_id, step_index=0,
+            description=schedule.description,
             source=TaskStepSource.SCHEDULED, tool_name=schedule.tool_name,
             tool_args=schedule.tool_args or {}, status=TaskStepStatus.PENDING,
         ))

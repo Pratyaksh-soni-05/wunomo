@@ -444,13 +444,23 @@ async def _check_scheduled_agent_tasks() -> int:
     from sqlalchemy import select
     from database import AsyncSessionLocal
     from models.all_models import ScheduledAgentTask
+    from services.tenant_context import async_tenant_context
     from croniter import croniter
 
     now = utcnow().replace(second=0, microsecond=0)
 
-    async with AsyncSessionLocal() as db:
-        r = await db.execute(select(ScheduledAgentTask).where(ScheduledAgentTask.active.is_(True)))
-        schedules = r.scalars().all()
+    # Same shape as _check_scheduled_pipelines() above: scheduled_agent_tasks
+    # is RLS-protected (Integration Phase 2, step 5), so the unscoped
+    # `select(...).where(active.is_(True))` this used to run always returned
+    # zero rows under current_tenant_id='' -- confirmed live (Phase 3 TEST C)
+    # before this fix, every schedule silently never fired, forever, with no
+    # error anywhere. One explicitly-scoped pass per tenant instead.
+    schedules = []
+    for tenant_id in await _list_active_tenant_ids():
+        async with async_tenant_context(tenant_id):
+            async with AsyncSessionLocal() as db:
+                r = await db.execute(select(ScheduledAgentTask).where(ScheduledAgentTask.active.is_(True)))
+                schedules.extend(r.scalars().all())
 
     fired = 0
     for s in schedules:
@@ -464,7 +474,7 @@ async def _check_scheduled_agent_tasks() -> int:
             continue
         if not is_due:
             continue
-        fire_scheduled_agent_task.delay(s.id)
+        fire_scheduled_agent_task.delay(s.id, s.tenant_id)
         fired += 1
         log.info("scheduled_agent_task_dispatched", schedule_id=s.id, agent_id=s.agent_id, cron=cron)
 
@@ -472,21 +482,35 @@ async def _check_scheduled_agent_tasks() -> int:
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def fire_scheduled_agent_task(self, schedule_id: str):
+def fire_scheduled_agent_task(self, schedule_id: str, tenant_id: str):
     """The real per-schedule work, dispatched by check_scheduled_agent_tasks
     above -- never run inline in the beat/scheduling process, same
     dispatch-per-item convention as advance_one_task/
-    execute_scheduled_pipeline_run."""
+    execute_scheduled_pipeline_run.
+
+    tenant_id (Integration Phase 4 fix): the scanner above already knows it
+    (it just read the row under that tenant's own scope) -- passed through
+    rather than rediscovered, the same way execute_scheduled_pipeline_run
+    takes tenant_id as its own argument instead of trying to look up a
+    pipeline by id alone. fire_scheduled_task() looking up the schedule by
+    id alone, with no tenant context ever established around it, is exactly
+    what made this fail closed before: RLS hid the row from every caller,
+    always, not just under concurrent load."""
     import asyncio
     from database import engine
+    from services.tenant_context import tenant_context
     from modules.orchestration.scheduled_tasks import fire_scheduled_task
 
     async def _run():
         await engine.dispose()
-        return await fire_scheduled_task(schedule_id)
+        return await fire_scheduled_task(schedule_id, tenant_id)
 
     try:
-        outcome = asyncio.run(_run())
+        # Same reasoning as execute_scheduled_pipeline_run: the tenant comes
+        # from the task argument, set before the loop so every nested
+        # session inherits it.
+        with tenant_context(tenant_id):
+            outcome = asyncio.run(_run())
     except Exception as exc:
         log.error("fire_scheduled_agent_task_failed", schedule_id=schedule_id, error=str(exc))
         raise self.retry(exc=exc)
