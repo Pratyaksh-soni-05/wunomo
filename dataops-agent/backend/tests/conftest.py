@@ -135,11 +135,29 @@ _PARENT_QUERIES = [
     ("T", "SELECT id FROM tasks WHERE tenant_id = ANY(:ids)"),
     ("A", "SELECT id FROM approval_requests WHERE tenant_id = ANY(:ids)"),
     ("N", "SELECT id FROM lineage_nodes WHERE tenant_id = ANY(:ids)"),
+    # Wunomo Projects tables (Integration Phase 2, step 5): agent_instances/
+    # projects/channels all carry a direct tenant_id, so their own deletes
+    # below need no extra clause -- these three parent-id sets exist only
+    # for the four join tables (agent_sources/project_agents/channel_users/
+    # channel_agents) that have no tenant_id column of their own.
+    ("AG", "SELECT id FROM agent_instances WHERE tenant_id = ANY(:ids)"),
+    ("PR", "SELECT id FROM projects WHERE tenant_id = ANY(:ids)"),
+    ("CH", "SELECT id FROM channels WHERE tenant_id = ANY(:ids)"),
 ]
 
 # (table, extra WHERE clause using parent-id bind params). Children first;
 # order derived from the live FK graph.
 DELETION_PLAN = [
+    # Wunomo Projects tables, deleted before anything they reference.
+    # handoffs first of all: it FKs to tasks (from/to_task_id) as well as
+    # channels/projects/agent_instances (from/to_agent_id), so it must clear
+    # before every one of those parents, including the existing tasks
+    # delete below.
+    ("handoffs", None),
+    ("channel_users", "channel_id = ANY(:CH)"),
+    ("channel_agents", "channel_id = ANY(:CH) OR agent_id = ANY(:AG)"),
+    ("project_agents", "project_id = ANY(:PR) OR agent_id = ANY(:AG)"),
+    ("agent_sources", "agent_id = ANY(:AG) OR source_id = ANY(:S)"),
     ("lineage_edges", "upstream_id = ANY(:N) OR downstream_id = ANY(:N)"),
     ("lineage_nodes", None),
     ("data_contracts", "producer_source_id = ANY(:S)"),
@@ -151,6 +169,18 @@ DELETION_PLAN = [
     ("quality_rules", "pipeline_id = ANY(:P)"),
     ("task_steps", "task_id = ANY(:T) OR approval_request_id = ANY(:A)"),
     ("tasks", None),
+    # scheduled_agent_tasks after tasks: tasks.scheduled_agent_task_id FKs to
+    # this table, so it must still exist while tasks are deleted, then clear
+    # itself before agent_instances/users below.
+    ("scheduled_agent_tasks", None),
+    # channels/projects/agent_instances, in dependency order: channels
+    # (child of projects via nullable project_id, parent of the join tables
+    # already cleared above) before projects; agent_instances last of the
+    # three since it's the parent of every join table above plus
+    # scheduled_agent_tasks and tasks.agent_id, all already gone by here.
+    ("channels", None),
+    ("projects", None),
+    ("agent_instances", None),
     ("approval_requests", None),
     ("pipelines", "source_id = ANY(:S)"),
     ("data_sources", None),
@@ -172,6 +202,14 @@ DELETION_PLAN = [
     ("user_workspace_preferences", None),
     ("users", None),
 ]
+
+# Wunomo Projects join tables (agent_sources/project_agents/channel_users/
+# channel_agents): pure FK tables with no tenant_id column of their own, so
+# unlike every other DELETION_PLAN entry, their `extra` clause above IS the
+# complete WHERE, not something OR'd onto a `tenant_id = ANY(:ids)` base that
+# doesn't apply to them -- a bare `tenant_id = ANY(:ids)` against one of
+# these would fail outright with "column tenant_id does not exist".
+NO_TENANT_ID_COLUMN = {"agent_sources", "project_agents", "channel_users", "channel_agents"}
 
 
 def delete_tenants(conn, tenant_ids):
@@ -206,7 +244,10 @@ def delete_tenants(conn, tenant_ids):
     conn.execute(text("SET session_replication_role = replica"))
     try:
         for table, extra in DELETION_PLAN:
-            where = "tenant_id = ANY(:ids)" + (f" OR {extra}" if extra else "")
+            if table in NO_TENANT_ID_COLUMN:
+                where = extra
+            else:
+                where = "tenant_id = ANY(:ids)" + (f" OR {extra}" if extra else "")
             r = conn.execute(text(f"DELETE FROM {table} WHERE {where}"), params)
             if r.rowcount:
                 deleted[table] = r.rowcount
