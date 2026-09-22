@@ -104,6 +104,35 @@ function isMfaRequired(r: IdentityResult): r is MfaRequired {
 }
 export { isChoose, isNoAccount, isMfaRequired };
 
+// ---------- Enterprise SSO (Item #14) ----------
+
+export function ssoStart(email: string): Promise<{ url: string; state: string }> {
+  return request("/api/v1/auth/sso/start", { method: "POST", body: JSON.stringify({ email }) });
+}
+
+export function ssoCallback(params: { code: string; state: string }): Promise<AuthSuccess | MfaRequired> {
+  return request("/api/v1/auth/sso/callback", { method: "POST", body: JSON.stringify(params) });
+}
+
+export interface SsoConfig {
+  connection_id: string;
+  email_domain: string;
+  enabled: boolean;
+  satisfies_mfa: boolean;
+  configured_on_deployment?: boolean;
+  redirect_uri?: string;
+}
+
+export function getSsoConfig(token: string): Promise<SsoConfig> {
+  return authedRequest("/api/v1/auth/sso/config", token);
+}
+
+export function updateSsoConfig(token: string, cfg: Omit<SsoConfig, "configured_on_deployment" | "redirect_uri">): Promise<SsoConfig> {
+  return request("/api/v1/auth/sso/config", {
+    method: "PUT", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(cfg),
+  });
+}
+
 // ---------- MFA (Item #13) ----------
 
 export function mfaVerify(mfa_token: string, code: string): Promise<AuthSuccess & { factor: "totp" | "backup"; backup_codes_remaining: number | null }> {

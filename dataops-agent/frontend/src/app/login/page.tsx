@@ -8,11 +8,11 @@ import { AuthShell } from "@/components/auth/AuthShell";
 import { WorkspacePicker } from "@/components/auth/WorkspacePicker";
 import {
   login, requestEmailCode, verifyEmailCode, googleLoginUrl, resolveWorkspace,
-  saveSession, getOnboarding, isChoose, isNoAccount, isMfaRequired, mfaVerify,
+  saveSession, getOnboarding, isChoose, isNoAccount, isMfaRequired, mfaVerify, ssoStart,
   ApiError, type WorkspaceOption,
 } from "@/lib/api";
 
-type Mode = "password" | "code-request" | "code-verify";
+type Mode = "password" | "code-request" | "code-verify" | "sso";
 
 async function completeLogin(token: string, tenantId: string, userId: string, router: ReturnType<typeof useRouter>) {
   saveSession(token, tenantId, userId);
@@ -35,6 +35,24 @@ export default function LoginPage() {
   // then shows the code step and nothing else until verify succeeds.
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const [mfaCode, setMfaCode] = useState("");
+  // Item #14: SP-initiated enterprise SSO. The email's domain decides the
+  // workspace and its identity provider; the backend answers with the
+  // provider's authorize URL and the browser is sent there.
+  const [ssoEmail, setSsoEmail] = useState("");
+
+  async function handleSsoSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const { url } = await ssoStart(ssoEmail);
+      window.location.href = url;
+    } catch (err) {
+      const msg = err instanceof ApiError ? String(err.detail ?? "Single sign-on is not available.") : "Single sign-on failed.";
+      toast.push(msg, "danger");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     // The Google callback page cannot show a code box itself; it parks the
@@ -214,6 +232,17 @@ export default function LoginPage() {
         </form>
       )}
 
+      {!mfaToken && mode === "sso" && (
+        <form onSubmit={handleSsoSubmit} className="flex flex-col gap-3">
+          <p className="text-sm text-muted">Enter your work email. If your organisation uses single sign-on, you&apos;ll be sent to its identity provider.</p>
+          <Input id="login-sso-email" label="Work email" type="email" required value={ssoEmail} onChange={(e) => setSsoEmail(e.target.value)} />
+          <Button type="submit" disabled={loading} className="w-full mt-2">Continue with SSO</Button>
+          <button type="button" className="auth-link-btn" onClick={() => setMode("password")}>
+            Back to password
+          </button>
+        </form>
+      )}
+
       {!mfaToken && mode === "code-verify" && (
         <form onSubmit={handleVerifyCode} className="flex flex-col gap-3">
           <p className="text-sm text-muted">Enter the 6-digit code sent to {email}</p>
@@ -237,6 +266,11 @@ export default function LoginPage() {
 
       <div className="auth-divider">or</div>
       <Button variant="secondary" className="w-full" onClick={handleGoogle}>Continue with Google</Button>
+      {!mfaToken && mode !== "sso" && (
+        <button type="button" className="auth-link-btn" style={{ marginTop: 10 }} onClick={() => setMode("sso")}>
+          Continue with single sign-on (SSO)
+        </button>
+      )}
 
       <p className="auth-footer">
         Don&apos;t have a workspace? <Link href="/signup" className="auth-link-btn">Sign up</Link>

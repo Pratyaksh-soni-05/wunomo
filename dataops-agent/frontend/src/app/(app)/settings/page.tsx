@@ -10,6 +10,7 @@ import {
   createApiKey, listApiKeys, revokeApiKey, getOnboardingProfile, testSlackWebhook,
   getMe, requestEmailVerifyCode, verifyEmailVerifyCode, saveSession, isChoose, isNoAccount, isMfaRequired,
   getMfaStatus, mfaSetup, mfaEnable, mfaDisable, mfaRegenerateBackupCodes, getToken as readToken, ApiError,
+  getSsoConfig, updateSsoConfig, type SsoConfig,
   type NotifyOn, type ApiKeyItem,
 } from "@/lib/api";
 import { applyTheme, getStoredTheme, resolveEffectiveTheme, type ThemePreference } from "@/lib/theme";
@@ -77,7 +78,13 @@ export default function SettingsPage() {
             {tab === "ai-model" && (
               <AiModelTab token={token} current={s?.ai_model_override ?? null} canManage={canManage} onSave={(u) => saveMut.mutate(u)} saving={saveMut.isPending} />
             )}
-            {tab === "security" && <SecurityTab token={token} />}
+            {tab === "security" && (
+              <>
+                <SecurityTab token={token} />
+                <div style={{ height: 16 }} />
+                <SsoSection token={token} role={user?.role ?? ""} />
+              </>
+            )}
             {tab === "theme" && <ThemeTab token={token} />}
             {tab === "api-keys" && <ApiKeysTab token={token} canManage={canManage} />}
           </>
@@ -617,6 +624,89 @@ function SecurityTab({ token }: { token: string }) {
             </div>
             {s.required && <p className="text-muted text-xs">Two-factor authentication cannot be turned off for owners and admins.</p>}
           </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+
+// ---------- Enterprise SSO (Item #14) ----------
+
+function SsoSection({ token, role }: { token: string; role: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const canManage = role === "owner" || role === "admin";
+  const isOwner = role === "owner";
+  const cfg = useQuery({ queryKey: ["sso-config"], queryFn: () => getSsoConfig(readToken() ?? token), enabled: canManage });
+  const [form, setForm] = useState<SsoConfig | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { if (cfg.data && !form) setForm(cfg.data); }, [cfg.data, form]);
+
+  if (!canManage) return null;
+
+  async function save() {
+    if (!form) return;
+    setBusy(true);
+    try {
+      const saved = await updateSsoConfig(readToken() ?? token, {
+        connection_id: form.connection_id, email_domain: form.email_domain,
+        enabled: form.enabled, satisfies_mfa: form.satisfies_mfa,
+      });
+      setForm({ ...form, ...saved });
+      qc.invalidateQueries({ queryKey: ["sso-config"] });
+      toast.push("Single sign-on settings saved.", "success");
+    } catch (e) {
+      const d = e instanceof ApiError ? e.detail : null;
+      toast.push(typeof d === "string" ? d : "Could not save SSO settings.", "danger");
+    } finally { setBusy(false); }
+  }
+
+  const d = cfg.data;
+  return (
+    <Card>
+      <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 560 }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="font-medium">Enterprise single sign-on (SAML / OIDC via WorkOS)</div>
+            <p className="text-muted text-sm">
+              Let everyone at your organisation&apos;s email domain sign in through your identity provider (Okta, Azure AD, Google Workspace…).
+            </p>
+          </div>
+          {d && <Badge variant={d.enabled ? "success" : "gray"}>{d.enabled ? "On" : "Off"}</Badge>}
+        </div>
+
+        {d && d.configured_on_deployment === false && (
+          <p className="text-sm text-danger">SSO is not configured on this deployment (no WorkOS credentials), so it cannot be enabled here.</p>
+        )}
+
+        {form && (
+          <>
+            <Input label="WorkOS connection ID" value={form.connection_id} placeholder="conn_…"
+                   onChange={(e) => setForm({ ...form, connection_id: e.target.value })} />
+            <Input label="Email domain" value={form.email_domain} placeholder="acme.com"
+                   onChange={(e) => setForm({ ...form, email_domain: e.target.value })} />
+            <p className="text-muted text-xs">
+              Only sign-ins your identity provider asserts for exactly this domain are accepted. A first-time sign-in from this domain creates a Viewer account automatically.
+            </p>
+            {d?.redirect_uri && <p className="text-muted text-xs">Redirect URI to register in WorkOS: <code className="mono">{d.redirect_uri}</code></p>}
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
+              Enable single sign-on for this workspace
+            </label>
+            <label className="flex items-center gap-2 text-sm" title={isOwner ? "" : "Only an owner can change this"}>
+              <input type="checkbox" checked={form.satisfies_mfa} disabled={!isOwner}
+                     onChange={(e) => setForm({ ...form, satisfies_mfa: e.target.checked })} />
+              Trust the identity provider&apos;s MFA (skip Wunomo&apos;s authenticator step for SSO sign-ins)
+            </label>
+            <p className={`text-xs${form.satisfies_mfa ? " text-danger" : " text-muted"}`}>
+              {form.satisfies_mfa
+                ? "Weaker by design: SSO sessions will not be asked for a Wunomo authenticator code, and this counts as MFA for owners and admins on those sessions. Wunomo cannot verify that your identity provider actually enforced MFA. This choice is recorded in the audit log."
+                : "Default: SSO is a first factor. Accounts with two-factor authentication on still enter their authenticator code after signing in through the identity provider."}
+            </p>
+            <div><Button size="sm" disabled={busy} onClick={save}>Save SSO settings</Button></div>
+          </>
         )}
       </div>
     </Card>
