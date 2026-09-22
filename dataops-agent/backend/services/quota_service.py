@@ -62,22 +62,36 @@ was chosen for now. Expect it to be replaced by a real $/token table
 once Stripe billing is genuinely live and per-model pricing needs to be
 exact rather than approximate.
 
-Tier limit calibration (2026-07-18): the originally-proposed Starter cap
-(2,000 credits/mo) was checked against this project's own real dev/
-verification-tenant usage before any enforcement shipped, and found badly
-miscalibrated - several actively-reused verification tenants already
-showed 4,000-84,000 credits/mo from ordinary live-LLM-testing sessions
-under this exact formula (a single afternoon of Gemini/Groq
-live-verification work, not abuse). Recalibrated upward using that real
-usage data as the signal before shipping (Starter 25,000 / Growth
-100,000 / Scale 500,000), discounting the extreme high end as
-accumulated-across-many-sessions test-tenant reuse rather than one real
-customer's single month. Sources/runs/members limits were left as
-originally proposed - the same real-usage check found those already
-realistic (max observed: 5 sources, 1 member, 6 runs/mo across ~2,900
-dev/test tenants). Revisit all of these once real customer usage data
-exists - these are launch-time placeholders with a documented basis, not
-carved in stone.
+Tier limit calibration (2026-07-18) - CORRECTED 2026-09-03, read this
+before this paragraph ends up in a pricing doc: the originally-proposed
+Starter cap (2,000 credits/mo) was checked against usage from a handful
+of this project's own actively-reused internal verification tenants
+(a small number of hand-created accounts belonging to the team, used
+for live Gemini/Groq testing) before any enforcement shipped, and found
+badly miscalibrated - those tenants already showed 4,000-84,000
+credits/mo from ordinary live-LLM-testing sessions under this exact
+formula (a single afternoon of verification work, not abuse).
+Recalibrated upward using that handful of internal accounts as the
+signal (Starter 25,000 / Growth 100,000 / Scale 500,000), discounting
+the extreme high end as accumulated-across-many-sessions reuse rather
+than one real customer's single month. Sources/runs/members limits were
+left as originally proposed on the same basis (max observed: 5 sources,
+1 member, 6 runs/mo across ~2,900 tenant rows, at the time).
+
+This was never customer data, and the "~2,900 tenant rows" figure is
+now itself stale and misleading in the other direction: as of
+2026-09-03 this table holds 23,589 tenant rows, of which a real audit
+found 23,578 carry the pytest fixture's own @example.com email pattern
+and the remaining ~14 are all traceable to the team's own accounts
+(demo/QA/manual-verification tenants) - zero are an external signup.
+The count keeps growing by thousands per day purely from running this
+project's own test suite (4,987 new rows in a single day, 2026-09-02),
+with no teardown. Every number in this docstring, and any per-tenant
+aggregate computed against the `tenants` table today, reflects test-
+suite volume, not usage calibration of any kind. Recalibrate all of
+these against real customer usage once it exists - these remain
+launch-time placeholders, now with a corrected basis, not carved in
+stone.
 """
 from datetime import datetime, timezone
 from typing import Optional
@@ -86,7 +100,7 @@ from sqlalchemy import select, func
 
 from database import AsyncSessionLocal
 from models.all_models import (
-    ChatMessage, DataSource, LlmUsageEvent, Pipeline, PipelineRun, Task, TaskStep,
+    AgentInstance, ChatMessage, DataSource, LlmUsageEvent, Pipeline, PipelineRun, Task, TaskStep,
     Tenant, User,
 )
 from services.tenant_context import with_tenant_context
@@ -384,3 +398,76 @@ async def get_quota_status(tenant_id: str, resource: str) -> dict:
 
 async def get_all_quota_statuses(tenant_id: str) -> dict:
     return {resource: await get_quota_status(tenant_id, resource) for resource in QUOTA_RESOURCES}
+
+
+async def _agent_token_usage(db, agent_id: str) -> int:
+    """Raw token count (input+output, unweighted), not the tenant-level
+    "credits" formula (input*1 + output*3) - a human setting "Nova gets
+    40k tokens a month" means tokens, not a cost-weighted proxy for
+    tokens. Every llm_usage_events row already carries agent_id (Phase 0/
+    1's own threading work), so this is a live aggregate, same pattern as
+    _current_usage above, not a separately-maintained counter."""
+    r = await db.execute(
+        select(LlmUsageEvent.input_tokens, LlmUsageEvent.output_tokens).where(
+            LlmUsageEvent.agent_id == agent_id,
+            LlmUsageEvent.created_at >= _month_start(),
+        )
+    )
+    return sum((inp or 0) + (out or 0) for inp, out in r.all())
+
+
+async def get_agent_quota_status(agent_id: str) -> dict:
+    """The second gate (Wunomo Projects Phase 1, part two) alongside
+    get_quota_status("ai_credits") above - both must pass, this one
+    never replaces that one. AgentInstance.monthly_token_budget is
+    nullable: None means no agent-level ceiling, draw against the
+    tenant's plan-level quota only (the Phase 0 column comment's own
+    stated intent) - returned as an always-"ok", None-limit status,
+    same shape get_quota_status uses for the Scale plan's unlimited
+    data_sources, so callers can treat both the same way."""
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(AgentInstance.monthly_token_budget).where(AgentInstance.id == agent_id))
+        row = r.first()
+        budget = row[0] if row else None
+        if budget is None:
+            return {"resource": "agent_tokens", "used": 0, "limit": None, "percent": 0.0, "status": "ok"}
+        used = await _agent_token_usage(db, agent_id)
+
+    percent = round((used / budget) * 100, 1) if budget else 100.0
+    if used >= budget:
+        status = "exceeded"
+    elif used >= budget * WARNING_THRESHOLD:
+        status = "warning"
+    else:
+        status = "ok"
+    return {"resource": "agent_tokens", "used": used, "limit": budget, "percent": percent, "status": status}
+
+
+async def get_task_cost(db, tenant_id: str, task_id: str) -> dict:
+    """Wunomo Projects Phase 4, item 2: what a task actually spent, for
+    the task detail screen -- an agent that works unattended (item 71's
+    auto-advance loop) should show what it spent while nobody was
+    watching, not just that it finished. Reuses credits_for_event's
+    existing formula (the same "AI Credits" unit already shown on
+    Billing) rather than inventing a second cost metric -- tenant-scoped
+    for defense in depth even though task_id alone is already
+    effectively unique, matching every other query in this module.
+    Takes an already-open db session (called from within GET
+    /tasks/{id}'s own session, not a second round trip)."""
+    r = await db.execute(
+        select(LlmUsageEvent.input_tokens, LlmUsageEvent.output_tokens, LlmUsageEvent.reasoning_tokens)
+        .where(LlmUsageEvent.tenant_id == tenant_id, LlmUsageEvent.task_id == task_id)
+    )
+    rows = r.all()
+    input_tokens = sum(inp or 0 for inp, _out, _reason in rows)
+    output_tokens = sum(out or 0 for _inp, out, _reason in rows)
+    reasoning_tokens = sum(reason or 0 for _inp, _out, reason in rows)
+    credits = sum(credits_for_event(inp, out) for inp, out, _reason in rows)
+    return {
+        "llm_calls": len(rows),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "reasoning_tokens": reasoning_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "credits": credits,
+    }
