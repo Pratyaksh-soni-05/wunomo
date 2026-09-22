@@ -552,14 +552,22 @@ async def _prepare_agent_invocation(user_message, tenant_id, user_id, session_id
     return agent, inputs
 
 
-def _finalize_agent_result(final: dict, session_id: str) -> dict:
+def _finalize_agent_result(final: dict, session_id: str, tenant_id: str, user_id: str) -> dict:
     """Shared tail for run_agent() and run_agent_stream() — turns a
     compiled graph's final AgentState (whatever .ainvoke() returns, or
     whatever the astream_events() root on_chain_end event's data.output
     carries — same shape either way) into the response dict every
     persistence caller (api/v1/chat.py, both the buffered and streaming
     routes) already expects. Extracted verbatim from run_agent()'s old
-    tail — no behavior change for run_agent() itself."""
+    tail — no behavior change for run_agent() itself.
+
+    tenant_id/user_id added back (Integration Phase 2/3 fix, 2026-09-23):
+    the extraction that created this shared function dropped them from the
+    signature while the redact_identifiers() call below still referenced
+    them as free variables — a NameError on every single call, caught live
+    in Phase 3 testing (chat_stream.persistence_failed on every turn, both
+    the buffered and streaming routes, and the supervisor path too, since
+    all three share this function)."""
     last_ai = next((m for m in reversed(final["messages"]) if isinstance(m, AIMessage)), None)
     last_llm_call = next(
         (m for m in reversed(final["messages"])
@@ -621,7 +629,7 @@ async def run_agent(user_message, tenant_id, user_id, session_id, caller_role,
         personality_mode, operation_mode, history, context, agent_id,
     )
     final = await agent.ainvoke(inputs, config={"recursion_limit": AGENT_RECURSION_LIMIT})
-    return _finalize_agent_result(final, session_id)
+    return _finalize_agent_result(final, session_id, tenant_id, user_id)
 
 
 # --- Streaming (POST /api/v1/chat/stream only — POST /api/v1/chat/ is

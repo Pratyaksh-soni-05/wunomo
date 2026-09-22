@@ -390,7 +390,7 @@ async def _run_agent_and_persist_stream(
 
     try:
         if final_state is not None:
-            result = _finalize_agent_result(final_state, session_id)
+            result = _finalize_agent_result(final_state, session_id, tenant_id, user["sub"])
             new_messages = final_state["messages"][len(history):]
             tool_trace = _extract_tool_trace(
                 new_messages, result["pending_approvals"], result.get("role_denied", []),
