@@ -29,3 +29,13 @@ marketing-site/.next/
 # not shared configuration. Untracked but unignored until now, so a broad add
 # would have swept it in.
 .claude/settings.local.json
+
+# Next.js build output, any depth — covers dataops-agent/frontend/.next/ (the
+# actual app) the way marketing-site/.next/ above covers that sibling
+# product. No leading slash, so it also matches at any nesting depth; kept
+# alongside the narrower marketing-site/.next/ entry rather than replacing
+# it, since that entry's comment documents a real constraint (don't ignore
+# marketing-site/ itself) that's still true.
+.next/
+*.tsbuildinfo
+next-env.d.ts

@@ -50,6 +50,24 @@ celery_app.conf.beat_schedule = {
         "task": "services.tasks.anchor_audit_chains",
         "schedule": 86400.0,
     },
+    # Auto-advance loop (Wunomo Projects Phase 3, item 71/slice 10) -- same
+    # 60s cadence as check-scheduled-pipelines-1min above, deliberately not
+    # tighter: execute_next_step() itself already has its own internal
+    # retry-backoff sleeps, and a conservative interval keeps a runaway
+    # task's wall-clock/step-budget caps compressing into minutes rather
+    # than seconds if the caps ever need to fire.
+    "advance-active-tasks-1min": {
+        "task": "services.tasks.advance_active_tasks",
+        "schedule": 60.0,
+    },
+    # Per-agent scheduled work (Wunomo Projects Phase 4, slice 14) -- same
+    # 60s cadence and same reasoning as check-scheduled-pipelines-1min
+    # above: polls every ACTIVE ScheduledAgentTask directly against the DB
+    # each tick, cron-matched via croniter.
+    "check-scheduled-agent-tasks-1min": {
+        "task": "services.tasks.check_scheduled_agent_tasks",
+        "schedule": 60.0,
+    },
     "daily-reports-24hr": {
         "task": "services.tasks.generate_daily_reports",
         "schedule": 86400.0,

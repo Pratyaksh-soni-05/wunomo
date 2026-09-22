@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 from functools import lru_cache
 from typing import List
 from typing import Optional
@@ -101,6 +102,12 @@ class Settings(BaseSettings):
     GOOGLE_OAUTH_REDIRECT_URI: str = "http://localhost:3000/api/auth/callback/google"
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = ""
+    # Wunomo Projects Phase 2 frontend, slice 9: the first place a backend
+    # notification embeds a real, clickable link back into the app -- every
+    # earlier alert (incident, pipeline failure, stale sources) was plain
+    # text with no URL at all. Same default-localhost-3000 convention
+    # GOOGLE_OAUTH_REDIRECT_URI above already uses for "the frontend."
+    FRONTEND_URL: str = "http://localhost:3000"
 
     @field_validator("LLM_DATA_RESIDENCY_MODE")
     @classmethod
@@ -133,6 +140,25 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         extra = "ignore"
+
+    @model_validator(mode="after")
+    def _reject_dev_secret_defaults_outside_development(self) -> "Settings":
+        # These two defaults exist only so a fresh dev checkout boots without
+        # a .env file. They must never be the running value anywhere else.
+        if self.APP_ENV != "development":
+            if self.APP_SECRET_KEY == "dev-secret":
+                raise ValueError(
+                    f"APP_SECRET_KEY is still the committed dev default ('dev-secret') "
+                    f"while APP_ENV={self.APP_ENV!r}. Set a real APP_SECRET_KEY before "
+                    "running outside development."
+                )
+            if self.JWT_SECRET == "dev-jwt-secret":
+                raise ValueError(
+                    f"JWT_SECRET is still the committed dev default ('dev-jwt-secret') "
+                    f"while APP_ENV={self.APP_ENV!r}. Set a real JWT_SECRET before "
+                    "running outside development."
+                )
+        return self
 
 
 @lru_cache()

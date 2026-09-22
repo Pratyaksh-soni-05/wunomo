@@ -16,13 +16,13 @@ import pytest
 from sqlalchemy import select
 
 import api.v1.tasks as tasks_module
-from database import AsyncSessionLocal
 from models.all_models import (
     AgentEmployeeType, AgentInstance, AgentInstanceStatus, OperationMode, PersonalityMode,
     Task, TaskStatus, TaskStep, TaskStepStatus, User,
 )
 from modules.orchestration.task_executor import APPROVAL_PAUSE_TIMEOUT_HOURS
 from services.auth_service import hash_password, issue_token_for_user
+from services.tenant_context import tenant_session
 
 
 async def _register(client, prefix="taskallactive"):
@@ -36,7 +36,7 @@ async def _register(client, prefix="taskallactive"):
 
 
 async def _member(tenant_id, role, prefix="member"):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         user = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id,
             email=f"{prefix}-{uuid.uuid4().hex[:8]}@example.com",
@@ -64,8 +64,8 @@ async def _create_mocked_task(client, token, monkeypatch, goal="test goal"):
     return r.json()
 
 
-async def _set_status(task_id, status, **extra):
-    async with AsyncSessionLocal() as db:
+async def _set_status(tenant_id, task_id, status, **extra):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         task.status = status
@@ -75,7 +75,7 @@ async def _set_status(task_id, status, **extra):
 
 
 async def _attach_agent(tenant_id, task_id, name="Nova"):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         agent = AgentInstance(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name, employee_type=AgentEmployeeType.DATAOPS,
             personality=PersonalityMode.ENGINEER, operation_mode=OperationMode.ASSISTED,
@@ -126,12 +126,12 @@ async def test_all_never_leaks_another_tenants_tasks(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_active_excludes_terminal_statuses(client, monkeypatch):
-    token, _, _ = await _register(client, "activeterm")
+    token, tenant_id, _ = await _register(client, "activeterm")
     active_draft = await _create_mocked_task(client, token, monkeypatch, goal="still draft")
     done = await _create_mocked_task(client, token, monkeypatch, goal="done")
     failed = await _create_mocked_task(client, token, monkeypatch, goal="failed")
-    await _set_status(done["id"], TaskStatus.COMPLETED)
-    await _set_status(failed["id"], TaskStatus.FAILED)
+    await _set_status(tenant_id, done["id"], TaskStatus.COMPLETED)
+    await _set_status(tenant_id, failed["id"], TaskStatus.FAILED)
 
     r = await client.get("/api/v1/tasks/active", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
@@ -144,13 +144,13 @@ async def test_active_includes_paused_and_queued_states(client, monkeypatch):
     """A task needing approval or paused on a failed step still needs the
     user's attention -- it must appear, not be silently excluded just
     because nothing is currently executing."""
-    token, _, _ = await _register(client, "activepaused")
+    token, tenant_id, _ = await _register(client, "activepaused")
     needs_approval = await _create_mocked_task(client, token, monkeypatch, goal="needs approval")
     paused_failed = await _create_mocked_task(client, token, monkeypatch, goal="paused failed")
     queued = await _create_mocked_task(client, token, monkeypatch, goal="queued")
-    await _set_status(needs_approval["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=datetime.utcnow())
-    await _set_status(paused_failed["id"], TaskStatus.PAUSED_FAILED_STEP)
-    await _set_status(queued["id"], TaskStatus.QUEUED)
+    await _set_status(tenant_id, needs_approval["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=datetime.utcnow())
+    await _set_status(tenant_id, paused_failed["id"], TaskStatus.PAUSED_FAILED_STEP)
+    await _set_status(tenant_id, queued["id"], TaskStatus.QUEUED)
 
     r = await client.get("/api/v1/tasks/active", headers={"Authorization": f"Bearer {token}"})
     assert len(r.json()) == 3
@@ -209,18 +209,18 @@ async def test_active_derives_needs_attention_from_runnable_minus_active_not_a_h
     """The whole point of deriving instead of hardcoding: every status
     that isn't in RUNNABLE_TASK_STATUSES needs attention, including ones
     with no dedicated reason-text helper (PAUSED_PLAN_INVALID)."""
-    token, _, _ = await _register(client, "activederive")
+    token, tenant_id, _ = await _register(client, "activederive")
     draft = await _create_mocked_task(client, token, monkeypatch, goal="draft")
     approval = await _create_mocked_task(client, token, monkeypatch, goal="approval")
     failed = await _create_mocked_task(client, token, monkeypatch, goal="failed")
     invalid = await _create_mocked_task(client, token, monkeypatch, goal="invalid")
     running = await _create_mocked_task(client, token, monkeypatch, goal="running")
     quota = await _create_mocked_task(client, token, monkeypatch, goal="quota")
-    await _set_status(approval["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=datetime.utcnow())
-    await _set_status(failed["id"], TaskStatus.PAUSED_FAILED_STEP)
-    await _set_status(invalid["id"], TaskStatus.PAUSED_PLAN_INVALID)
-    await _set_status(running["id"], TaskStatus.RUNNING)
-    await _set_status(quota["id"], TaskStatus.PAUSED_QUOTA_EXCEEDED)
+    await _set_status(tenant_id, approval["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=datetime.utcnow())
+    await _set_status(tenant_id, failed["id"], TaskStatus.PAUSED_FAILED_STEP)
+    await _set_status(tenant_id, invalid["id"], TaskStatus.PAUSED_PLAN_INVALID)
+    await _set_status(tenant_id, running["id"], TaskStatus.RUNNING)
+    await _set_status(tenant_id, quota["id"], TaskStatus.PAUSED_QUOTA_EXCEEDED)
 
     r = await client.get("/api/v1/tasks/active", headers={"Authorization": f"Bearer {token}"})
     by_goal = {t["goal"]: t for t in r.json()}
@@ -234,14 +234,14 @@ async def test_active_derives_needs_attention_from_runnable_minus_active_not_a_h
 
 @pytest.mark.asyncio
 async def test_active_sorts_needs_attention_tiers_and_auto_advancing_last(client, monkeypatch):
-    token, _, _ = await _register(client, "activesort")
+    token, tenant_id, _ = await _register(client, "activesort")
     draft = await _create_mocked_task(client, token, monkeypatch, goal="draft")
     approval = await _create_mocked_task(client, token, monkeypatch, goal="approval")
     failed = await _create_mocked_task(client, token, monkeypatch, goal="failed")
     running = await _create_mocked_task(client, token, monkeypatch, goal="running")
-    await _set_status(approval["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=datetime.utcnow())
-    await _set_status(failed["id"], TaskStatus.PAUSED_FAILED_STEP)
-    await _set_status(running["id"], TaskStatus.RUNNING)
+    await _set_status(tenant_id, approval["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=datetime.utcnow())
+    await _set_status(tenant_id, failed["id"], TaskStatus.PAUSED_FAILED_STEP)
+    await _set_status(tenant_id, running["id"], TaskStatus.RUNNING)
 
     r = await client.get("/api/v1/tasks/active", headers={"Authorization": f"Bearer {token}"})
     goals_in_order = [t["goal"] for t in r.json()]
@@ -250,12 +250,12 @@ async def test_active_sorts_needs_attention_tiers_and_auto_advancing_last(client
 
 @pytest.mark.asyncio
 async def test_active_sorts_expiring_approvals_soonest_first(client, monkeypatch):
-    token, _, _ = await _register(client, "activesoonest")
+    token, tenant_id, _ = await _register(client, "activesoonest")
     older = await _create_mocked_task(client, token, monkeypatch, goal="older approval")
     newer = await _create_mocked_task(client, token, monkeypatch, goal="newer approval")
     now = datetime.utcnow()
-    await _set_status(older["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=now - timedelta(hours=40))
-    await _set_status(newer["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=now - timedelta(hours=2))
+    await _set_status(tenant_id, older["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=now - timedelta(hours=40))
+    await _set_status(tenant_id, newer["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=now - timedelta(hours=2))
 
     r = await client.get("/api/v1/tasks/active", headers={"Authorization": f"Bearer {token}"})
     goals_in_order = [t["goal"] for t in r.json()]
@@ -264,16 +264,16 @@ async def test_active_sorts_expiring_approvals_soonest_first(client, monkeypatch
 
 @pytest.mark.asyncio
 async def test_active_action_text_names_the_fix_not_just_the_status(client, monkeypatch):
-    token, _, _ = await _register(client, "activeaction")
+    token, tenant_id, _ = await _register(client, "activeaction")
     approval = await _create_mocked_task(client, token, monkeypatch, goal="approval")
     failed = await _create_mocked_task(client, token, monkeypatch, goal="failed")
     invalid = await _create_mocked_task(client, token, monkeypatch, goal="invalid")
     draft = await _create_mocked_task(client, token, monkeypatch, goal="draft")
     running = await _create_mocked_task(client, token, monkeypatch, goal="running")
-    await _set_status(approval["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=datetime.utcnow() - timedelta(hours=10))
-    await _set_status(failed["id"], TaskStatus.PAUSED_FAILED_STEP)
-    await _set_status(invalid["id"], TaskStatus.PAUSED_PLAN_INVALID)
-    await _set_status(running["id"], TaskStatus.RUNNING)
+    await _set_status(tenant_id, approval["id"], TaskStatus.PAUSED_NEEDS_APPROVAL, paused_at=datetime.utcnow() - timedelta(hours=10))
+    await _set_status(tenant_id, failed["id"], TaskStatus.PAUSED_FAILED_STEP)
+    await _set_status(tenant_id, invalid["id"], TaskStatus.PAUSED_PLAN_INVALID)
+    await _set_status(tenant_id, running["id"], TaskStatus.RUNNING)
 
     r = await client.get("/api/v1/tasks/active", headers={"Authorization": f"Bearer {token}"})
     by_goal = {t["goal"]: t for t in r.json()}
@@ -294,7 +294,7 @@ async def test_active_includes_agent_name_via_join(client, monkeypatch):
     task = await _create_mocked_task(client, token, monkeypatch, goal="assigned")
     unassigned = await _create_mocked_task(client, token, monkeypatch, goal="unassigned")
     await _attach_agent(tenant_id, task["id"], name="Nova")
-    await _set_status(unassigned["id"], TaskStatus.DRAFT_PLAN, agent_id=None)
+    await _set_status(tenant_id, unassigned["id"], TaskStatus.DRAFT_PLAN, agent_id=None)
 
     r = await client.get("/api/v1/tasks/active", headers={"Authorization": f"Bearer {token}"})
     by_goal = {t["goal"]: t for t in r.json()}
@@ -323,9 +323,9 @@ async def test_task_detail_surfaces_plan_invalid_reason(client, monkeypatch):
     (discovered while deriving the rail's needs_attention set) -- GET
     /{task_id} must now say what happened and that it's unrecoverable,
     same as the sibling PAUSED_FAILED_STEP field."""
-    token, _, _ = await _register(client, "planinvalid")
+    token, tenant_id, _ = await _register(client, "planinvalid")
     task = await _create_mocked_task(client, token, monkeypatch, goal="invalidated")
-    await _set_status(task["id"], TaskStatus.PAUSED_PLAN_INVALID)
+    await _set_status(tenant_id, task["id"], TaskStatus.PAUSED_PLAN_INVALID)
 
     r = await client.get(f"/api/v1/tasks/{task['id']}", headers={"Authorization": f"Bearer {token}"})
     body = r.json()
@@ -344,14 +344,14 @@ async def test_task_detail_plan_invalid_reason_is_null_for_other_statuses(client
 
 @pytest.mark.asyncio
 async def test_active_current_step_falls_back_to_last_step_when_all_done(client, monkeypatch):
-    token, _, _ = await _register(client, "activedone")
+    token, tenant_id, _ = await _register(client, "activedone")
     task = await _create_mocked_task(client, token, monkeypatch, goal="all done")
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(TaskStep).where(TaskStep.task_id == task["id"]))
         step = r.scalar_one()
         step.status = TaskStepStatus.SUCCEEDED
         await db.commit()
-    await _set_status(task["id"], TaskStatus.QUEUED)
+    await _set_status(tenant_id, task["id"], TaskStatus.QUEUED)
 
     r = await client.get("/api/v1/tasks/active", headers={"Authorization": f"Bearer {token}"})
     item = next(t for t in r.json() if t["goal"] == "all done")

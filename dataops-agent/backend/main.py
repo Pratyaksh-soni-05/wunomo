@@ -19,7 +19,7 @@ from api.v1 import (
     incidents, quality, governance, uploads,
     analytics, approvals, transformations,
     cicd, onboarding, catalog, team, billing, settings as settings_router,
-    api_keys, tasks, mfa, sso,
+    api_keys, tasks, mfa, sso, agents, projects, channels,
 )
 
 
@@ -60,6 +60,18 @@ async def lifespan(app: FastAPI):
         log.info("llm_data_residency", **residency)
     else:
         log.error("llm_data_residency_blocks_all_llm_calls", **residency)
+
+    # Model liveness check (2026-09-03, see GOTCHAS.md) -- a real 404 gets
+    # logged loudly (model_liveness_check_failed) and is inspectable via
+    # GET /health/models afterward, but a failure in the check's OWN
+    # infrastructure (Redis briefly unavailable, a network blip reaching
+    # a provider) must never prevent the app from starting -- this is a
+    # visibility improvement, not a new hard dependency for boot.
+    try:
+        from services.model_liveness import check_configured_models
+        await check_configured_models()
+    except Exception as exc:
+        log.error("model_liveness_check_errored", error=str(exc))
 
     log.info("axiom.startup", env=settings.APP_ENV, version="1.0.0")
     yield
@@ -178,6 +190,13 @@ app.include_router(settings_router.router,  prefix="/api/v1/settings",        ta
 app.include_router(api_keys.router,        prefix="/api/v1/api-keys",        tags=["API Keys"])
 app.include_router(tasks.router,           prefix="/api/v1/tasks",           tags=["Tasks"])
 
+# Wunomo Projects Phase 1 — agent source-scope management + hiring
+app.include_router(agents.router,          prefix="/api/v1/agents",          tags=["Agents"])
+app.include_router(projects.router,        prefix="/api/v1/projects",        tags=["Projects"])
+
+# Wunomo Projects Phase 2 — channels
+app.include_router(channels.router,        prefix="/api/v1/channels",        tags=["Channels"])
+
 
 
 @app.get("/health", tags=["Health"])
@@ -198,6 +217,57 @@ async def health_db():
             status_code=503,
             content={"status": "error", "db": "unreachable", "detail": str(exc)},
         )
+
+
+@app.get("/health/models", tags=["Health"])
+async def health_models(force: bool = False):
+    """Cached model-liveness result (see services/model_liveness.py) --
+    ?force=true bypasses the cache and re-pings every configured model
+    right now. 503 whenever any configured model isn't reachable, so a
+    monitor polling this can alert on a provider deprecation within
+    minutes instead of discovering it mid-incident."""
+    from services.model_liveness import check_configured_models
+    payload = await check_configured_models(force=force)
+    dead = [r for r in payload["results"] if r["status"] != "ok"]
+    status_code = 503 if dead else 200
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.get("/health/tasks", tags=["Health"])
+async def health_tasks():
+    """Backlog visibility for the auto-advance loop (Wunomo Projects
+    Phase 3, item 71): a live, on-demand answer to "is the beat tick's
+    25/tick cap draining the backlog or falling behind it" -- previously
+    only visible by grepping advance_active_tasks_dispatched log lines.
+    Uses the same RUNNABLE_TASK_STATUSES services/tasks.py's beat tick
+    selects against, so this can never disagree with what the tick
+    itself considers runnable. Broken down by status so a growing QUEUED
+    count (plans piling up unstarted) reads differently from a growing
+    PAUSED_QUOTA_EXCEEDED one (a quota problem, not a scheduler one)."""
+    from sqlalchemy import func, select
+    from database import AsyncSessionLocal
+    from models.all_models import RUNNABLE_TASK_STATUSES, Task
+    from services.tasks import ADVANCE_BATCH_SIZE
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(
+            select(Task.status, func.count())
+            .where(Task.status.in_(RUNNABLE_TASK_STATUSES))
+            .group_by(Task.status)
+        )
+        by_status = {status.value: count for status, count in r.all()}
+
+    total = sum(by_status.values())
+    return {
+        "total_runnable": total,
+        "by_status": by_status,
+        "batch_size": ADVANCE_BATCH_SIZE,
+        # Ceiling division: how many 60s ticks it would take to drain the
+        # current backlog if zero new runnable work ever arrived --
+        # optimistic on purpose (real arrivals only push this further
+        # out), still useful as a lower bound on "how far behind is it."
+        "estimated_ticks_to_drain_if_no_new_work": -(-total // ADVANCE_BATCH_SIZE) if total else 0,
+    }
 
 
 

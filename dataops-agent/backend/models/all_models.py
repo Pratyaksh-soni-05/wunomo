@@ -2,7 +2,7 @@ import uuid, enum
 from datetime import datetime
 from sqlalchemy import (Column, String, Text, Boolean, Integer, Float,
     DateTime, ForeignKey, JSON, Enum as SAEnum, UniqueConstraint,
-    BigInteger, Sequence)
+    BigInteger, Sequence, Index)
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import TypeDecorator
 from database import Base
@@ -303,6 +303,11 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
     id = Column(String, primary_key=True, default=gen_uuid)
     tenant_id = Column(String, nullable=False)
+    # Nullable, no FK - matches this table's own tenant_id (also no FK):
+    # an audit log must never fail to record an action over a referential-
+    # integrity check. History predates agents-as-records, backfills to
+    # AXIOM's row-one agent per tenant.
+    agent_id = Column(String, nullable=True)
     actor = Column(String(255))
     action = Column(String(255), nullable=False)
     resource_type = Column(String(100))
@@ -346,6 +351,21 @@ class ChatMessage(Base):
     tenant_id = Column(String, nullable=False)
     user_id = Column(String, nullable=False)
     session_id = Column(String, nullable=False)
+    # Nullable: history predates agents-as-records, backfills to AXIOM's
+    # new row-one agent. No FK - matches this table's own existing
+    # convention (tenant_id/user_id above are plain columns too, not FKs).
+    agent_id = Column(String, nullable=True)
+    # Wunomo Projects Phase 2: which agent this message @mentions, if
+    # any - singular, matching "the tagged agent responds, nobody else"
+    # (multi-mention would need a join table instead; not needed for v1).
+    # Nullable and FK-less for the same reason agent_id above is: every
+    # message before this column existed, and every private 1:1 message
+    # after it, simply has none. @mention ROUTING resolves this against
+    # real ChannelAgent membership (services/channels.py), never trusts
+    # this column alone - an agent removed from a channel after being
+    # mentioned in an old message must not retroactively become
+    # reachable through it.
+    mentioned_agent_id = Column(String, nullable=True)
     role = Column(String(20), nullable=False)
     content = Column(Text, nullable=False)
     personality_mode = Column(String(50))
@@ -398,6 +418,21 @@ class LlmUsageEvent(Base):
     tenant_id = Column(String, nullable=False, index=True)
     user_id = Column(String, nullable=True)
     session_id = Column(String, nullable=True)
+    # Nullable, no FK - a planning attempt can log a real row under a
+    # task_id whose Task was never persisted (a failed/invalid plan means
+    # nothing gets written to `tasks`, per api/v1/tasks.py's create_task()),
+    # and an unattended/system-triggered call may legitimately have no task
+    # at all. A hard FK here would either reject the first case's real
+    # spend or force a two-phase write; a plain indexed column costs
+    # nothing and lets a rollup query LEFT JOIN and treat "no matching Task
+    # row" as its own honest bucket instead of failing the insert.
+    task_id = Column(String, nullable=True, index=True)
+    # Nullable, no FK - same reasoning as task_id above, and matches this
+    # table's own tenant_id (also no FK): this table is a metering log
+    # that must never fail an insert over a referential-integrity check.
+    # History predates agents-as-records, backfills to AXIOM's row-one
+    # agent per tenant.
+    agent_id = Column(String, nullable=True, index=True)
     request_type = Column(String(50), nullable=False)
     provider = Column(String(50), nullable=False)
     model = Column(String(100), nullable=False)
@@ -530,6 +565,185 @@ class ApiKey(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class AgentEmployeeType(str, enum.Enum):
+    """Which product line this agent instance is (Wunomo Projects Phase 0
+    - see docs/context/WUNOMO_PROJECTS_PROPOSAL_v2.md). LEDGER/PULSE/etc.
+    still have no tools or modules built, and adding placeholder values
+    here before they exist risks the same "never imply a locked employee
+    is available" mistake the proposal explicitly holds the *frontend*
+    hire screen to -- extend this only the day a type's real tools/prompt
+    actually ship, not before. ANALYST is the second one to clear that
+    bar: a read-only business-analyst persona built entirely from the
+    existing 40 DataOps tools (agent/dataops_agent.py's
+    _employee_type_tools(), the "view"/transforms.generate-tier subset),
+    not a new tool surface of its own."""
+    DATAOPS = "dataops"
+    ANALYST = "analyst"
+
+
+class AgentInstanceStatus(str, enum.Enum):
+    ACTIVE = "active"
+    OFFBOARDED = "offboarded"
+
+
+class AgentInstance(Base):
+    """A named, tenant-owned agent (Wunomo Projects Phase 0). AXIOM
+    becomes row one per tenant, backfilled by the next migration - not a
+    special case; every agent, including AXIOM, is a real row here from
+    this point forward.
+
+    model is authoritative per-agent, not a live reference to
+    Tenant.settings.ai_model_override - the tenant override is only the
+    seed value copied in when an agent is created (application-level, not
+    a DB default), so editing the tenant setting later never silently
+    moves an already-created agent's model out from under it.
+
+    updated_at (not a separate version counter, and not a new pattern -
+    DataSource already does exactly this) is what get_agent()'s cache key
+    incorporates going forward: editing any field on this row bumps
+    updated_at automatically (onupdate=datetime.utcnow), which changes
+    the cache key, which means a stale cached agent object can never be
+    served after an edit - invalidation by construction, not by a call
+    site remembering to bust the cache."""
+    __tablename__ = "agent_instances"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_agent_instances_tenant_name"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    employee_type = Column(SAEnum(AgentEmployeeType), nullable=False, default=AgentEmployeeType.DATAOPS)
+    personality = Column(SAEnum(PersonalityMode), nullable=False, default=PersonalityMode.ENGINEER)
+    operation_mode = Column(SAEnum(OperationMode), nullable=False, default=OperationMode.ASSISTED)
+    model = Column(String, nullable=False)
+    standing_instructions = Column(Text, nullable=True)
+    # None = no agent-level ceiling, draw against the tenant's plan-level
+    # AI-credit quota only. Schema only this pass (Wunomo Projects Phase
+    # 0) - the two-gate enforcement code path (tenant plan limit AND
+    # agent budget, both must pass) lands with Phase 1, not here.
+    monthly_token_budget = Column(Integer, nullable=True)
+    status = Column(SAEnum(AgentInstanceStatus), nullable=False, default=AgentInstanceStatus.ACTIVE)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class AgentSource(Base):
+    """Scope join table (Wunomo Projects Phase 0) - deliberately a real,
+    queryable table, not a JSON column on AgentInstance, so "can this
+    agent touch this source" is enforceable in SQL and joinable, not just
+    checked in Python after the fact. Every permission system that began
+    as JSON in a column in this codebase got rewritten; this one starts
+    right. Intersection-permission enforcement itself (has_permission(...)
+    AND source in agent_scope) is Phase 1, not Phase 0 - this table only
+    exists so Phase 1 has something real to query."""
+    __tablename__ = "agent_sources"
+    __table_args__ = (UniqueConstraint("agent_id", "source_id", name="uq_agent_sources_agent_source"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=False, index=True)
+    source_id = Column(String, ForeignKey("data_sources.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Project(Base):
+    """Wunomo Projects Phase 1, part two. "A project is an object inside
+    a tenant" (WUNOMO_PROJECTS_PROPOSAL_v2.md's own correction to itself)
+    - explicitly NOT a workspace/tenant substitute: a project just groups
+    agents (via ProjectAgent below) inside the tenant that already owns
+    billing, team, and sources. An agent hired outside any project (every
+    agent that exists as of this migration, including every tenant's
+    AXIOM row) simply has no ProjectAgent row - membership is optional,
+    not a required foreign key on AgentInstance itself, since retrofitting
+    a NOT NULL project_id onto every pre-existing agent would be a much
+    bigger migration for a distinction (grouped vs ungrouped) this schema
+    doesn't need to force."""
+    __tablename__ = "projects"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_projects_tenant_name"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    # Nullable, optional at create time (Wunomo UI-rebuild slice 4, 2026-09-14)
+    # -- a one-line note on what the project is for. Deliberately free text,
+    # not structured: the proposal's own framing is "context your agents will
+    # eventually read," not a field any current code path consumes yet.
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ProjectAgent(Base):
+    """Join table, not a project_id FK on AgentInstance - same reasoning
+    AgentSource already established for agent/source scope: a real,
+    queryable, joinable table rather than a column that would force
+    every agent into exactly one project (or none) at the schema level
+    when the actual v1 rule is simpler and looser - an agent may belong
+    to zero or one project for now (hiring only ever links one), but
+    nothing here mechanically prevents more later without a migration."""
+    __tablename__ = "project_agents"
+    __table_args__ = (UniqueConstraint("project_id", "agent_id", name="uq_project_agents_project_agent"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Channel(Base):
+    """Wunomo Projects Phase 2 -- the multi-participant conversation the
+    proposal calls a "channel." ChatMessage.session_id (see that model's
+    own column, unchanged) stays a bare, FK-less grouping string exactly
+    as it's always been; for a real channel it's simply set to this
+    row's own id at creation time, by convention, not by a declared
+    foreign key -- correlation is by value, checked at read time
+    (routing, context-filtering), the same way ChatMessage.agent_id's
+    optionality already works on this same table. No backfill needed
+    for today's private 1:1 chat: it keeps generating a bare session_id
+    with no matching Channel row, forever, exactly as before this
+    table existed.
+
+    project_id is nullable, not required -- same reasoning ProjectAgent
+    already established for agent-project membership: a channel MAY
+    live inside a project, but forcing "create a project first" before
+    anyone can ever open a channel isn't a v1 requirement this schema
+    needs to enforce."""
+    __tablename__ = "channels"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ChannelUser(Base):
+    """Human membership -- a channel's real participant set, queried by
+    the ownership/membership check the same way agent_sources/
+    project_agents already are, not inferred from who happens to have
+    posted a message."""
+    __tablename__ = "channel_users"
+    __table_args__ = (UniqueConstraint("channel_id", "user_id", name="uq_channel_users_channel_user"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    channel_id = Column(String, ForeignKey("channels.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ChannelAgent(Base):
+    """Agent membership -- @mention routing resolves against this table,
+    never a string match on an agent's name: an agent not in
+    channel_agents for a given channel cannot be mentioned in it,
+    regardless of what its name looks like in the message text."""
+    __tablename__ = "channel_agents"
+    __table_args__ = (UniqueConstraint("channel_id", "agent_id", name="uq_channel_agents_channel_agent"),)
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    channel_id = Column(String, ForeignKey("channels.id"), nullable=False, index=True)
+    agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class TaskShape(str, enum.Enum):
     """Deliberately narrow for v1 (see CLAUDE.md's item-6 design decisions)
     - a fixed, pre-vetted set of goal->plan-shape pairings, not open-ended
@@ -538,6 +752,18 @@ class TaskShape(str, enum.Enum):
     DIAGNOSE_PIPELINE_FAILURE = "diagnose_pipeline_failure"
     INVESTIGATE_INCIDENT = "investigate_incident"
     SYNC_PROFILE_QUALITY = "sync_profile_quality"
+    # Stage 2 (multi-agent supervisor, modules/orchestration/supervisor.py):
+    # one intent parsed from a single @mention in a supervisor-orchestrated
+    # channel message. Deliberately NOT one of the three shapes above --
+    # those each drive task_planner.py's LLM plan generation against a
+    # fixed, pre-vetted tool allowlist; a supervisor intent is a single
+    # free-form conversational instruction run once through the existing
+    # per-agent graph (agent/dataops_agent.py's run_agent(), unchanged),
+    # never through task_planner.py/task_executor.py at all. Confirmed safe
+    # to add: task_planner.py's TASK_SHAPE_ALLOWED_TOOLS is keyed by dict
+    # lookup/membership, never iterates TaskShape expecting an exhaustive
+    # closed set (checked before adding this).
+    SUPERVISOR_INTENT = "supervisor_intent"
 
 
 class TaskStatus(str, enum.Enum):
@@ -549,11 +775,59 @@ class TaskStatus(str, enum.Enum):
     PAUSED_FAILED_STEP = "paused_failed_step"  # a step exhausted its attempt budget, or the initiating user was demoted/deactivated
     PAUSED_PLAN_INVALID = "paused_plan_invalid"  # a completed step's result shows the remaining plan won't reach the goal
     PAUSED_QUOTA_EXCEEDED = "paused_quota_exceeded"  # tenant AI-credit quota exhausted mid-run; resumable once quota resets
+    PAUSED_SOURCE_LOCKED = "paused_source_locked"  # a step's source is held by another caller (Wunomo Projects Phase 2, item 5); resumable once the lock frees
     COMPLETED = "completed"
     COMPLETED_WITH_UNCONFIRMED_STEPS = "completed_with_unconfirmed_steps"  # a dispatched step's verification never reached a terminal state within its window - honest, not clean, success (Q2)
     FAILED = "failed"
     CANCELLED = "cancelled"
     EXPIRED = "expired"  # sat paused past the pause-timeout with no resolution
+
+    # Stage 2 (multi-agent supervisor). Deliberately excluded from BOTH
+    # RUNNABLE_TASK_STATUSES and TERMINAL_TASK_STATUSES below -- see each
+    # constant's own comment for why. A supervisor-dispatched task
+    # (task_shape=SUPERVISOR_INTENT) reuses COMPLETED/FAILED/
+    # PAUSED_NEEDS_APPROVAL for its actual outcomes (all three already sit
+    # outside RUNNABLE_TASK_STATUSES, so no collision there either) -- only
+    # its two "not yet resolved" states below are genuinely new.
+    SUPERVISOR_QUEUED = "supervisor_queued"    # dispatched by the supervisor; waiting its turn (ready, or behind an unmet dependency) -- never the generic single-agent QUEUED, see RUNNABLE_TASK_STATUSES
+    SUPERVISOR_RUNNING = "supervisor_running"  # the supervisor's own run node is actively executing this task's single run_agent() turn right now
+    BLOCKED_ON_DEPENDENCY = "blocked_on_dependency"  # a task this one depends on reached FAILED; retrying that upstream task releases this one back to SUPERVISOR_QUEUED
+
+
+# The single source of truth for "auto-advanceable" -- task_executor.py's
+# execute_next_step(), services/tasks.py's beat tick, and main.py's
+# GET /health/tasks all import this same tuple rather than each defining
+# their own copy, so a status added or removed here can never make the
+# beat tick and the backlog-visibility endpoint disagree about what
+# "runnable" means. PAUSED_NEEDS_APPROVAL is deliberately excluded -- a
+# task waiting on a human must never be picked up automatically.
+#
+# SUPERVISOR_QUEUED/SUPERVISOR_RUNNING are deliberately excluded too, for a
+# different reason: services/tasks.py's advance_active_tasks beat tick
+# (live, running every 60s in every environment including dev) queries
+# Task.status.in_(RUNNABLE_TASK_STATUSES) with NO task_shape filter --
+# if a supervisor-dispatched task (task_shape=SUPERVISOR_INTENT) ever held
+# a status in this tuple, that beat tick would hand it to
+# task_executor.execute_next_step(), which expects an LLM-planned
+# tool-call step this task_shape never has. The supervisor
+# (modules/orchestration/supervisor.py) is the ONLY code that ever reads
+# or advances these two statuses; keeping them out of this tuple is what
+# makes that true rather than merely intended.
+RUNNABLE_TASK_STATUSES = (
+    TaskStatus.QUEUED, TaskStatus.RUNNING,
+    TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED,
+)
+
+# The single source of truth for "this task is done, nothing further will
+# ever happen to it" -- originally api/v1/tasks.py's own private
+# _TERMINAL_STATUSES (used by the topbar counter and the Tasks list badge),
+# promoted here (2026-09-04) so api/v1/agents.py's offboard check can share
+# the exact same definition rather than risk a second, driftable copy of
+# "terminal" existing side by side with the first.
+TERMINAL_TASK_STATUSES = frozenset({
+    TaskStatus.PLAN_REJECTED, TaskStatus.COMPLETED, TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS,
+    TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.EXPIRED,
+})
 
 
 class TaskStepStatus(str, enum.Enum):
@@ -573,6 +847,21 @@ class TaskStepSource(str, enum.Enum):
     LLM_PLANNED = "llm_planned"
     HUMAN_EDITED = "human_edited"
     SYSTEM_INSERTED = "system_inserted"
+    # Wunomo Projects Phase 4, slice 14: a ScheduledAgentTask's fixed step,
+    # created directly by the beat tick with no LLM plan generated and no
+    # human editing it in the moment -- neither LLM_PLANNED nor HUMAN_EDITED
+    # is honest here, and SYSTEM_INSERTED already has an established,
+    # different meaning (a verify step appended to an EXISTING plan), not
+    # "the entire, only step of a task." A genuinely new provenance value
+    # rather than overloading one of the three above.
+    SCHEDULED = "scheduled"
+    # Stage 2 (multi-agent supervisor): the single TaskStep behind a
+    # SUPERVISOR_INTENT task -- one free-form instruction parsed from an
+    # @mention, run once through run_agent(), never LLM-planned as a tool
+    # call the way LLM_PLANNED steps are and never appended to an existing
+    # plan the way SYSTEM_INSERTED steps are. Same "genuinely new
+    # provenance" reasoning as SCHEDULED above, not an overload of it.
+    SUPERVISOR_DISPATCHED = "supervisor_dispatched"
 
 
 class Task(Base):
@@ -584,10 +873,42 @@ class Task(Base):
     snapshotted role would be a privilege-escalation hole with a built-in
     time window for any task that outlives a demotion or deactivation."""
     __tablename__ = "tasks"
+    __table_args__ = (
+        # Wunomo Projects Phase 3, item 71/slice 10: the auto-advance beat
+        # tick selects the oldest-untouched runnable tasks every 60s
+        # (ORDER BY updated_at ASC WHERE status IN (...) LIMIT N) -- this
+        # index is what keeps that an index scan, not a full table scan,
+        # as this table keeps growing (6,053 rows and counting -- see
+        # WALKTHROUGH_FINDINGS_2026-08.md item 74 on why it grows fast).
+        Index("ix_tasks_status_updated_at", "status", "updated_at"),
+    )
     id = Column(String, primary_key=True, default=gen_uuid)
     tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
     user_id = Column(String, ForeignKey("users.id"), nullable=False)  # initiator - see class docstring re: role
+    # Nullable: history predates agents-as-records (Wunomo Projects Phase
+    # 0) and backfills to AXIOM's new row-one agent in the next migration;
+    # a real FK because Task already uses FKs on its other identity
+    # columns above, matching this table's own established convention.
+    agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=True)
     originating_session_id = Column(String, nullable=True)  # the chat session this task was spawned from, if any
+    # Wunomo Projects Phase 4, slice 14: the ScheduledAgentTask that created
+    # this Task, if any -- a real FK (unlike originating_session_id's
+    # FK-less, log-shaped convention), matching Task's own established
+    # pattern for its other identity columns (tenant_id, user_id, agent_id
+    # are all real FKs) and ScheduledAgentTask being a real, joinable row
+    # (like AgentInstance), not a log-shaped table. Forward reference to a
+    # class defined later in this same module -- SQLAlchemy resolves
+    # ForeignKey string targets at mapper-configuration time, not at class
+    # body evaluation time, so declaration order here doesn't matter.
+    # ondelete="SET NULL": a schedule CAN be deleted (the real fix a
+    # deactivation notification points at for two of its three causes --
+    # delete and recreate is the only option with no edit endpoint), and a
+    # task's own record/goal/steps must survive that unchanged, only
+    # losing the back-reference -- the same "a task is never touched by
+    # cleanup elsewhere" precedent as originating_session_id.
+    originating_schedule_id = Column(
+        String, ForeignKey("scheduled_agent_tasks.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
     goal = Column(Text, nullable=False)
     task_shape = Column(SAEnum(TaskShape), nullable=False)
     status = Column(SAEnum(TaskStatus), nullable=False, default=TaskStatus.DRAFT_PLAN)
@@ -603,8 +924,32 @@ class Task(Base):
     credit_budget_max = Column(Integer, nullable=True)
     credit_budget_used = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Bumped automatically by SQLAlchemy's onupdate on every ORM-level
+    # UPDATE to this row -- what makes "oldest untouched runnable task
+    # first" (the auto-advance beat tick's own ordering) mean "hasn't
+    # made progress in the longest time," not "was created longest ago."
+    # Backfilled from created_at for every pre-existing row (migration
+    # f8a5decd97df) -- the honest value for "last touched" on a row with
+    # no real update-tracking history before this column existed.
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     started_at = Column(DateTime, nullable=True)
     paused_at = Column(DateTime, nullable=True)  # drives the pause-timeout expiry check
+    # Cumulative seconds spent in ANY paused status (PAUSED_NEEDS_APPROVAL,
+    # PAUSED_QUOTA_EXCEEDED, PAUSED_SOURCE_LOCKED), incremented at every
+    # transition out of one of those back to RUNNING -- see
+    # task_executor.py's own comment on _check_wall_clock_cap for why this
+    # exists: the wall-clock cap must bound real execution exposure, not
+    # raw calendar time since started_at, or a task paused for approval
+    # over a weekend gets killed the instant it's approved (found live,
+    # WALKTHROUGH_FINDINGS_2026-08.md item 72). PAUSED_FAILED_STEP and
+    # PAUSED_PLAN_INVALID have no resume path anywhere in this codebase
+    # (confirmed by exhaustive grep) and are excluded on purpose -- a task
+    # that reaches either one never transitions back to RUNNING, so there
+    # is nothing to subtract for them. Backfilled to 0 for every existing
+    # row: no historical task has a recoverable pause history to compute
+    # this from, and 0 is the correct, honest value for "unknown, assume
+    # no paused time," not a placeholder.
+    paused_seconds = Column(Integer, nullable=False, default=0)
     completed_at = Column(DateTime, nullable=True)
     # Real, persisted reason for a non-clean stop (stage 6, Q4): which cap
     # fired (step/wall-clock/loop) for a FAILED task, or who cancelled and
@@ -613,6 +958,18 @@ class Task(Base):
     # read time from a related step's own data), there's no step to derive
     # this from -- a wall-clock or loop stop isn't any one step's fault.
     termination_reason = Column(Text, nullable=True)
+    # Stage 2 (multi-agent supervisor): self-referential FK, populated only
+    # for a SUPERVISOR_INTENT task the plan node inferred a dependency for
+    # ("B's required input can only come from A's output" -- see
+    # modules/orchestration/supervisor.py's plan_node). Deliberately a
+    # single predecessor, not an edge table -- the only DAG shape the
+    # supervisor currently builds is a linear mention-order chain (the
+    # acceptance test's own two-node A->B case); a true multi-predecessor
+    # fan-in would need a real edge table, out of scope for this pass (see
+    # supervisor.py's module docstring for the honest limitation writeup).
+    # NULL for every task outside the supervisor path (unchanged, no
+    # backfill needed -- this column has no meaning for those rows).
+    depends_on_task_id = Column(String, ForeignKey("tasks.id"), nullable=True, index=True)
 
 
 class TaskStep(Base):
@@ -643,3 +1000,120 @@ class TaskStep(Base):
     approval_request_id = Column(String, ForeignKey("approval_requests.id"), nullable=True)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
+
+
+class ScheduledAgentTask(Base):
+    """Wunomo Projects Phase 4, slice 14: a standing, recurring instruction
+    for one agent to run one fixed tool call on a cron schedule -- fixed,
+    never replanned. task_shape/tool_name/tool_args are set once at
+    creation and never touch generate_plan() again: a natural-language
+    goal replanned every firing would mean a real LLM call every night,
+    forever, for a schedule nobody's watching to notice if the plan
+    drifted -- a materially different cost/risk profile from a fixed
+    tool call, and out of scope for this slice by explicit decision.
+
+    created_by_user_id is this schedule's real owner, never a synthetic
+    "system" role -- Task.user_id is NOT NULL and every per-step
+    authorization check re-reads that user's CURRENT role live (see
+    Task's own docstring); a scheduled run is attributed to the real
+    person who configured it so that existing re-check keeps governing
+    unchanged. The cost: if that person is later deactivated or demoted
+    out of the permission this schedule's tool_name needs, the schedule
+    can no longer run -- see active/deactivation_reason below for how
+    that's surfaced, not left to fail silently, night after night.
+
+    active=False means this will never fire again until something
+    explicit reactivates it. Set automatically (never by a human
+    directly) the moment validate_schedule_can_run() (modules/
+    orchestration/scheduled_tasks.py) finds a cause it can't run for
+    anymore -- the owner losing access, this agent being offboarded, or
+    a referenced source being deleted -- with deactivation_reason storing
+    exactly which, in prose, plus the real fix. Reactivating re-runs that
+    identical validation; if the cause is still true, reactivation fails
+    the same way it would have at the next firing, not silently a second
+    time. Deactivation always fires a one-time notification (services/
+    reporting/notification_service.py) -- a schedule whose failure
+    symptom is "nothing happens, ever" is the invisible-failure pattern
+    this whole build keeps having to close, not reproduce a seventh time.
+
+    No edit endpoint exists (backend-first per explicit scope; the
+    schedule-management UI is its own later slice) -- tool_name/tool_args
+    are immutable once created. The real fix for a stale reference today
+    is delete this schedule and create a new one; deactivation messages
+    say so plainly rather than pointing at an edit action that doesn't
+    exist."""
+    __tablename__ = "scheduled_agent_tasks"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=False, index=True)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    task_shape = Column(SAEnum(TaskShape), nullable=False)
+    # The single fixed step's human-readable description -- also reused
+    # verbatim as the Task.goal of every Task this schedule creates, since
+    # a single-fixed-step schedule has no separate "high-level goal vs.
+    # this specific step" distinction the way a multi-step LLM plan does.
+    description = Column(Text, nullable=False)
+    tool_name = Column(String(100), nullable=False)
+    tool_args = Column(JSON, nullable=False, default=dict)
+    schedule_cron = Column(String(100), nullable=False)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    deactivation_reason = Column(Text, nullable=True)
+    last_fired_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Handoff(Base):
+    """Stage 2 (multi-agent supervisor, modules/orchestration/supervisor.py
+    §20): the durable record of one agent's completed task feeding another
+    agent's task in the same channel -- the thing that makes a multi-agent
+    conversation a real handoff instead of two unrelated replies that
+    happen to sit in the same thread. Written exactly once, by the
+    supervisor's handoff node, only when a task with at least one
+    dependent actually reaches COMPLETED -- never for a task that fails,
+    gets blocked, or has no dependent at all.
+
+    tenant_id is a REAL FK here, deliberately not this codebase's usual
+    bare-tenant_id-by-convention pattern (AuditLog, ChatMessage,
+    ApprovalRequest, etc. all skip the FK so a write can never fail on a
+    referential-integrity check) -- a Handoff is never write-critical the
+    way an audit/metering row is; it's read-path provenance for a UI
+    that will always be scoped to a real, live tenant/channel, so the
+    stronger guarantee costs nothing and catches a real bug class (a
+    dangling tenant_id) the bare-string convention would silently allow.
+    """
+    __tablename__ = "handoffs"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    channel_id = Column(String, ForeignKey("channels.id"), nullable=False, index=True)
+    # Nullable: mirrors Channel.project_id's own nullability -- a channel
+    # (and therefore a handoff inside it) doesn't have to belong to a
+    # project.
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True)
+    from_agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=False)
+    to_agent_id = Column(String, ForeignKey("agent_instances.id"), nullable=False)
+    from_task_id = Column(String, ForeignKey("tasks.id"), nullable=False, index=True)
+    to_task_id = Column(String, ForeignKey("tasks.id"), nullable=False, index=True)
+    # One sentence, for the handoff card (blueprint §07) -- what was
+    # passed, not the payload itself.
+    payload_summary = Column(Text, nullable=False)
+    # A pointer to the actual artefact (here: the TaskStep.id holding the
+    # real output text/raw_result), never the artefact inlined onto this
+    # row -- nullable because not every handoff necessarily has a
+    # separately-addressable artefact beyond payload_summary itself.
+    payload_ref = Column(String, nullable=True)
+    # What was deliberately NOT passed along -- a privacy feature, not
+    # decoration (the blueprint's own "Ravi did not receive names or
+    # contact details" example). A list of short strings naming the
+    # withheld category/field, e.g. ["customer names", "contact details"].
+    # Stage 2 part 1 always writes [] -- no content-redaction logic exists
+    # yet (see supervisor.py's module docstring) -- the column exists so
+    # that logic has somewhere real to write to when it's built, rather
+    # than needing a second migration.
+    withheld = Column(JSON, nullable=False, default=list)
+    # Naive UTC, matching this codebase's convention outside cicd.py (see
+    # CLAUDE.md Hard Rule 3) -- a Handoff is a normal application record,
+    # not one of the cicd.py tables' documented timezone-aware exception.
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

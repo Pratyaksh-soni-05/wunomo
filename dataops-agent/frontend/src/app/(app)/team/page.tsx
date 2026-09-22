@@ -290,7 +290,16 @@ function progressVariant(status: QuotaStatus["status"]): "default" | "success" |
 }
 
 function planLabel(name: string) {
-  return name.charAt(0).toUpperCase() + name.slice(1);
+  // Plan keys became standard / starter_plus / premium / enterprise on
+  // 2026-09-01. Splitting on "_" matters: a naive
+  // `charAt(0).toUpperCase() + slice(1)` renders starter_plus as
+  // "Starter_plus" — the only one of the four with an underscore, so it
+  // looks fine against the other three. Ported from the retired standalone
+  // /billing page's own fix when that page's content moved into this tab.
+  return name
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function BillingTab({ token }: { token: string }) {
