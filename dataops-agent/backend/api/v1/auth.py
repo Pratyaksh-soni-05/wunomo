@@ -87,7 +87,11 @@ async def get_current_user(request: Request, token: str = Depends(oauth2_scheme)
     # immediate block because the rule lands on existing accounts; a lockout
     # nobody was warned about is an outage, not a control.
     from services.mfa_service import enrollment_overdue
+    # Item #14 Option B: a session whose token carries the signed mfa_via_idp
+    # claim was authenticated through an IdP the tenant's owner chose to
+    # trust for MFA; that satisfies the mandate for this session only.
     if enrollment_overdue(row.role, row.mfa_enabled, row.mfa_required_since, row.created_at) \
+            and not payload.get("mfa_via_idp") \
             and not request.url.path.startswith(MFA_ENROLLMENT_EXEMPT_PREFIXES):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -99,6 +103,7 @@ async def get_current_user(request: Request, token: str = Depends(oauth2_scheme)
     payload["role"] = row.role
     payload["plan"] = row.plan
     payload["mfa_enabled"] = bool(row.mfa_enabled)
+    payload["mfa_via_idp"] = bool(payload.get("mfa_via_idp", False))
     return payload
 
 

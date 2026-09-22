@@ -115,6 +115,10 @@ PREAUTH_PATHS = (
     # same per-IP bucket as login, plus a per-challenge attempt cap in
     # services/mfa_service.py.
     "/api/v1/auth/mfa/verify",
+    # Item #14: SSO start (email -> IdP redirect) and callback (code exchange)
+    # are pre-auth; same bucket, so a domain-enumeration loop is bounded.
+    "/api/v1/auth/sso/start",
+    "/api/v1/auth/sso/callback",
     "/api/v1/auth/password-reset",
     "/api/v1/auth/forgot-password",
 )

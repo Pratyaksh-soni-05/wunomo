@@ -17,7 +17,7 @@ from sqlalchemy import select
 from config import settings
 from database import AsyncSessionLocal
 from models.all_models import EmailLoginCode, Tenant, User, UserWorkspacePreference
-from services.tenant_context import with_tenant_context, async_tenant_context, apply_tenant_to_session
+from services.tenant_context import with_tenant_context, async_tenant_context, apply_tenant_to_session, tenant_session
 
 log = structlog.get_logger()
 
@@ -144,7 +144,8 @@ def create_token(data: dict) -> str:
     )
 
 
-def issue_token_for_user(user: User, auth_method: str, epoch: int = 0) -> str:
+def issue_token_for_user(user: User, auth_method: str, epoch: int = 0,
+                         extra_claims: Optional[dict] = None) -> str:
     """Kept synchronous (see issue_token_and_remember's docstring for why).
 
     `epoch` therefore has to be passed in rather than read here — the lookup is
@@ -161,10 +162,11 @@ def issue_token_for_user(user: User, auth_method: str, epoch: int = 0) -> str:
         "role": user.role,
         "auth_method": auth_method,
         "epoch": epoch,
+        **(extra_claims or {}),
     })
 
 
-async def establish_session(user: User, auth_method: str) -> dict:
+async def establish_session(user: User, auth_method: str, mfa_via_idp: bool = False) -> dict:
     """Item #13: the ONE place a proven first factor becomes a session.
 
     Every login path -- password, email-code, Google, the pending-identity
@@ -175,19 +177,29 @@ async def establish_session(user: User, auth_method: str) -> dict:
     fork here rather than in each route means a login path added later
     cannot skip the second factor by omission.
     """
-    if user.mfa_enabled:
+    # Item #14, MFA composition. Option A (default): SSO is a first factor
+    # like any other, so an account with TOTP enabled still completes it.
+    # Option B: the tenant's owner opted in to trusting the IdP's MFA
+    # (Tenant.settings.sso.satisfies_mfa); an SSO session then skips Wunomo
+    # TOTP and carries a signed claim that also satisfies the owner/admin
+    # mandate for THIS session only. The flag reaches here only from
+    # sso_service.complete(), which read it from the tenant's own config.
+    trusted_idp = auth_method == "sso" and mfa_via_idp
+    if user.mfa_enabled and not trusted_idp:
         from services.mfa_service import create_challenge
         return {
             "status": "mfa_required", "mfa_token": await create_challenge(user, auth_method),
             "user_id": user.id, "tenant_id": user.tenant_id,
         }
+    extra = {"mfa_via_idp": True} if trusted_idp else None
     return {
-        "status": "single", "token": await issue_token_and_remember(user, auth_method),
+        "status": "single", "token": await issue_token_and_remember(user, auth_method, extra_claims=extra),
         "user_id": user.id, "tenant_id": user.tenant_id,
     }
 
 
-async def issue_token_and_remember(user: User, auth_method: str) -> str:
+async def issue_token_and_remember(user: User, auth_method: str,
+                                   extra_claims: Optional[dict] = None) -> str:
     """Item 1: wraps issue_token_for_user() with the "remember the last
     workspace used" write, for the real login/signup/invite-accept/switch
     call sites (6 of them, confirmed by grep, every one a genuine "a
@@ -200,7 +212,8 @@ async def issue_token_and_remember(user: User, auth_method: str) -> str:
     # issue_token_for_user() cannot do itself, and it is why every real login
     # path goes through this wrapper rather than the sync function directly.
     from services.token_revocation import current_epoch
-    token = issue_token_for_user(user, auth_method, epoch=await current_epoch(user.id))
+    token = issue_token_for_user(user, auth_method, epoch=await current_epoch(user.id),
+                                 extra_claims=extra_claims)
     await _remember_workspace(user.email, user.tenant_id)
     return token
 
@@ -433,7 +446,16 @@ async def resolve_password_login(email: str, password: str, tenant_id: Optional[
 async def resolve_identity(
     email: str, auth_method: str, intended_tenant_id: Optional[str] = None,
     google_id: Optional[str] = None, provider_email_verified: bool = False,
+    sso_subject: Optional[str] = None, sso_satisfies_mfa: bool = False,
+    full_name: Optional[str] = None,
 ) -> dict:
+    """Shared post-proof resolver for email-code, Google and (Item #14) SSO.
+    SSO always arrives with intended_tenant_id -- the connection IS the
+    tenant -- so it never reaches the multi-tenant "choose" branch. An SSO
+    email with no account in that tenant is provisioned just-in-time
+    (`viewer`; the domain guard already proved the IdP owns the domain),
+    because enterprise SSO where every employee first needs an invite is
+    SSO in name only."""
     async with AsyncSessionLocal() as db:
         if intended_tenant_id:
             r = await db.execute(select(User).where(
@@ -442,8 +464,12 @@ async def resolve_identity(
             ))
             user = r.scalars().first()
             if user is None:
+                if auth_method == "sso" and provider_email_verified:
+                    user = await _provision_sso_user(intended_tenant_id, email, sso_subject, full_name)
+                    return await establish_session(user, "sso", mfa_via_idp=sso_satisfies_mfa)
                 return {"status": "none"}
-            return await _link_and_issue(db, user, auth_method, google_id, provider_email_verified)
+            return await _link_and_issue(db, user, auth_method, google_id, provider_email_verified,
+                                         sso_subject=sso_subject, sso_satisfies_mfa=sso_satisfies_mfa)
 
         r = await db.execute(select(User).where(User.email == email, User.is_active.is_(True)))
         users = r.scalars().all()
@@ -464,7 +490,23 @@ async def resolve_identity(
         }
 
 
-async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_email_verified) -> dict:
+async def _provision_sso_user(tenant_id: str, email: str, sso_subject: Optional[str],
+                              full_name: Optional[str]) -> User:
+    async with tenant_session(tenant_id) as db:
+        user = User(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, email=email, hashed_password=None,
+            email_verified=True, sso_subject=sso_subject,
+            full_name=full_name or email.split("@")[0], role="viewer", created_at=utcnow(),
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    log.info("sso.user_provisioned", tenant_id=tenant_id, user_id=user.id)
+    return user
+
+
+async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_email_verified,
+                          sso_subject: Optional[str] = None, sso_satisfies_mfa: bool = False) -> dict:
     # This is the write half of the pre-auth chicken-and-egg. The caller found
     # this user by email across all tenants, which the `pre_auth_read` policy
     # permits precisely because the tenant isn't known until the user is. The
@@ -477,7 +519,8 @@ async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_
     # than widening pre_auth_read to cover UPDATE (which would let any session
     # modify any tenant's users).
     if (auth_method == "google" and not user.google_id) or \
-       (auth_method == "email_code" and not user.email_verified):
+       (auth_method == "email_code" and not user.email_verified) or \
+       (auth_method == "sso" and user.sso_subject != sso_subject):
         await apply_tenant_to_session(db, user.tenant_id)
 
     if auth_method == "google" and not user.google_id:
@@ -491,6 +534,19 @@ async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_
         user.email_verified = True
         db.add(user)
         await db.commit()
+    elif auth_method == "sso":
+        # The SSO counterpart of Google's email_verified rule: the IdP is
+        # believed only for the domain the tenant configured, and
+        # sso_service.complete() passes provider_email_verified=True only
+        # when the asserted email is in that domain.
+        if not provider_email_verified:
+            return {"status": "blocked_unverified"}
+        if user.sso_subject != sso_subject:
+            user.sso_subject = sso_subject
+            user.email_verified = True
+            db.add(user)
+            await db.commit()
+        return await establish_session(user, "sso", mfa_via_idp=sso_satisfies_mfa)
 
     return await establish_session(user, auth_method)
 
