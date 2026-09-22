@@ -74,6 +74,7 @@ from models.all_models import (
 from models.approval_model import ApprovalRequest
 from services.channel_routing import find_active_agent_in_tenant, resolve_mentioned_agent
 from services.llm_service import invoke_llm
+from services.tenant_context import async_tenant_context
 
 # One live-progress callback signature, shared by every node/helper below
 # that can emit a mid-run SSE-shaped event: (event_type, data) -> None.
@@ -677,7 +678,8 @@ async def dispatch_node(state: SupervisorState) -> dict:
             if dep_i is not None:  # guaranteed to also be in dispatch_indices, by the propagation above
                 task_rows[i].depends_on_task_id = task_rows[dep_i].id
             db.add(TaskStep(
-                task_id=task_rows[i].id, step_index=0, description=intents[i]["text"],
+                task_id=task_rows[i].id, tenant_id=task_rows[i].tenant_id, step_index=0,
+                description=intents[i]["text"],
                 source=TaskStepSource.SUPERVISOR_DISPATCHED, status=TaskStepStatus.PENDING,
             ))
         await db.commit()
@@ -859,7 +861,7 @@ async def _run_one_task(
     # situation as a real (if mild) failure rather than assuming success,
     # and this mirrors that rather than inventing a third behavior.
     result = (
-        _finalize_agent_result(final_state, channel_id) if final_state is not None
+        _finalize_agent_result(final_state, channel_id, tenant_id, user_id) if final_state is not None
         else {"response": "AXIOM hit an error before finishing this response.", "pending_approvals": []}
     )
 
@@ -1098,16 +1100,33 @@ async def run_supervisor(
     actually run (see dispatch_node/_run_one_task) -- api/v1/chat.py's
     streaming route is the only real caller that passes one; every other
     caller (tests, retry_task(), resolve_task_approval()) gets the
-    original headless behavior for free via the default."""
-    graph = get_supervisor_graph()
-    return await graph.ainvoke({
-        "tenant_id": tenant_id, "channel_id": channel_id, "project_id": project_id,
-        "user_id": user_id, "caller_role": caller_role, "message": message,
-        "intents": [], "unresolved_mentions": [], "edges": [], "inferred_edge_notices": [],
-        "error": None, "error_kind": None, "needs_clarification": None, "blocked_intent_indices": [],
-        "tasks": [], "completed_this_wave": [],
-        "handoffs_created": [], "more_ready": False, "event_sink": event_sink,
-    })
+    original headless behavior for free via the default.
+
+    Wrapped in async_tenant_context(tenant_id) (Integration Phase 3 fix,
+    2026-09-23): every node this compiled graph runs (dispatch_node,
+    run_node/_run_one_task, handoff writing) opens its own bare
+    AsyncSessionLocal() with no tenant scope of its own -- this module's
+    own header docstring says it was "headless only... every entry point
+    meant to be called directly, the way tests/test_supervisor.py does"
+    (its tests establish tenant context themselves before calling in).
+    That stopped being true the moment api/v1/chat.py wired this into a
+    live HTTP route, and nothing was added here to cover the gap: proven
+    live, every dispatch failed with "new row violates row-level security
+    policy for table task_steps" -- current_tenant_id was '' inside
+    dispatch_node's own AsyncSessionLocal(), for every tenant, every time,
+    not just under concurrent load. Fails closed (RLS correctly refused
+    the wrong-tenant write), not a leak -- but a 100%-reproducible outage
+    for every multi-agent dispatch before this fix."""
+    async with async_tenant_context(tenant_id):
+        graph = get_supervisor_graph()
+        return await graph.ainvoke({
+            "tenant_id": tenant_id, "channel_id": channel_id, "project_id": project_id,
+            "user_id": user_id, "caller_role": caller_role, "message": message,
+            "intents": [], "unresolved_mentions": [], "edges": [], "inferred_edge_notices": [],
+            "error": None, "error_kind": None, "needs_clarification": None, "blocked_intent_indices": [],
+            "tasks": [], "completed_this_wave": [],
+            "handoffs_created": [], "more_ready": False, "event_sink": event_sink,
+        })
 
 
 async def _drain_ready_waves(
@@ -1121,25 +1140,32 @@ async def _drain_ready_waves(
     rather than each re-deriving their own. Neither caller re-invokes the
     graph (see retry_task()'s own docstring on why: LangGraph
     checkpointing isn't wired up here, and both calls happen well after
-    the original run_supervisor() invocation already returned)."""
+    the original run_supervisor() invocation already returned).
+
+    Wrapped in async_tenant_context(tenant_id) for the same reason
+    run_supervisor() is -- the bare AsyncSessionLocal() calls below and
+    inside _run_ready_wave()/_run_one_task()/_write_handoffs_for_completion()
+    have no tenant scope of their own (Integration Phase 3 fix,
+    2026-09-23)."""
     completed: list[str] = []
     handoffs_created: list[str] = []
-    while True:
-        async with AsyncSessionLocal() as db:
-            ready_ids = await _find_ready_task_ids(db, channel_id)
-        if not ready_ids:
-            break
-        newly_completed, _failed = await _run_ready_wave(
-            ready_ids, tenant_id=tenant_id, channel_id=channel_id, user_id=user_id,
-            caller_role=caller_role, event_sink=event_sink,
-        )
-        completed.extend(newly_completed)
-        async with AsyncSessionLocal() as db:
-            for cid in newly_completed:
-                task_row = await db.get(Task, cid)
-                handoffs_created.extend(await _write_handoffs_for_completion(
-                    db, task_row, tenant_id=tenant_id, channel_id=channel_id, project_id=project_id,
-                ))
+    async with async_tenant_context(tenant_id):
+        while True:
+            async with AsyncSessionLocal() as db:
+                ready_ids = await _find_ready_task_ids(db, channel_id)
+            if not ready_ids:
+                break
+            newly_completed, _failed = await _run_ready_wave(
+                ready_ids, tenant_id=tenant_id, channel_id=channel_id, user_id=user_id,
+                caller_role=caller_role, event_sink=event_sink,
+            )
+            completed.extend(newly_completed)
+            async with AsyncSessionLocal() as db:
+                for cid in newly_completed:
+                    task_row = await db.get(Task, cid)
+                    handoffs_created.extend(await _write_handoffs_for_completion(
+                        db, task_row, tenant_id=tenant_id, channel_id=channel_id, project_id=project_id,
+                    ))
     return {"completed": completed, "handoffs_created": handoffs_created}
 
 
