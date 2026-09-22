@@ -168,6 +168,7 @@ DELETION_PLAN = [
     ("api_keys", None),
     ("onboarding_profiles", None),
     ("team_invites", None),
+    ("sso_domains", None),          # Item #14: derived SSO index, bare tenant_id
     ("user_workspace_preferences", None),
     ("users", None),
 ]
