@@ -58,6 +58,15 @@ class Settings(BaseSettings):
     # that introduced the rule) to enrol before privileged routes refuse them.
     MFA_GRACE_DAYS: int = 7
     MFA_ISSUER: str = "Wunomo"
+    # Security Master Ranking Item #14 (enterprise SSO through WorkOS). Empty
+    # means SSO is not configured for this deployment: /auth/sso/* answers
+    # 503 rather than pretending. WORKOS_TEST_CONNECTION_ID is the staging
+    # Test Identity Provider's connection, used only by the live round-trip
+    # script and tests -- never by a customer tenant.
+    WORKOS_API_KEY: str = ""
+    WORKOS_CLIENT_ID: str = ""
+    WORKOS_TEST_CONNECTION_ID: str = ""
+    SSO_REDIRECT_URI: str = "http://localhost:3000/api/auth/callback/sso"
     JWT_SECRET: str = "dev-jwt-secret"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60

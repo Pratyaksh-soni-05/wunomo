@@ -148,9 +148,32 @@ class User(Base):
     # as owner, on promotion to owner/admin, and backfilled at deploy for
     # existing holders. The enrolment deadline is this + MFA_GRACE_DAYS.
     mfa_required_since = Column(DateTime, nullable=True)
+    # ── Enterprise SSO (Security Master Ranking Item #14) ────────────────
+    # The WorkOS profile id ("prof_...") this account is linked to, the SSO
+    # counterpart of google_id. Written by _link_and_issue on first SSO login
+    # once the domain guard passes; an SSO-only user has this and no password.
+    sso_subject = Column(String(255), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     __table_args__ = (UniqueConstraint("tenant_id", "email"),)
     tenant = relationship("Tenant", back_populates="users")
+
+
+class SsoDomain(Base):
+    """Pre-auth lookup: which tenant owns SSO for an email domain.
+
+    The SSO configuration itself lives in Tenant.settings["sso"] (one source
+    of truth, edited through settings_service). This table is a derived
+    index written by the same code path on every change, never by hand --
+    it exists because the login page has to answer "does user@acme.com log
+    in through SSO?" BEFORE any tenant is known, and `tenants` is RLS-scoped
+    by id, so its settings cannot be searched pre-auth. Same reason
+    users/team_invites carry a pre_auth_read policy; this table gets one too.
+    """
+    __tablename__ = "sso_domains"
+    email_domain = Column(String(255), primary_key=True)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    connection_id = Column(String(255), nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow)
 
 
 class DataSource(Base):
