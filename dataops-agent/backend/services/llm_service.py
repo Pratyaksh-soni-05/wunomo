@@ -1,12 +1,14 @@
 import asyncio
 import time
+from typing import Optional
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_core.messages import BaseMessage
 from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
+from redis import asyncio as aioredis
 from config import settings
 import structlog
-from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 from groq import AuthenticationError as GroqAuthError
 from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 
@@ -14,6 +16,38 @@ from services.tenant_context import with_tenant_context
 
 
 log = structlog.get_logger()
+
+# Same lazy, loop-aware client pattern as services/auth_service.py's OTP
+# rate limiter (_redis()) - a module-level client bound at import time
+# would break across pytest-asyncio's per-test event loops. Not reusing
+# auth_service._redis() directly since no shared redis-accessor module
+# exists yet in this codebase; each file that needs Redis builds its own.
+_redis_client: Optional[aioredis.Redis] = None
+_redis_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _redis() -> aioredis.Redis:
+    global _redis_client, _redis_loop
+    loop = asyncio.get_running_loop()
+    if _redis_client is None or _redis_loop is not loop:
+        _redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        _redis_loop = loop
+    return _redis_client
+
+
+async def _record_dropped_usage(tenant_id: str, total_tokens: Optional[int]) -> None:
+    """Best-effort detectability signal for a usage row that failed to
+    persist - cumulative counters (not TTL-windowed like the OTP rate
+    limiter's keys), since this is a 'has this ever happened, by how
+    much' gauge to check on demand, not a time-boxed rate gate. Must
+    never itself raise: a Redis hiccup on top of the DB hiccup it's
+    reporting must not break log_llm_usage()'s own never-fail contract."""
+    try:
+        await _redis().incr(f"llm_usage_meter:dropped_events:{tenant_id}")
+        if total_tokens:
+            await _redis().incrby(f"llm_usage_meter:dropped_tokens:{tenant_id}", total_tokens)
+    except Exception as exc:
+        log.warning("dropped_usage_counter_failed", tenant_id=tenant_id, error=str(exc))
 
 # The only models this project has actually live-verified end-to-end for
 # real tool-calling (see CLAUDE.md's LangChain v1.x upgrade row and the
@@ -147,30 +181,36 @@ def content_as_text(content) -> str:
 @with_tenant_context
 async def log_llm_usage(
     *, tenant_id: str | None, user_id: str | None = None, session_id: str | None = None,
+    task_id: str | None = None, agent_id: str | None = None,
     request_type: str, provider: str, model: str, used_fallback: bool,
     latency_ms: int, success: bool, usage_metadata: dict | None = None,
     error_message: str | None = None,
 ) -> None:
     """Usage logging — a transient DB hiccup must never break the actual LLM
     call it's describing, but a permission/RLS denial is not a hiccup and is
-    re-raised rather than swallowed (see the except blocks below)."""
+    re-raised rather than swallowed (see the except blocks below). A
+    transient drop also increments a cumulative Redis counter (see
+    _record_dropped_usage) so "this happened once" vs "this happened
+    constantly" doesn't require grepping logs by hand."""
     if not tenant_id:
         return
+    usage_metadata = usage_metadata or {}
+    row = {
+        "tenant_id": tenant_id, "user_id": user_id, "session_id": session_id,
+        "task_id": task_id, "agent_id": agent_id,
+        "request_type": request_type, "provider": provider, "model": model,
+        "used_fallback": used_fallback,
+        "input_tokens": usage_metadata.get("input_tokens"),
+        "output_tokens": usage_metadata.get("output_tokens"),
+        "reasoning_tokens": (usage_metadata.get("output_token_details") or {}).get("reasoning"),
+        "total_tokens": usage_metadata.get("total_tokens"),
+        "latency_ms": latency_ms, "success": success, "error_message": error_message,
+    }
     try:
         from database import AsyncSessionLocal
         from models.all_models import LlmUsageEvent
-        usage_metadata = usage_metadata or {}
         async with AsyncSessionLocal() as db:
-            db.add(LlmUsageEvent(
-                tenant_id=tenant_id, user_id=user_id, session_id=session_id,
-                request_type=request_type, provider=provider, model=model,
-                used_fallback=used_fallback,
-                input_tokens=usage_metadata.get("input_tokens"),
-                output_tokens=usage_metadata.get("output_tokens"),
-                reasoning_tokens=(usage_metadata.get("output_token_details") or {}).get("reasoning"),
-                total_tokens=usage_metadata.get("total_tokens"),
-                latency_ms=latency_ms, success=success, error_message=error_message,
-            ))
+            db.add(LlmUsageEvent(**row))
             await db.commit()
     except (OperationalError, InterfaceError, DBAPIError) as exc:
         # Transient only: dropped connection, exhausted pool, DB briefly
@@ -179,6 +219,7 @@ async def log_llm_usage(
         log.warning("log_llm_usage.transient_failure",
                     tenant_id=tenant_id, request_type=request_type,
                     provider=provider, model=model, error=str(exc))
+        await _record_dropped_usage(tenant_id, row["total_tokens"])
     except Exception as exc:
         # Not transient — specifically InsufficientPrivilege from a Row-Level
         # Security denial. Previously this was caught, warned, and dropped, so
@@ -204,7 +245,11 @@ async def log_llm_usage(
 # constructor field is dead code (never wired to the actual request in this
 # library version). Left alone, a single failed primary call can take 2+
 # minutes before RunnableWithFallbacks ever gets a chance to try Groq. We
-# enforce our own hard ceiling instead of trusting those nested retries.
+# enforce our own hard ceiling instead of trusting those nested retries
+# (PRIMARY_LLM_TIMEOUT_SECONDS below, via _TimeoutFallbackChatModel) — and,
+# where we can tell the failure apart from a merely slow one, skip waiting
+# on it at all (see _is_daily_quota_error and the quota-exhausted cache
+# below).
 #
 # Raised from 15s to 30s when the primary model moved to gemini-3-flash-preview
 # (see CLAUDE.md Gotchas): even trivial single-word prompts measured 13-26s
@@ -212,6 +257,78 @@ async def log_llm_usage(
 # the fallback almost every time. GEMINI_THINKING_BUDGET below caps reasoning
 # tokens to reduce that latency — re-measure before lowering this back down.
 PRIMARY_LLM_TIMEOUT_SECONDS = 30
+
+# How long we trust a "the primary's daily quota is exhausted" finding before
+# re-checking the primary again. Google's free-tier daily caps reset on a
+# fixed wall-clock boundary (documented as midnight Pacific), not on a fixed
+# offset from the failure we observed -- and the raised exception doesn't
+# reliably expose that reset instant in a form worth parsing. A flat,
+# conservative window is simpler and safer than guessing at the real reset
+# time: worst case we re-attempt the primary once an hour while it's still
+# exhausted (one wasted attempt, capped by PRIMARY_LLM_TIMEOUT_SECONDS same
+# as any other primary failure) -- cheap compared to paying the full
+# retry-storm cost on every single call, which is the status quo this exists
+# to fix.
+QUOTA_EXHAUSTED_CACHE_TTL_SECONDS = 3600
+
+_QUOTA_EXHAUSTED_KEY_PREFIX = "llm_quota_exhausted"
+
+
+def _is_daily_quota_error(exc: Exception) -> bool:
+    """A 429 whose message carries a DAILY quota-reset signal (Gemini's
+    free-tier quota_id strings look like
+    "GenerateRequestsPerDayPerProjectPerModel-FreeTier") is fundamentally
+    different from a transient rate limit or a network blip: retrying
+    against the same primary again today can never succeed, no matter how
+    long we wait or how many times we try -- there's no backoff duration
+    that fixes "the quota resets tomorrow." A ResourceExhausted WITHOUT
+    that marker (e.g. a per-minute rate limit) is still worth the normal
+    retry -- only the daily shape is treated as non-retryable-against-
+    primary. ServiceUnavailable (503) is never a quota condition at all,
+    daily or otherwise -- ordinary transient-error handling covers it."""
+    if not isinstance(exc, ResourceExhausted):
+        return False
+    normalized = str(exc).replace("_", "").replace("-", "").replace(" ", "").lower()
+    return "perday" in normalized
+
+
+def _is_terminal_llm_error(exc: Exception) -> bool:
+    """A failure invoke_llm()'s own OUTER @retry should never spend
+    another attempt on. Reaching this point already means BOTH primary
+    and fallback failed once (invoke_llm()'s try/except already gave the
+    fallback a real chance before re-raising) -- retrying a known-terminal
+    condition three more times at wait_exponential's own backoff pace just
+    repeats the same wasted latency for the same guaranteed outcome, not a
+    chance at a different one."""
+    return _is_daily_quota_error(exc) or isinstance(exc, GroqAuthError)
+
+
+def _quota_exhausted_cache_key(provider: str, model: str) -> str:
+    return f"{_QUOTA_EXHAUSTED_KEY_PREFIX}:{provider}:{model}"
+
+
+async def _mark_quota_exhausted(provider: str, model: str) -> None:
+    """Best-effort: a cache-write failure must never block the fallback
+    response the caller is already about to receive -- worst case, the
+    next call simply rediscovers the same exhaustion at full cost, exactly
+    today's status quo, not a new failure mode."""
+    try:
+        await _redis().set(
+            _quota_exhausted_cache_key(provider, model), "1", ex=QUOTA_EXHAUSTED_CACHE_TTL_SECONDS,
+        )
+    except Exception as exc:
+        log.warning("quota_exhausted_cache_write_failed", provider=provider, model=model, error=str(exc))
+
+
+async def _is_quota_exhausted_cached(provider: str, model: str) -> bool:
+    """Best-effort: a cache-read failure must fail OPEN (assume not
+    exhausted, try the primary as normal) rather than silently starving
+    the primary of traffic it may actually be able to serve."""
+    try:
+        return bool(await _redis().exists(_quota_exhausted_cache_key(provider, model)))
+    except Exception as exc:
+        log.warning("quota_exhausted_cache_read_failed", provider=provider, model=model, error=str(exc))
+        return False
 
 # Gemini 3 models default to an internal "thinking" pass before answering —
 # observed burning 94-99 reasoning tokens on "what is 2+2?" and adding
@@ -272,58 +389,6 @@ def get_fallback_llm(temperature=0.0):
                       provider=settings.FALLBACK_LLM_PROVIDER)
 
 
-# retry_if_not_exception_type: a residency refusal is a configuration fact,
-# not a transient fault -- retrying it three times with backoff would only
-# delay the same answer by up to 20 seconds.
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10),
-       retry=retry_if_not_exception_type(DataResidencyError))
-async def invoke_llm(
-    messages: list, temperature=0.0, *, tenant_id: str | None = None,
-    user_id: str | None = None, session_id: str | None = None,
-    request_type: str = "general_completion",
-) -> str:
-    assert_outbound_llm_allowed()   # Item #11: before any message is sent
-    start = time.monotonic()
-    used_fallback = False
-    model = settings.PRIMARY_LLM_MODEL
-    try:
-        llm = get_primary_llm(temperature)
-        r = await llm.ainvoke(messages)
-        latency_ms = int((time.monotonic() - start) * 1000)
-        await log_llm_usage(
-            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
-            request_type=request_type, provider=_provider_for_model(model), model=model,
-            used_fallback=False, latency_ms=latency_ms, success=True,
-            usage_metadata=getattr(r, "usage_metadata", None),
-        )
-        return content_as_text(r.content)
-    except Exception as e:
-        log.warning("primary_llm_failed", error=str(e))
-        used_fallback = True
-        model = settings.FALLBACK_LLM_MODEL
-        fallback_start = time.monotonic()
-        try:
-            llm = get_fallback_llm(temperature)
-            r = await llm.ainvoke(messages)
-            latency_ms = int((time.monotonic() - fallback_start) * 1000)
-            await log_llm_usage(
-                tenant_id=tenant_id, user_id=user_id, session_id=session_id,
-                request_type=request_type, provider=_provider_for_model(model), model=model,
-                used_fallback=True, latency_ms=latency_ms, success=True,
-                usage_metadata=getattr(r, "usage_metadata", None),
-            )
-            return content_as_text(r.content)
-        except Exception as fallback_exc:
-            latency_ms = int((time.monotonic() - fallback_start) * 1000)
-            await log_llm_usage(
-                tenant_id=tenant_id, user_id=user_id, session_id=session_id,
-                request_type=request_type, provider=_provider_for_model(model), model=model,
-                used_fallback=True, latency_ms=latency_ms, success=False,
-                error_message=str(fallback_exc),
-            )
-            raise
-
-
 class _TimeoutFallbackChatModel:
     """Drop-in replacement for `primary.with_fallbacks([fallback])` that adds
     a hard wall-clock ceiling on the primary attempt. `RunnableWithFallbacks`
@@ -332,14 +397,33 @@ class _TimeoutFallbackChatModel:
     PRIMARY_LLM_TIMEOUT_SECONDS above) never actually reaches the fallback in
     reasonable time. Implements just the `bind_tools`/`ainvoke` surface
     `agent/dataops_agent.py` actually calls.
+
+    Shared by BOTH get_llm_for_agent() (the agent-chat path) and invoke_llm()
+    (every other LLM call in this codebase) as of the quota-exhaustion fix --
+    previously invoke_llm() had its own separate, timeout-less primary/
+    fallback logic and paid the full retry-storm cost this class exists to
+    avoid on every one of its call sites (window_and_summarize(),
+    task_planner.generate_plan(), task_executor's step re-planning,
+    transform_generator, supervisor.infer_dependencies(), IncidentManager).
+    One mechanism, one place to get it right.
     """
 
-    def __init__(self, primary, fallback, timeout_seconds, primary_model=None, fallback_model=None):
+    def __init__(
+        self, primary, fallback, timeout_seconds, primary_model=None, fallback_model=None,
+        force_used_fallback=False,
+    ):
         self._primary = primary
         self._fallback = fallback
         self._timeout = timeout_seconds
         self._primary_model = primary_model or settings.PRIMARY_LLM_MODEL
         self._fallback_model = fallback_model or settings.FALLBACK_LLM_MODEL
+        # Set when the caller already knows the "primary" slot holds the
+        # fallback client itself (get_llm_for_agent's build-failure branch)
+        # - the primary-succeeded code path below would otherwise report
+        # used_fallback=False just because nothing raised on this call,
+        # even though the model actually serving the request is the
+        # fallback, not the real primary.
+        self._force_used_fallback = force_used_fallback
 
     def bind_tools(self, tools):
         return _TimeoutFallbackChatModel(
@@ -347,7 +431,21 @@ class _TimeoutFallbackChatModel:
             self._fallback.bind_tools(tools),
             self._timeout,
             self._primary_model, self._fallback_model,
+            force_used_fallback=self._force_used_fallback,
         )
+
+    async def _call_fallback(self, messages, *args, **kwargs):
+        fallback_start = time.monotonic()
+        response = await self._fallback.ainvoke(messages, *args, **kwargs)
+        response.additional_kwargs["_llm_usage"] = {
+            "provider": _provider_for_model(self._fallback_model),
+            "model": self._fallback_model,
+            "used_fallback": True,
+            "latency_ms": int((time.monotonic() - fallback_start) * 1000),
+            "success": True,
+            "usage_metadata": getattr(response, "usage_metadata", None) or {},
+        }
+        return response
 
     async def ainvoke(self, messages, *args, **kwargs):
         # No tenant/session context reaches this class (it's built once and
@@ -356,6 +454,16 @@ class _TimeoutFallbackChatModel:
         # additional_kwargs instead; the caller (agent_node, which does have
         # tenant context) is responsible for popping and logging them.
         assert_outbound_llm_allowed()   # Item #11: the agent path, cached clients
+        provider = _provider_for_model(self._primary_model)
+
+        # A previous call already discovered the primary's daily quota is
+        # exhausted -- every call within the TTL would otherwise pay the
+        # same cost (up to the full timeout, or the real retry-storm
+        # latency if that surfaces faster) just to rediscover the same
+        # fact. Skip the primary entirely and go straight to fallback.
+        if await _is_quota_exhausted_cached(provider, self._primary_model):
+            return await self._call_fallback(messages, *args, **kwargs)
+
         start = time.monotonic()
         try:
             response = await asyncio.wait_for(
@@ -363,43 +471,120 @@ class _TimeoutFallbackChatModel:
                 timeout=self._timeout,
             )
             response.additional_kwargs["_llm_usage"] = {
-                "provider": _provider_for_model(self._primary_model),
+                "provider": provider,
                 "model": self._primary_model,
-                "used_fallback": False,
+                "used_fallback": self._force_used_fallback,
                 "latency_ms": int((time.monotonic() - start) * 1000),
                 "success": True,
                 "usage_metadata": getattr(response, "usage_metadata", None) or {},
             }
             return response
         except Exception as e:
-            log.warning("primary_llm_failed_or_timed_out", error=str(e), timeout=self._timeout)
-            fallback_start = time.monotonic()
-            response = await self._fallback.ainvoke(messages, *args, **kwargs)
-            response.additional_kwargs["_llm_usage"] = {
-                "provider": _provider_for_model(self._fallback_model),
-                "model": self._fallback_model,
-                "used_fallback": True,
-                "latency_ms": int((time.monotonic() - fallback_start) * 1000),
-                "success": True,
-                "usage_metadata": getattr(response, "usage_metadata", None) or {},
-            }
-            return response
+            if _is_daily_quota_error(e):
+                # Non-retryable against this primary today, by definition
+                # (see _is_daily_quota_error) -- no gRPC retry, no tenacity
+                # retry, no backoff: fail over immediately, and remember it
+                # so the NEXT call skips the primary too.
+                log.warning("primary_llm_quota_exhausted", error=str(e), model=self._primary_model)
+                await _mark_quota_exhausted(provider, self._primary_model)
+            else:
+                log.warning("primary_llm_failed_or_timed_out", error=str(e), timeout=self._timeout)
+            return await self._call_fallback(messages, *args, **kwargs)
+
+
+# Excludes two shapes of guaranteed-to-repeat failure from the outer retry,
+# not one: a residency refusal (DataResidencyError, Item #11 -- a
+# configuration fact, not a transient fault) and a known-terminal LLM
+# failure (_is_terminal_llm_error -- the primary's daily quota, or a bad
+# fallback API key). Retrying either three more times at wait_exponential's
+# pace just repeats the same wasted latency for the same guaranteed outcome.
+@retry(
+    stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception(
+        lambda exc: not isinstance(exc, DataResidencyError) and not _is_terminal_llm_error(exc)
+    ),
+    reraise=True,
+)
+async def invoke_llm(
+    messages: list, temperature=0.0, *, tenant_id: str | None = None,
+    user_id: str | None = None, session_id: str | None = None,
+    task_id: str | None = None, agent_id: str | None = None,
+    request_type: str = "general_completion",
+) -> str:
+    """Primary->fallback with the same hard timeout ceiling and quota-
+    exhaustion short-circuit get_llm_for_agent() already had, via the
+    shared _TimeoutFallbackChatModel (see its own docstring). The outer
+    @retry only re-attempts this whole function if BOTH primary and
+    fallback failed -- and only when that combined failure ISN'T already
+    known-terminal (_is_terminal_llm_error) or a residency refusal
+    (DataResidencyError, Item #11): retrying either three more times at
+    wait_exponential's pace just repeats the same wasted latency for the
+    same guaranteed outcome."""
+    assert_outbound_llm_allowed()   # Item #11: before any message is sent
+    start = time.monotonic()
+    model_wrapper = _TimeoutFallbackChatModel(
+        get_primary_llm(temperature), get_fallback_llm(temperature), PRIMARY_LLM_TIMEOUT_SECONDS,
+    )
+    try:
+        response = await model_wrapper.ainvoke(messages)
+    except Exception as exc:
+        latency_ms = int((time.monotonic() - start) * 1000)
+        await log_llm_usage(
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id, task_id=task_id, agent_id=agent_id,
+            request_type=request_type, provider=_provider_for_model(settings.FALLBACK_LLM_MODEL),
+            model=settings.FALLBACK_LLM_MODEL, used_fallback=True, latency_ms=latency_ms, success=False,
+            error_message=str(exc),
+        )
+        raise
+
+    usage = response.additional_kwargs.get("_llm_usage", {})
+    await log_llm_usage(
+        tenant_id=tenant_id, user_id=user_id, session_id=session_id, task_id=task_id, agent_id=agent_id,
+        request_type=request_type,
+        provider=usage.get("provider", _provider_for_model(settings.PRIMARY_LLM_MODEL)),
+        model=usage.get("model", settings.PRIMARY_LLM_MODEL),
+        used_fallback=usage.get("used_fallback", False),
+        latency_ms=usage.get("latency_ms", int((time.monotonic() - start) * 1000)),
+        success=True, usage_metadata=usage.get("usage_metadata"),
+    )
+    return content_as_text(response.content)
 
 
 def get_llm_for_agent(temperature=0.0, primary_model: str | None = None):
     """primary_model overrides settings.PRIMARY_LLM_MODEL for this call
     only (Phase 16's per-tenant AI model override) - the fallback model is
     always the global settings.FALLBACK_LLM_MODEL, since fallback is
-    reliability infrastructure, not a per-tenant preference."""
+    reliability infrastructure, not a per-tenant preference.
+
+    Always returns a _TimeoutFallbackChatModel, never a bare client -
+    agent_node's usage logging depends on the _llm_usage key that only
+    the wrapper stashes onto a response's additional_kwargs. This used to
+    fall back to a bare get_fallback_llm() client on ANY exception here
+    (including the primary failing to even build), which meant every chat
+    turn served that way was completely unmetered - no _llm_usage key, so
+    agent_node's `if usage:` check silently skipped log_llm_usage() the
+    whole time. get_fallback_llm() itself is deliberately NOT wrapped in
+    the try - if there's genuinely no LLM available at all, failing loudly
+    here is more honest than silently returning a broken, unmetered
+    object further down the call chain."""
+    fallback = get_fallback_llm(temperature)
+    force_used_fallback = False
     try:
         primary = get_primary_llm(temperature, model=primary_model)
-        fallback = get_fallback_llm(temperature)
-        return _TimeoutFallbackChatModel(
-            primary, fallback, PRIMARY_LLM_TIMEOUT_SECONDS,
+        primary_model_name = primary_model or settings.PRIMARY_LLM_MODEL
+    except Exception as exc:
+        log.warning(
+            "primary_llm_build_failed", error=str(exc),
             primary_model=primary_model or settings.PRIMARY_LLM_MODEL,
         )
-    except Exception:
-        return get_fallback_llm(temperature)
+        primary = fallback
+        primary_model_name = settings.FALLBACK_LLM_MODEL
+        force_used_fallback = True
+    return _TimeoutFallbackChatModel(
+        primary, fallback, PRIMARY_LLM_TIMEOUT_SECONDS,
+        primary_model=primary_model_name,
+        force_used_fallback=force_used_fallback,
+    )
 
 
 class LLMService:
@@ -411,13 +596,14 @@ class LLMService:
 
     async def complete(
         self, prompt: str, temperature: float = 0.0, *, tenant_id: str | None = None,
-        user_id: str | None = None, session_id: str | None = None,
+        user_id: str | None = None, session_id: str | None = None, task_id: str | None = None,
+        agent_id: str | None = None,
         request_type: str = "general_completion",
     ) -> str:
         from langchain_core.messages import HumanMessage
         return await invoke_llm(
             [HumanMessage(content=prompt)], temperature=temperature,
-            tenant_id=tenant_id, user_id=user_id, session_id=session_id,
+            tenant_id=tenant_id, user_id=user_id, session_id=session_id, task_id=task_id, agent_id=agent_id,
             request_type=request_type,
         )
 
