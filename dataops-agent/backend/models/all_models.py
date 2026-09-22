@@ -305,8 +305,12 @@ class AuditLog(Base):
     tenant_id = Column(String, nullable=False)
     # Nullable, no FK - matches this table's own tenant_id (also no FK):
     # an audit log must never fail to record an action over a referential-
-    # integrity check. History predates agents-as-records, backfills to
-    # AXIOM's row-one agent per tenant.
+    # integrity check. History predates agents-as-records; rows written
+    # before Wunomo Projects Phase 0 keep agent_id = NULL permanently and
+    # were deliberately NOT backfilled -- Item #9's append-only trigger
+    # blocks any UPDATE to this table, for every role, with no exception,
+    # and that guarantee wins over backfill completeness here. See
+    # migration dd460a06e6ce and docs/context/GOTCHAS.md.
     agent_id = Column(String, nullable=True)
     actor = Column(String(255))
     action = Column(String(255), nullable=False)

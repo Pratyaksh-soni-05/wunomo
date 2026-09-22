@@ -39,6 +39,26 @@ sense that matters (a second real run can't clobber anything), though the
 (tenant_id, name) unique constraint on agent_instances means Alembic's own
 apply-once bookkeeping is really what prevents a genuine double-run of the
 INSERT half.
+
+EDITED 2026-09-23, Integration Phase 2: audit_logs dropped from the
+backfill loop below. This file predates master's Item #9 append-only
+trigger on audit_logs (BEFORE UPDATE OR DELETE, every role, no exception) --
+at the time this migration was written, updating audit_logs.agent_id was
+completely ordinary. Once merged onto a chain where that trigger already
+exists, this same UPDATE fails outright against any database with real
+audit_logs rows, and -- because it ran last in the original loop, inside
+this migration's one transaction -- its failure rolled back everything
+else in this migration too, including the harmless tasks/chat_messages/
+llm_usage_events backfills and the AXIOM INSERT itself.
+
+This migration has never been applied to any real database (confirmed via
+alembic current before this edit: every environment this branch has run in
+sat at e5a9c3d7b2f1, master's pre-merge head) -- editing it here carries
+none of the desync risk that "never edit a shipped migration" exists to
+prevent. See the new migration immediately after this one in the chain,
+and docs/context/GOTCHAS.md, for the actual decision: historical
+audit_logs rows keep agent_id = NULL permanently. The append-only
+guarantee wins over backfill completeness for this one column.
 """
 from typing import Sequence, Union
 from alembic import op
@@ -75,7 +95,8 @@ def upgrade() -> None:
         FROM tenants t
     """))
 
-    for table in ('tasks', 'chat_messages', 'llm_usage_events', 'audit_logs'):
+    # audit_logs deliberately excluded -- see the file-header note above.
+    for table in ('tasks', 'chat_messages', 'llm_usage_events'):
         conn.execute(sa.text(f"""
             UPDATE {table} AS target
             SET agent_id = a.id
@@ -86,7 +107,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
-    for table in ('tasks', 'chat_messages', 'llm_usage_events', 'audit_logs'):
+    # audit_logs excluded here too -- upgrade() never set it, so there is
+    # nothing for downgrade() to unset, and attempting the UPDATE would hit
+    # the same append-only trigger this edit exists to respect.
+    for table in ('tasks', 'chat_messages', 'llm_usage_events'):
         conn.execute(sa.text(f"""
             UPDATE {table} AS target
             SET agent_id = NULL
