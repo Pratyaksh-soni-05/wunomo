@@ -655,7 +655,71 @@ were checked and deferred on purpose, not missed:
 Neither of these blocked Phase 7 — the screenshot pass proceeded with both
 left exactly as they are in the live product today.
 
-## 8. Source of truth
+## 8. Capture rules — real screenshots means the real tenant, no exceptions
+
+**Every landing-page product screenshot comes from `demo@axiom-yc.ai`, the
+real long-running demo account, with its real contents exactly as they
+stand — never a tenant created or seeded for the purpose of the capture.**
+This is not a style preference; it's the thing that separates "real
+screenshots" from a staged demo, which is the entire premise the landing
+page's own copy ("no fabricated numbers") stakes itself on.
+
+**The near-miss this rule exists to prevent, 2026-08-27:** a landing-carousel
+recapture pass built and seeded a brand-new tenant (`landing-demo@wunomo.ai`,
+"Wunomo Product Demo") from scratch — synthetic CSV sources, triggered
+pipeline runs, a quality rule, a chat message, a task — specifically so the
+5 slides would have something to show, because a genuinely fresh tenant
+renders as all zeros. The resulting screenshots were real in the narrow
+sense that every number on screen came from a real API response, no pixel
+was hand-edited — but the entire *usage history* behind those numbers was
+manufactured in one sitting for the screenshot, not organic. The report
+describing this work called it "a fresh, synthetic-data-only demo tenant,"
+and it was that word — **synthetic** — landing wrong against a screen that
+happened to superficially resemble the real tenant's shape (2 sources, 2
+pipelines) that prompted the question that caught it. Nothing about the
+screenshots themselves signaled the problem; the same fabricated-tenant
+technique would have passed a purely visual review indefinitely.
+
+**What "the real tenant, no exceptions" actually means in practice**,
+established while re-capturing correctly the same session:
+- A thin screen stays thin. `demo@axiom-yc.ai` has exactly 2 sources and 2
+  pipelines — the Dashboard/Pipelines/Quality slides show exactly that, not
+  a rounder or more impressive number.
+- A bad-looking real number ships anyway, **once it's confirmed to reflect
+  current, correct system behavior** — Dashboard's Open Incidents was 22
+  (a real, live symptom of the pre-merge item 53 duplicate-incident bug) at
+  the time of capture. The resolution was to merge the already-reviewed fix
+  branch, confirm via real Celery beat logs that a tick fired and the count
+  stayed flat, and *then* capture whatever number resulted — not to hide,
+  filter, or wait out the bug quietly. The distinguishing question was never
+  "does this number look bad," it was "does this number reflect code that's
+  actually still true" — a bug already fixed and sitting merged is not a
+  fact about the running system anymore.
+- Messy real history ships as-is. `demo@axiom-yc.ai`'s Tasks list carries
+  real leftover QA-verification debris from this project's own earlier
+  testing passes (goals literally titled "item-46 verification task...").
+  It is not filtered, hidden, or cropped out of the screenshot — it's real
+  tenant content, and curating it out to look more polished is exactly the
+  move this rule forbids, just aimed at history instead of a fabricated
+  tenant. (Real PII — an actual email, tenant ID, or connection string — is
+  a different case and does get masked, at the DOM level before the
+  screenshot, same as raw UUIDs in chat responses; see below. Internal QA
+  jargon is not PII and is not masked on appearance grounds alone.)
+- Raw IDs that leak into chat responses (pipeline/source/run/incident/tenant
+  UUIDs AXIOM prints inline) are masked with a DOM-level find-and-replace
+  immediately before the screenshot is taken — the live page still shows
+  them, the stored message is never edited, only the one exported PNG has
+  them blacked out. This is the one form of post-capture intervention that's
+  in bounds, precisely because it changes nothing about what actually
+  happened — it's redacting a photograph, not fabricating an event to
+  photograph.
+
+**If a screen looks too thin or a number looks too bad to ship, that's a
+signal to ask, not a license to seed data or reach for a different tenant.**
+See `docs/context/WALKTHROUGH_FINDINGS_2026-08.md` items 65–67 for the full
+incident, the fix, and the QA-debris inventory.
+
+## 9. Source of truth
 
 `dataops-agent/frontend/src/styles/tokens.css` is authoritative. This
 document is a compiled reference, last updated 2026-08-21 (surfaces

@@ -12,7 +12,6 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
   const router = useRouter();
   const [checked, setChecked] = useState(false);
   const [user, setUser] = useState<DecodedUser | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
 
@@ -73,16 +72,13 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
     <QueryProvider>
       <div className="app-layout">
         <Sidebar
-          collapsed={collapsed}
-          onToggle={() => setCollapsed((v) => !v)}
           mobileOpen={mobileOpen}
           user={user}
         />
-        <div className={["main-content", collapsed ? "expanded" : ""].filter(Boolean).join(" ")}>
+        <div className="main-content">
           <Topbar
             onToggleSidebar={() => setMobileOpen((v) => !v)}
             onOpenCommandPalette={() => setCmdOpen(true)}
-            user={user}
           />
           <main className="page-content">{children}</main>
         </div>

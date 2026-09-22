@@ -2,13 +2,22 @@ import { ReactNode } from "react";
 import { Card, CardBody, Badge } from "@/components/ui";
 import type { Employee } from "@/lib/employees";
 
-// Shared by /ai-employees and the landing page's roster section - only the
-// active employee's CTA differs between callers (auth-aware on the landing
-// page, always "Open AXIOM" on the already-auth-gated /ai-employees page),
-// so that's the one thing left to the caller.
-export function EmployeeCard({ employee: e, cta }: { employee: Employee; cta?: ReactNode }) {
+// Shared by /ai-employees, the landing page's roster section, and /agents/
+// hire - only the active employee's CTA differs between the first two
+// callers (auth-aware on the landing page, always "Open AXIOM" on the
+// already-auth-gated /ai-employees page), so that's the one thing left to
+// the caller. `interactive` (default true, matching those two callers'
+// existing look) controls the hover-elevate effect -- /agents/hire passes
+// false because these cards are reference-only there (no cta, nothing
+// happens on click): the same shadow-lift affordance that correctly signals
+// "click me" on the other two pages was reading as a false promise on a
+// page where the real action is the form below, not the cards (found live
+// -- a user clicked the AXIOM card expecting it to do something).
+export function EmployeeCard({
+  employee: e, cta, interactive = true,
+}: { employee: Employee; cta?: ReactNode; interactive?: boolean }) {
   return (
-    <Card hover style={{ position: "relative" }}>
+    <Card hover={interactive} style={{ position: "relative" }}>
       {!e.active && (
         <div className="locked-overlay">
           <Badge variant="gray">Coming Soon</Badge>

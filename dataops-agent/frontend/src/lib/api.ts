@@ -381,13 +381,19 @@ export function rejectRequest(token: string, approvalId: string): Promise<unknow
 // button conditionally per row); getOpenIncidents() is now a thin wrapper
 // that actually passes status=open, matching what its name has always
 // implied and what the health banner actually needs.
-export function getIncidents(token: string, status?: string): Promise<{ incidents: Incident[]; count: number }> {
-  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-  return authedRequest(`/api/v1/incidents/${qs}`, token);
+export function getIncidents(
+  token: string,
+  opts?: { status?: string; unscoped?: boolean }
+): Promise<{ incidents: Incident[]; count: number }> {
+  const qs = new URLSearchParams();
+  if (opts?.status) qs.set("status", opts.status);
+  if (opts?.unscoped) qs.set("unscoped", "true");
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return authedRequest(`/api/v1/incidents/${suffix}`, token);
 }
 
 export function getOpenIncidents(token: string): Promise<{ incidents: Incident[]; count: number }> {
-  return getIncidents(token, "open");
+  return getIncidents(token, { status: "open" });
 }
 
 export interface ChatSessionSummary {
@@ -419,15 +425,55 @@ export interface ChatToolCall {
     | "approval_rejected"
     | "approval_executed"
     | "approval_failed"
-    | "denied_insufficient_role";
+    | "denied_insufficient_role"
+    // Wunomo Projects Phase 2 frontend, slice 9:
+    | "denied_out_of_scope"
+    | "denied_source_locked"
+    // Streaming only (POST /chat/stream) -- transient, never persisted and
+    // never seen on a message loaded via GET .../history. "running" is the
+    // live state between a tool_start and its matching tool_end SSE event;
+    // "failed" is a tool_end with ok:false, whose real reason (a lock
+    // conflict vs some other failure) only the persisted trace can tell
+    // apart -- once the turn's `done` event lands, the caller replaces
+    // this whole message with the real persisted one (see
+    // sendChatMessageStream's docstring), so a live-only "failed" call
+    // always resolves to its real, specific status within one turn.
+    | "running"
+    | "failed";
   approval_id?: string;
+  // denied_out_of_scope only -- lets the UI render a real "grant access"
+  // link pre-scoped to this exact agent/source, role-gated to Owner/Admin
+  // (the only roles the real grant endpoint accepts).
+  reason?: string;
+  agent_id?: string;
+  agent_name?: string;
+  source_id?: string;
+  source_name?: string;
+  // Streaming only -- a short live preview of args/result (POST /chat/
+  // stream's tool_start/tool_end events carry a summary, not the real
+  // args/result object the persisted trace stores). Never present on a
+  // message loaded from history.
+  args_summary?: string;
+  result_summary?: string;
 }
 
 export interface ChatMessageItem {
-  role: "user" | "assistant";
+  // "system_notice" (supervisor wiring): a system-authored line -- an
+  // inferred dependency edge's explanation, or a handoff between two
+  // agents -- never one agent's own words. Same free-text ChatMessage.role
+  // column "summary" already used a non-user/assistant value on; render
+  // via shape I (§7.3.I), never as if AXIOM or any one agent said it.
+  role: "user" | "assistant" | "system_notice";
   content: string;
   tool_calls: ChatToolCall[];
   timestamp: string;
+  // Added for the employee avatar (§7.4) -- which real agent sent this
+  // message (assistant rows) or was tagged by it (user rows), straight off
+  // ChatMessage.agent_id/mentioned_agent_id. Both null for a pre-agents
+  // message, a 1:1 non-channel message, or a user message that didn't
+  // @mention anyone -- never guess an agent when this is null.
+  agent_id?: string | null;
+  mentioned_agent_id?: string | null;
 }
 
 export interface ChatContext {
@@ -470,6 +516,232 @@ export function getChatHistory(token: string, sessionId: string): Promise<{ sess
   return authedRequest(`/api/v1/chat/sessions/${sessionId}/history`, token);
 }
 
+// ---------- Streaming chat (POST /api/v1/chat/stream — Stage 1) ----------
+//
+// Kept entirely separate from sendChatMessage()/request() above: the
+// buffered endpoint stays untouched and this is additive, not a
+// replacement. Currently wired into the project chat page only (see
+// app/(app)/projects/[id]/chat/page.tsx) — the direct AXIOM chat page
+// (app/(app)/chat/page.tsx) stays on sendChatMessage() until this path is
+// proven.
+
+// The very first event on every stream, before any token -- the
+// responding agent is already resolved server-side before the run even
+// starts, so the client doesn't have to wait for `done` to color the
+// streaming placeholder's avatar correctly (§7.3.C).
+export interface ChatStreamStart {
+  agent_id: string | null;
+  session_id: string;
+}
+
+export interface ChatStreamDone {
+  // Null on the supervisor path (multi-agent dispatch) -- there is no one
+  // message this turn produced, see ChatStreamSupervisorTask's own
+  // message_id instead, one per dispatched agent.
+  message_id: string | null;
+  // Always present, including when the client supplied its own
+  // session_id -- a sessionless first message otherwise has no way to
+  // learn the server-generated id from the stream alone.
+  session_id: string;
+  provider: string | null;
+  used_fallback: boolean | null;
+  usage: Record<string, unknown> | null;
+  // Same value `start` already carried -- kept here too as a second,
+  // redundant confirmation, not the only place it's available anymore.
+  // Null on the supervisor path -- no single agent is "the" responder.
+  agent_id: string | null;
+}
+
+export interface ChatStreamApprovalRequired {
+  approval_request_id: string;
+  // Read straight off the real ApprovalRequest row (see api/v1/chat.py's
+  // _run_agent_and_persist_stream) -- lets the live notice say what's
+  // actually being asked instead of a generic banner.
+  risk_level: string;
+  reason: string;
+}
+
+// Supervisor wiring (a message resolving to two or more @mentions) --
+// five event types on top of the seven single-agent ones above. See
+// api/v1/chat.py's chat_stream() docstring for the full contract.
+
+// One per dispatched Task, now fired up to three times across its life
+// (not once, already-resolved): "queued" the instant dispatch happens
+// (§7.3.B's acknowledgement, before any work has started at all),
+// "running" the moment it actually starts, then exactly one terminal
+// status. token/tool_start/tool_end below stream live in between "running"
+// and the terminal event -- supervisor sub-tasks use run_agent_stream()
+// now, the same as the single-agent path, tagged with task_id/agent_id so
+// a client juggling several running at once can route each delta.
+export interface ChatStreamSupervisorTask {
+  task_id: string;
+  agent_id: string;
+  agent_name: string;
+  status: "queued" | "running" | "blocked" | "paused_needs_approval" | "completed" | "failed";
+  // Null except on the terminal "completed" emission -- never a
+  // fabricated placeholder.
+  response: string | null;
+  // Set only when `response` is non-null -- the real, already-persisted
+  // ChatMessage id, so a live-pushed render can be reconciled with the
+  // same row the next history refetch returns, not just re-added.
+  message_id: string | null;
+}
+
+// Shape I (§7.3.I) content that arrives live before it's persisted (an
+// inferred-edge notice) or that never persists at all (an unresolved
+// @mention, the multi-agent equivalent of the single-mention path's own
+// never-persisted routing failure).
+export interface ChatStreamSystemLine {
+  text: string;
+}
+
+// The supervisor's needs_clarification outcome (§7.3.G, not built this
+// pass) -- never persisted, never rendered; see onNeedsClarification's
+// own call site for the explicit "log, don't fake a UI" contract.
+export interface ChatStreamNeedsClarification {
+  question: string;
+  agents: string[];
+  options: string[];
+}
+
+// A Handoff row, relayed live (it already persists in its own table,
+// unchanged by this pass -- see api/v1/chat.py's _handoff_entries for
+// the same content re-derived on the next history refetch).
+export interface ChatStreamHandoff {
+  from_agent_id: string;
+  from_agent_name: string;
+  to_agent_id: string;
+  to_agent_name: string;
+  payload_summary: string;
+  withheld: string[];
+}
+
+export interface ChatStreamHandlers {
+  onStart?: (data: ChatStreamStart) => void;
+  // task_id/agent_id are present only on the supervisor path -- absent
+  // (not merely null) on the single-agent path's own emissions, where
+  // there is only ever one message for a delta to belong to.
+  onToken?: (data: { delta: string; task_id?: string; agent_id?: string }) => void;
+  onToolStart?: (data: { name: string; args_summary: string; task_id?: string; agent_id?: string }) => void;
+  onToolEnd?: (data: { name: string; result_summary: string; ok: boolean; task_id?: string; agent_id?: string }) => void;
+  onApprovalRequired?: (data: ChatStreamApprovalRequired) => void;
+  // `kind` is only ever set on the supervisor path's refusal outcome --
+  // one of "ceiling" | "fan_in" | "cycle"; undefined for every other
+  // error (including every single-agent-path error, which never sends it).
+  onError?: (data: { message: string; kind?: "ceiling" | "fan_in" | "cycle" | null }) => void;
+  onDone?: (data: ChatStreamDone) => void;
+  onSupervisorTask?: (data: ChatStreamSupervisorTask) => void;
+  onSystemLine?: (data: ChatStreamSystemLine) => void;
+  onNeedsClarification?: (data: ChatStreamNeedsClarification) => void;
+  onHandoff?: (data: ChatStreamHandoff) => void;
+}
+
+// Parses one `event: X\ndata: {...}` frame (already split on the blank-line
+// separator) into a typed (eventType, payload) pair. Returns null for a
+// malformed/empty frame rather than throwing — a single bad frame must
+// never take down the rest of the stream.
+function parseSseFrame(rawFrame: string): { eventType: string; data: unknown } | null {
+  let eventType: string | null = null;
+  let data: unknown = null;
+  for (const line of rawFrame.split("\n")) {
+    if (line.startsWith("event: ")) eventType = line.slice("event: ".length);
+    else if (line.startsWith("data: ")) {
+      try {
+        data = JSON.parse(line.slice("data: ".length));
+      } catch {
+        return null;
+      }
+    }
+  }
+  return eventType ? { eventType, data } : null;
+}
+
+export async function sendChatMessageStream(
+  token: string,
+  params: {
+    message: string;
+    session_id?: string;
+    personality_mode?: string;
+    operation_mode?: string;
+    context?: ChatContext;
+  },
+  handlers: ChatStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/v1/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(params),
+    signal,
+  });
+
+  if (!res.ok) {
+    // Quota/budget enforcement runs before the stream ever opens (see
+    // api/v1/chat.py's chat_stream() docstring) -- a 402 here is a normal
+    // JSON error body, the exact same ApiError shape sendChatMessage()
+    // throws, so every existing 402-handling catch block works unchanged
+    // against this function too.
+    const body = await res.json().catch(() => null);
+    if (res.status === 401) handleSessionExpired();
+    throw new ApiError(res.status, body?.detail ?? body);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) return;
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary: number;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const rawFrame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const parsed = parseSseFrame(rawFrame);
+      if (!parsed) continue;
+
+      switch (parsed.eventType) {
+        case "start":
+          handlers.onStart?.(parsed.data as ChatStreamStart);
+          break;
+        case "token":
+          handlers.onToken?.(parsed.data as { delta: string; task_id?: string; agent_id?: string });
+          break;
+        case "tool_start":
+          handlers.onToolStart?.(parsed.data as { name: string; args_summary: string; task_id?: string; agent_id?: string });
+          break;
+        case "tool_end":
+          handlers.onToolEnd?.(parsed.data as { name: string; result_summary: string; ok: boolean; task_id?: string; agent_id?: string });
+          break;
+        case "approval_required":
+          handlers.onApprovalRequired?.(parsed.data as ChatStreamApprovalRequired);
+          break;
+        case "error":
+          handlers.onError?.(parsed.data as { message: string; kind?: "ceiling" | "fan_in" | "cycle" | null });
+          break;
+        case "done":
+          handlers.onDone?.(parsed.data as ChatStreamDone);
+          break;
+        case "supervisor_task":
+          handlers.onSupervisorTask?.(parsed.data as ChatStreamSupervisorTask);
+          break;
+        case "system_line":
+          handlers.onSystemLine?.(parsed.data as ChatStreamSystemLine);
+          break;
+        case "needs_clarification":
+          handlers.onNeedsClarification?.(parsed.data as ChatStreamNeedsClarification);
+          break;
+        case "handoff":
+          handlers.onHandoff?.(parsed.data as ChatStreamHandoff);
+          break;
+      }
+    }
+  }
+}
+
 // Item 4: 409 (ApiError.status) means a pending approval still traces back
 // to this session -- see chat.py's delete_session for why that's refused
 // while a resolved one isn't.
@@ -496,11 +768,39 @@ export function getSources(token: string): Promise<{ sources: DataSourceItem[]; 
   return authedRequest("/api/v1/sources/", token);
 }
 
+export interface CreateSourceResult {
+  id?: string;
+  name?: string;
+  source_type?: string;
+  status?: string;
+  // register_source() (backend) reports a refusal -- app-database guard,
+  // unknown type, no-connector type -- as a plain {"error": ...} body on a
+  // 200 response, not an HTTP error status. Callers must check this field;
+  // a 200 status alone does not mean the source was actually created.
+  error?: string;
+}
+
 export function createSource(
   token: string,
   params: { name: string; source_type: string; connection_config: Record<string, unknown> }
-): Promise<{ id: string; name: string; source_type: string; status: string }> {
+): Promise<CreateSourceResult> {
   return request("/api/v1/sources/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
+export interface ConnectionTestResult {
+  ok: boolean;
+  reason?: string;
+  message?: string;
+  tables_found?: number;
+}
+
+export function testSourceConnection(
+  token: string,
+  params: { source_type: string; connection_config: Record<string, unknown> }
+): Promise<ConnectionTestResult> {
+  return request("/api/v1/sources/test-connection", {
     method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
   });
 }
@@ -574,8 +874,12 @@ export interface PipelineRunItem {
   error_message?: string | null;
 }
 
-export function getPipelines(token: string): Promise<{ pipelines: PipelineItem[]; count: number }> {
-  return authedRequest("/api/v1/pipelines/", token);
+export function getPipelines(
+  token: string,
+  opts?: { unscoped?: boolean }
+): Promise<{ pipelines: PipelineItem[]; count: number }> {
+  const qs = opts?.unscoped ? "?unscoped=true" : "";
+  return authedRequest(`/api/v1/pipelines/${qs}`, token);
 }
 
 export function createPipeline(
@@ -895,12 +1199,13 @@ export function explainCode(
 
 export function getTransformRuns(
   token: string,
-  opts?: { limit?: number; offset?: number; source_id?: string }
+  opts?: { limit?: number; offset?: number; source_id?: string; unscoped?: boolean }
 ): Promise<{ runs: TransformRunItem[]; count: number }> {
   const qs = new URLSearchParams();
   if (opts?.limit) qs.set("limit", String(opts.limit));
   if (opts?.offset) qs.set("offset", String(opts.offset));
   if (opts?.source_id) qs.set("source_id", opts.source_id);
+  if (opts?.unscoped) qs.set("unscoped", "true");
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return authedRequest(`/api/v1/transformations/runs${suffix}`, token);
 }
@@ -1234,6 +1539,15 @@ export interface TaskStepItem {
   approval_request_id: string | null;
 }
 
+export interface TaskCost {
+  llm_calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  credits: number;
+}
+
 export interface TaskItem {
   id: string;
   tenant_id: string;
@@ -1241,11 +1555,21 @@ export interface TaskItem {
   goal: string;
   task_shape: TaskShapeValue;
   status: string;
+  // Wunomo Projects Phase 4 frontend, slice 11: the chat session this task
+  // was started from, if any -- the write side was already correct
+  // (TaskCreateModal/create_task), this was simply never in the response.
+  originating_session_id: string | null;
   pause_reason: string | null;
+  // Wunomo Projects Phase 2 frontend, slice 9: only set when pause_reason
+  // names a scope denial specifically -- lets the task detail page render
+  // a real "grant access" link pre-scoped to this exact agent/source, the
+  // same way the chat trace does.
+  scope_denial: { agent_id: string; source_id: string } | null;
   completion_note: string | null;
   approval_pending_reason: string | null;
   expiry_reason: string | null;
   quota_paused_reason: string | null;
+  source_locked_reason: string | null;
   termination_reason: string | null;
   paused_at: string | null;
   plan_approved_by: string | null;
@@ -1256,11 +1580,20 @@ export interface TaskItem {
   created_at: string | null;
   started_at: string | null;
   steps: TaskStepItem[];
+  // Only GET /tasks/{id} merges this in (a second DB query) -- every
+  // other task-mutation endpoint's response (approve/reject-plan,
+  // edit-steps, advance, resume, reject-step, cancel) returns
+  // _serialize_task() alone, with no `cost` key at all. Those responses
+  // land in the query cache directly via setQueryData before the
+  // follow-up invalidate()'s refetch resolves, so a consumer must treat
+  // this as genuinely absent, not just zeroed.
+  cost?: TaskCost;
 }
 
 export interface TaskSummary {
   id: string;
   user_id: string;
+  agent_id: string | null;
   goal: string;
   task_shape: TaskShapeValue;
   status: string;
@@ -1278,8 +1611,52 @@ export function getAllTenantTasks(token: string): Promise<TaskSummary[]> {
   return authedRequest("/api/v1/tasks/all", token);
 }
 
-export function getTaskCounts(token: string): Promise<{ active: number }> {
-  return authedRequest("/api/v1/tasks/counts", token);
+// Wunomo Projects Phase 4 frontend, slice 12: the tenant-wide task rail.
+// Replaces the old getTaskCounts()/tasks/counts -- the topbar badge is now
+// just activeTasks.length off this same response, so the badge and the
+// rail can never disagree about what "active" means.
+export interface ActiveTaskCurrentStep {
+  step_index: number;
+  description: string;
+  status: string;
+  // Lets a caller tell whether a GET /approvals/merged item is already
+  // represented by this task -- both can trace back to the same
+  // PolicyEngine ApprovalRequest (slice 9, 2026-09-15, findings item 98).
+  approval_request_id: string | null;
+}
+
+export interface ActiveTaskRailItem {
+  id: string;
+  goal: string;
+  status: string;
+  task_shape: TaskShapeValue;
+  agent_id: string | null;
+  agent_name: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  originating_session_id: string | null;
+  current_step: ActiveTaskCurrentStep | null;
+  // needs_attention/attention_tier are derived server-side as
+  // active-minus-RUNNABLE_TASK_STATUSES, not a hardcoded list -- see
+  // api/v1/tasks.py's list_active_tasks. tier 0 = expiring approval
+  // (most urgent), 1 = already dead (failed step / invalid plan), 2 =
+  // an unapproved draft plan (no decay, least urgent of the three).
+  needs_attention: boolean;
+  attention_tier: 0 | 1 | 2 | null;
+  action_text: string | null;
+  // Real, specific failure text (finding 76's "can't be resumed"
+  // disclosure baked in) -- at most one is ever non-null, matching which
+  // status the task is actually in. Reused from the same *_reason()
+  // helpers the task detail page's pause_reason/plan_invalid_reason use.
+  pause_reason: string | null;
+  plan_invalid_reason: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  paused_at: string | null;
+}
+
+export function getActiveTasks(token: string): Promise<ActiveTaskRailItem[]> {
+  return authedRequest("/api/v1/tasks/active", token);
 }
 
 export function getTask(token: string, id: string): Promise<TaskItem> {
@@ -1288,7 +1665,13 @@ export function getTask(token: string, id: string): Promise<TaskItem> {
 
 export function createTask(
   token: string,
-  params: { goal: string; task_shape: TaskShapeValue; originating_session_id?: string }
+  params: {
+    goal: string; task_shape: TaskShapeValue; originating_session_id?: string;
+    // Wunomo Projects Phase 4: omitted keeps the backend's own "oldest
+    // active agent" fallback (unchanged default) -- provided, it's who
+    // actually runs this task, not just who you were talking to.
+    agent_id?: string;
+  }
 ): Promise<TaskItem> {
   return request("/api/v1/tasks/", {
     method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
@@ -1334,6 +1717,319 @@ export function rejectTaskStep(token: string, id: string, notes = ""): Promise<T
 
 export function cancelTask(token: string, id: string): Promise<TaskItem> {
   return request(`/api/v1/tasks/${id}/cancel`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+}
+
+// ---------- Projects (Wunomo Projects Phase 1, part two) ----------
+
+export interface ProjectItem {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+}
+
+export interface ProjectAgentItem {
+  id: string;
+  name: string;
+  employee_type: string;
+}
+
+export interface ProjectChannelItem {
+  id: string;
+  name: string;
+}
+
+export function listProjects(token: string): Promise<{ projects: ProjectItem[] }> {
+  return authedRequest("/api/v1/projects/", token);
+}
+
+export function createProject(token: string, name: string, description?: string): Promise<ProjectItem> {
+  return request("/api/v1/projects/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ name, description: description || undefined }),
+  });
+}
+
+export function renameProject(token: string, projectId: string, name: string): Promise<ProjectItem> {
+  return request(`/api/v1/projects/${projectId}`, {
+    method: "PATCH", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ name }),
+  });
+}
+
+export function deleteProject(token: string, projectId: string): Promise<{ id: string; deleted: boolean }> {
+  return request(`/api/v1/projects/${projectId}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function getProjectAgents(
+  token: string, projectId: string
+): Promise<{ project_id: string; agents: ProjectAgentItem[] }> {
+  return authedRequest(`/api/v1/projects/${projectId}/agents`, token);
+}
+
+export function getProjectChannels(
+  token: string, projectId: string
+): Promise<{ project_id: string; channels: ProjectChannelItem[] }> {
+  return authedRequest(`/api/v1/projects/${projectId}/channels`, token);
+}
+
+// ---------- Hiring (Wunomo Projects Phase 1, part two) ----------
+
+export interface HiredAgent {
+  id: string;
+  name: string;
+  employee_type: string;
+  personality: string;
+  operation_mode: string;
+  model: string;
+  project_id: string | null;
+  sources: { id: string; name: string }[];
+  monthly_token_budget: number | null;
+  status: string;
+}
+
+export function hireAgent(
+  token: string,
+  params: { name: string; project_id?: string | null; source_ids?: string[]; monthly_token_budget?: number | null }
+): Promise<HiredAgent> {
+  return request("/api/v1/agents/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ employee_type: "dataops", ...params }),
+  });
+}
+
+// ---------- Agent detail (Wunomo Projects Phase 2 frontend, slice 4) ----------
+
+export interface AgentListItem {
+  id: string;
+  name: string;
+  employee_type: string;
+  status: string;
+  monthly_token_budget: number | null;
+}
+
+export interface AgentQuota {
+  agent_id: string;
+  resource: string;
+  used: number;
+  limit: number | null;
+  percent: number;
+  status: string;
+}
+
+export function listAgents(token: string): Promise<{ agents: AgentListItem[] }> {
+  return authedRequest("/api/v1/agents/", token);
+}
+
+// Wunomo Projects Phase 4: any authenticated tenant member, not
+// agents.manage -- for populating an agent picker (task creation, channel
+// creation), not editing scope/hiring. ACTIVE agents only, with their real
+// source scope (not just a count) so a picker can show what each one can
+// actually reach, not just its name.
+export interface SelectableAgent {
+  id: string;
+  name: string;
+  sources: { id: string; name: string }[];
+}
+
+export function listSelectableAgents(token: string): Promise<{ agents: SelectableAgent[] }> {
+  return authedRequest("/api/v1/agents/selectable", token);
+}
+
+export function getAgentSources(token: string, agentId: string): Promise<{ agent_id: string; sources: { id: string; name: string }[] }> {
+  return authedRequest(`/api/v1/agents/${agentId}/sources`, token);
+}
+
+export function grantAgentSource(token: string, agentId: string, sourceId: string) {
+  return request(`/api/v1/agents/${agentId}/sources/${sourceId}`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function revokeAgentSource(token: string, agentId: string, sourceId: string) {
+  return request(`/api/v1/agents/${agentId}/sources/${sourceId}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function getAgentQuota(token: string, agentId: string): Promise<AgentQuota> {
+  return authedRequest(`/api/v1/agents/${agentId}/quota`, token);
+}
+
+// ---------- Scheduled work (Wunomo UI-rebuild slice 10, 2026-09-15) ----------
+
+export interface ScheduleLastRun {
+  task_id: string;
+  status: string;
+  completed_at: string | null;
+  created_at: string | null;
+}
+
+export interface ScheduleItem {
+  id: string;
+  agent_id: string;
+  agent_name: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  created_by_user_id: string;
+  task_shape: TaskShapeValue;
+  description: string;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  schedule_cron: string;
+  active: boolean;
+  // Real, already-written prose from validate_schedule_can_run -- shown
+  // verbatim, not mapped from a code. Non-null exactly when active is
+  // false; a schedule only ever goes inactive automatically (no manual
+  // pause exists), so this is never absent on an inactive row.
+  deactivation_reason: string | null;
+  last_fired_at: string | null;
+  last_run: ScheduleLastRun | null;
+  created_at: string | null;
+}
+
+export function getSchedules(token: string): Promise<{ schedules: ScheduleItem[] }> {
+  return authedRequest("/api/v1/agents/schedules", token);
+}
+
+export function reactivateSchedule(token: string, agentId: string, scheduleId: string): Promise<ScheduleItem> {
+  return request(`/api/v1/agents/${agentId}/schedules/${scheduleId}/reactivate`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function deleteSchedule(token: string, agentId: string, scheduleId: string): Promise<unknown> {
+  return request(`/api/v1/agents/${agentId}/schedules/${scheduleId}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function offboardAgent(token: string, agentId: string): Promise<{ agent_id: string; agent_name: string; status: string }> {
+  return request(`/api/v1/agents/${agentId}/offboard`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+// ---------- Channels (Wunomo Projects Phase 2 frontend, slice 6) ----------
+
+export interface ChannelItem {
+  id: string;
+  name: string;
+  project_id: string | null;
+  created_at: string;
+  // 0 means unusable right now -- never had an agent added, or its only
+  // agent was offboarded (offboarding removes channel_agents membership
+  // but never the channel itself). Lets the sidebar flag this before a
+  // human opens the channel and hits a routing failure.
+  agent_count: number;
+}
+
+export interface ChannelMemberUser {
+  id: string;
+  email: string;
+}
+
+export interface ChannelMemberAgent {
+  id: string;
+  name: string;
+  // Added for the employee avatar (§7.4) -- resolves which identity hue
+  // (tokens.css's .c-* classes) this member's avatar renders in.
+  employee_type: string;
+  // Added for the mention picker's "On this project" row (§7.5). Note:
+  // §7.5 also asks for a "live status" (busy/idle) indicator per row --
+  // AgentInstance.status is only ACTIVE/OFFBOARDED (a lifecycle flag, not
+  // a live activity signal), and nothing in this codebase tracks whether
+  // an agent is "doing something right now" -- same gap already noted in
+  // the old ProjectContextPanel. Not fabricated here either.
+  operation_mode: string;
+}
+
+export interface ChannelDetail {
+  id: string;
+  name: string;
+  project_id: string | null;
+  users: ChannelMemberUser[];
+  agents: ChannelMemberAgent[];
+}
+
+export function listChannels(token: string): Promise<{ channels: ChannelItem[] }> {
+  return authedRequest("/api/v1/channels/", token);
+}
+
+export function createChannel(token: string, params: { name: string; project_id?: string | null }): Promise<ChannelItem> {
+  return request("/api/v1/channels/", {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(params),
+  });
+}
+
+export function getChannel(token: string, channelId: string): Promise<ChannelDetail> {
+  return authedRequest(`/api/v1/channels/${channelId}`, token);
+}
+
+export function addChannelAgent(
+  token: string, channelId: string, agentId: string
+): Promise<{ channel_id: string; agent_id: string; agent_name: string; added: boolean }> {
+  return request(`/api/v1/channels/${channelId}/members/agents/${agentId}`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function removeChannelAgent(token: string, channelId: string, agentId: string): Promise<unknown> {
+  return request(`/api/v1/channels/${channelId}/members/agents/${agentId}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export function addChannelUser(
+  token: string, channelId: string, userId: string
+): Promise<{ channel_id: string; user_id: string; added: boolean }> {
+  return request(`/api/v1/channels/${channelId}/members/users/${userId}`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+// Backend refuses (409) removing the channel's only human member -- see
+// channels.py's remove_user_member docstring. Callers should surface
+// ApiError.detail (a plain string here) rather than a generic failure.
+export function removeChannelUser(token: string, channelId: string, userId: string): Promise<unknown> {
+  return request(`/api/v1/channels/${channelId}/members/users/${userId}`, {
+    method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export interface ChannelUploadResult {
+  channel_id: string;
+  agent_id: string;
+  agent_name: string;
+  source_id: string;
+  source_name: string;
+  profiled: boolean;
+}
+
+// Multipart, same reason uploadAndRegisterSource can't go through
+// request(). `message` carries whatever's in the composer at drop time --
+// used server-side only to resolve which agent the file targets
+// (resolve_channel_message_target, the same @mention/sole-member rule a
+// real text message uses), never stored as a chat message and never
+// reaching the LLM.
+export async function uploadToChannel(
+  token: string, channelId: string, file: File, message: string
+): Promise<ChannelUploadResult> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("message", message);
+  const res = await fetch(`${API_URL}/api/v1/channels/${channelId}/upload`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    if (res.status === 401) handleSessionExpired();
+    throw new ApiError(res.status, body?.detail ?? body);
+  }
+  return body;
 }
 
 // ---------- Local session storage ----------

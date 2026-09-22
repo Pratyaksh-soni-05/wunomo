@@ -12,7 +12,7 @@ import {
 async function completeAuth(token: string, tenantId: string, userId: string, router: ReturnType<typeof useRouter>) {
   saveSession(token, tenantId, userId);
   const profile = await getOnboarding(token).catch(() => ({ completed: false }));
-  router.push(profile.completed ? "/dashboard" : "/onboarding");
+  router.push(profile.completed ? "/home" : "/onboarding");
 }
 
 export default function GoogleCallbackPage() {
@@ -90,7 +90,7 @@ function GoogleCallbackInner() {
         {error ? (
           <div className="flex flex-col gap-3">
             <p className="text-danger font-medium">{error}</p>
-            <a href="/login" className="auth-link-btn">Back to login</a>
+            <a href="/login" className="btn btn-text">Back to login</a>
           </div>
         ) : (
           <div className="flex flex-col gap-3">

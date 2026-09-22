@@ -1,22 +1,58 @@
-from models.all_models import PersonalityMode, OperationMode
+from models.all_models import AgentEmployeeType, PersonalityMode, OperationMode
 
+# Which employee TYPE the agent is (§ "Add Analyst as a second employee
+# type") -- orthogonal to PersonalityMode below (a tone/communication-style
+# dial every employee type shares) and to OperationMode (an autonomy dial).
+# A dict, not a template system: one complete identity statement per type,
+# composed in front of the personality tone text in build_system_prompt(),
+# never cross-multiplied against it.
+#
+# DATAOPS's entry exists so an Analyst-type agent using ENGINEER
+# personality can't end up contradicting itself (SYSTEM_PROMPTS[ENGINEER]
+# used to open with "an AI DataOps Engineer" unconditionally, baked in
+# from when DATAOPS was the only employee type that could ever exist --
+# harmless then, a real self-contradiction the moment a second type could
+# select ENGINEER tone too). That claim moved here instead; ENGINEER's own
+# entry below no longer makes an employee-type claim of its own.
+EMPLOYEE_TYPE_IDENTITY: dict[AgentEmployeeType, str] = {
+    AgentEmployeeType.DATAOPS: (
+        "You are {agent_name}, an AI DataOps Engineer. You automate data pipelines, monitor "
+        "data quality, diagnose pipeline failures, and manage the tenant's data infrastructure "
+        "-- connecting sources, building and running pipelines, and making real changes to the "
+        "data stack when asked."
+    ),
+    AgentEmployeeType.ANALYST: (
+        "You are {agent_name}, an AI Business Analyst. You answer business questions using the "
+        "tenant's existing data and explain your reasoning clearly. You read and analyse data "
+        "quality, pipeline health, incidents, and reports -- you do not connect new sources, "
+        "write transformations, or build or modify pipelines. If a question needs one of those, "
+        "say so plainly and name who can do it, rather than attempting it yourself."
+    ),
+}
+
+# {agent_name} is substituted by build_system_prompt() - was a hardcoded
+# literal "AXIOM" in all four variants until Wunomo Projects Phase 0
+# (commit 4). Every named agent instance shares these same four
+# personality templates; only the introduced name differs. AXIOM itself
+# is not special-cased - it's just the name every existing tenant's
+# backfilled agent happens to have (see the backfill migration).
 SYSTEM_PROMPTS = {
     PersonalityMode.ENGINEER: (
-        "You are AXIOM, an AI DataOps Engineer. Operate with precision of a senior engineer. "
-        "Include: pipeline states, SQL logic, schema diagnostics, root-cause analysis, "
-        "dependency chains, run history, and specific remediation steps. Cite exact table names, "
-        "column counts, row volumes, and error codes. Be direct and efficient."
+        "Operate with the precision of a senior engineer. Include: pipeline states, SQL logic, "
+        "schema diagnostics, root-cause analysis, dependency chains, run history, and specific "
+        "remediation steps. Cite exact table names, column counts, row volumes, and error codes. "
+        "Be direct and efficient."
     ),
     PersonalityMode.FOUNDER: (
-        "You are AXIOM briefing a founder. Summarize in plain business terms. Lead with: "
+        "You are {agent_name} briefing a founder. Summarize in plain business terms. Lead with: "
         "What broke? What is affected? ETA to fix? What was saved? Keep to 3-5 bullets."
     ),
     PersonalityMode.ANALYST: (
-        "You are AXIOM assisting a business analyst. Focus on dataset readiness, KPI accuracy, "
+        "You are {agent_name} assisting a business analyst. Focus on dataset readiness, KPI accuracy, "
         "freshness status, and reporting context. Explain what data is available, stale, or failing quality."
     ),
     PersonalityMode.AUDITOR: (
-        "You are AXIOM in audit mode. Provide: lineage paths, change history with timestamps, "
+        "You are {agent_name} in audit mode. Provide: lineage paths, change history with timestamps, "
         "approval records, validation results, access logs, policy tags, contract compliance. Cite IDs."
     ),
 }
@@ -74,10 +110,26 @@ RISK_ACTIONS = {
     ],
 }
 
-def build_system_prompt(personality: PersonalityMode, operation: OperationMode) -> str:
-    base = SYSTEM_PROMPTS.get(personality, SYSTEM_PROMPTS[PersonalityMode.ENGINEER])
+def build_system_prompt(
+    personality: PersonalityMode, operation: OperationMode, agent_name: str = "AXIOM",
+    employee_type: AgentEmployeeType = AgentEmployeeType.DATAOPS,
+) -> str:
+    """agent_name defaults to "AXIOM" so every existing caller keeps
+    working unchanged until Wunomo Projects Phase 0's commit 5 threads a
+    real agent's own name through from build_agent(). employee_type
+    defaults to DATAOPS for the exact same reason -- every caller that
+    predates a second employee type existing gets the identical resolved
+    prompt it always has.
+
+    Composed as identity (who this employee type IS) -> tone (how
+    personality_mode wants it communicated) -> operation_mode context --
+    three independent dials, not one matrix keyed by their combination."""
+    identity = EMPLOYEE_TYPE_IDENTITY.get(
+        employee_type, EMPLOYEE_TYPE_IDENTITY[AgentEmployeeType.DATAOPS],
+    ).format(agent_name=agent_name)
+    tone = SYSTEM_PROMPTS.get(personality, SYSTEM_PROMPTS[PersonalityMode.ENGINEER]).format(agent_name=agent_name)
     op_ctx = OPERATION_MODE_CONTEXT.get(operation, "")
-    return f"{base}\n\n{op_ctx}"
+    return f"{identity}\n\n{tone}\n\n{op_ctx}"
 
 def get_risk_level(action: str) -> str:
     for level, actions in RISK_ACTIONS.items():

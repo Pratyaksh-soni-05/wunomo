@@ -54,8 +54,8 @@ class BackfillRequest(BaseModel):
 
 
 @router.get("/")
-async def list_pipelines(user=Depends(get_current_user)):
-    return await DAGManager(user["tenant_id"]).list_pipelines()
+async def list_pipelines(unscoped: Optional[bool] = None, user=Depends(get_current_user)):
+    return await DAGManager(user["tenant_id"]).list_pipelines(unscoped=unscoped)
 
 
 @router.post("/")

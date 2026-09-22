@@ -8,12 +8,17 @@ import { SessionList, MessageThread, ContextPanel, type LocalChatMessage } from 
 import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
 import {
   getToken, decodeUserFromToken, getChatSessions, getChatHistory, sendChatMessage, getSources,
-  deleteChatSession, ApiError, type ChatContext, type TaskItem,
+  deleteChatSession, listChannels, createChannel, getChannel, addChannelAgent, removeChannelAgent,
+  addChannelUser, removeChannelUser, listSelectableAgents, getTeamMembers, uploadToChannel,
+  ApiError, type ChatContext, type TaskItem,
 } from "@/lib/api";
 
 export default function ChatPage() {
   const token = getToken() as string;
-  const tenantId = decodeUserFromToken(token)?.tenant_id ?? null;
+  const decoded = decodeUserFromToken(token);
+  const tenantId = decoded?.tenant_id ?? null;
+  const currentUserId = decoded?.sub ?? null;
+  const currentUserRole = decoded?.role ?? null;
   const toast = useToast();
   const router = useRouter();
   const qc = useQueryClient();
@@ -28,6 +33,8 @@ export default function ChatPage() {
   const [operationMode, setOperationMode] = useState("assisted");
   const [attachedContext, setAttachedContext] = useState<ChatContext | null>(null);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Bumped by newChat() so a response from a request sent before "New Chat"
   // was clicked can be detected as stale and dropped instead of silently
@@ -36,6 +43,25 @@ export default function ChatPage() {
 
   const sessionsQuery = useQuery({ queryKey: ["chat-sessions"], queryFn: () => getChatSessions(token) });
   const sourcesQuery = useQuery({ queryKey: ["sources"], queryFn: () => getSources(token) });
+  const channelsQuery = useQuery({ queryKey: ["channels"], queryFn: () => listChannels(token) });
+  // Wunomo Projects Phase 4: was listAgents() (agents.manage-gated) --
+  // confirmed live that gave a data_analyst (or any non-Owner/Admin role)
+  // a real 403 here, so this channel-creation picker came up empty for
+  // every such role since channels shipped. listSelectableAgents() is the
+  // fix (any authenticated member, ACTIVE agents only -- already excludes
+  // offboarded ones, so no separate filter is needed below anymore); same
+  // queryKey the task-create modal's own agent picker uses, so the two
+  // share one cached fetch instead of two independent ones.
+  const agentsQuery = useQuery({ queryKey: ["selectable-agents"], queryFn: () => listSelectableAgents(token) });
+  const teamQuery = useQuery({ queryKey: ["team-members"], queryFn: () => getTeamMembers(token) });
+
+  const activeChannel = channelsQuery.data?.channels.find((c) => c.id === activeSessionId) ?? null;
+  const channelDetailQuery = useQuery({
+    queryKey: ["channel-detail", activeSessionId],
+    queryFn: () => getChannel(token, activeSessionId as string),
+    enabled: !!activeChannel,
+  });
+  const activeAgents = agentsQuery.data?.agents ?? [];
 
   const selectSession = async (id: string) => {
     // Same stale-response hazard newChat() guards against: switching
@@ -44,6 +70,7 @@ export default function ChatPage() {
     chatGenerationRef.current += 1;
     setActiveSessionId(id);
     setSendError(null);
+    setUploadError(null);
     setSending(false);
     try {
       const history = await getChatHistory(token, id);
@@ -110,10 +137,119 @@ export default function ChatPage() {
     setMessages([]);
     setDraft("");
     setSendError(null);
+    setUploadError(null);
     setAttachedContext(null);
     setSending(false);
     setProvider(null);
     toast.push(alreadyEmpty ? "Already a new chat." : "Started a new chat.", "success");
+  };
+
+  // A channel with zero agents is a guaranteed dead end (resolve_mentioned_
+  // agent/channel_agent_members both refuse to route into one) -- creation
+  // and adding at least one agent happen as one flow, never a bare
+  // name-only create that leaves a channel unusable until a separate step.
+  const createChannelWithAgents = async (name: string, agentIds: string[]) => {
+    try {
+      const channel = await createChannel(token, { name });
+      for (const agentId of agentIds) {
+        await addChannelAgent(token, channel.id, agentId);
+      }
+      qc.invalidateQueries({ queryKey: ["channels"] });
+      chatGenerationRef.current += 1;
+      setActiveSessionId(channel.id);
+      setMessages([]);
+      setSendError(null);
+      toast.push(`Channel "${channel.name}" created.`, "success");
+    } catch {
+      toast.push("Failed to create channel.", "danger");
+    }
+  };
+
+  const addAgentToActiveChannel = async (agentId: string) => {
+    if (!activeSessionId) return;
+    try {
+      const result = await addChannelAgent(token, activeSessionId, agentId);
+      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
+      toast.push(`${result.agent_name} added to the channel.`, "success");
+    } catch {
+      toast.push("Failed to add agent.", "danger");
+    }
+  };
+
+  const removeAgentFromActiveChannel = async (agentId: string, agentName: string) => {
+    if (!activeSessionId) return;
+    try {
+      await removeChannelAgent(token, activeSessionId, agentId);
+      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
+      toast.push(`${agentName} removed from the channel.`, "default");
+    } catch {
+      toast.push("Failed to remove agent.", "danger");
+    }
+  };
+
+  const addPersonToActiveChannel = async (userId: string) => {
+    if (!activeSessionId) return;
+    try {
+      await addChannelUser(token, activeSessionId, userId);
+      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+      toast.push("Added to the channel.", "success");
+    } catch {
+      toast.push("Failed to add person.", "danger");
+    }
+  };
+
+  // Backend refuses (409) removing the channel's only human member -- the
+  // real, honest way out named in that refusal is "add someone else
+  // first" (there is no delete-channel or dedicated leave endpoint in
+  // this codebase). Removing yourself drops you out of the channel view
+  // entirely, since GET .../{id} requires membership.
+  const removePersonFromActiveChannel = async (userId: string) => {
+    if (!activeSessionId) return;
+    try {
+      await removeChannelUser(token, activeSessionId, userId);
+      if (userId === currentUserId) {
+        chatGenerationRef.current += 1;
+        setActiveSessionId(null);
+        setMessages([]);
+        qc.invalidateQueries({ queryKey: ["channels"] });
+        toast.push("You left the channel.", "default");
+      } else {
+        qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+        toast.push("Removed from the channel.", "default");
+      }
+    } catch (err) {
+      const message = err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Failed to remove person.";
+      toast.push(message, "danger");
+    }
+  };
+
+  // Chat-first data upload (Wunomo Projects Phase 4, item 4): channels
+  // only in v1 (finding 80). No LLM call here -- upload/register/profile/
+  // grant is silent; the resolved agent is only "ready" once a real
+  // message is sent, which is why success just populates attachedContext
+  // (the existing "attach this source to my next message" chip) instead
+  // of injecting a synthetic message into the thread. draft is passed
+  // through as the accompanying message so an in-progress "@Nova ..." in
+  // the composer resolves the same target a real send would.
+  const handleUploadFile = async (file: File) => {
+    if (!activeSessionId || !activeChannel) return;
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const result = await uploadToChannel(token, activeSessionId, file, draft);
+      setAttachedContext({ source_id: result.source_id, source_name: result.source_name });
+      toast.push(`${result.agent_name} is ready with "${result.source_name}" on your next message.`, "success");
+      qc.invalidateQueries({ queryKey: ["sources"] });
+    } catch (err) {
+      const message = err instanceof ApiError && typeof err.detail === "string"
+        ? err.detail
+        : "Couldn't upload that file. Try again.";
+      setUploadError(message);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const send = async () => {
@@ -145,6 +281,10 @@ export default function ChatPage() {
       const assistantMsg: LocalChatMessage = {
         role: "assistant", content: res.response, tool_calls: res.tool_calls,
         timestamp: res.timestamp, approvals: res.pending_approvals,
+        // provider: null is exclusively how a channel routing failure
+        // (unknown mention, not-a-member, ambiguous/no mention) comes
+        // back -- a real reply always carries a real provider string.
+        isSystemNotice: res.provider === null,
       };
       setMessages((prev) => [...prev, assistantMsg]);
       setProvider(res.provider);
@@ -152,6 +292,34 @@ export default function ChatPage() {
       qc.invalidateQueries({ queryKey: ["chat-sessions"] });
     } catch (err) {
       if (chatGenerationRef.current !== myGeneration) return;
+      // Wunomo Projects Phase 2 frontend, slice 9: every ApiError used to
+      // collapse to the same "try rephrasing" text regardless of status --
+      // actively wrong for a 402, since rephrasing can't fix an exhausted
+      // quota. Two distinct causes share this status (enforce_quota's
+      // tenant-wide "ai_credits" gate vs. enforce_agent_budget's per-agent
+      // gate) with two different fixes, so a single generic message would
+      // send whoever reads it to the wrong screen.
+      if (err instanceof ApiError && err.status === 402 && err.detail && typeof err.detail === "object") {
+        const detail = err.detail as { error?: string; agent_id?: string; used?: number; limit?: number };
+        if (detail.error === "quota_exceeded") {
+          const message = "Your workspace's AI-credit quota is exhausted for this billing period.";
+          setSendError(message);
+          toast.push(message, "danger", { label: "Go to Billing", onClick: () => router.push("/team?tab=billing") });
+        } else if (detail.error === "agent_budget_exceeded") {
+          const usage = detail.used != null && detail.limit != null ? ` (${detail.used}/${detail.limit} tokens)` : "";
+          const message = `This agent's own monthly token budget${usage} is exhausted.`;
+          setSendError(message);
+          toast.push(message, "danger", {
+            label: "Go to agent",
+            onClick: () => { if (detail.agent_id) router.push(`/agents/${detail.agent_id}`); },
+          });
+        } else {
+          const message = "AXIOM couldn't complete that request. Try again.";
+          setSendError(message);
+          toast.push(message, "danger");
+        }
+        return;
+      }
       const message =
         err instanceof ApiError
           ? "AXIOM couldn't complete that request — it may have tried an action it couldn't format correctly. Try rephrasing, or try again."
@@ -169,9 +337,13 @@ export default function ChatPage() {
         tenantId={tenantId}
         sessions={sessionsQuery.data?.sessions ?? []}
         loading={sessionsQuery.isLoading}
+        channels={channelsQuery.data?.channels ?? []}
+        channelsLoading={channelsQuery.isLoading}
+        availableAgents={activeAgents}
         activeSessionId={activeSessionId}
         onSelectSession={selectSession}
         onNewChat={newChat}
+        onCreateChannel={createChannelWithAgents}
         onInsertPrompt={setDraft}
         onDeleteSession={deleteSession}
         draft={draft}
@@ -192,6 +364,20 @@ export default function ChatPage() {
         onSend={send}
         onGoToApprovals={() => router.push("/approvals")}
         onStartTask={() => setTaskModalOpen(true)}
+        channel={activeChannel}
+        channelAgents={channelDetailQuery.data?.agents ?? []}
+        channelUsers={channelDetailQuery.data?.users ?? []}
+        availableAgents={activeAgents}
+        availablePeople={teamQuery.data?.members ?? []}
+        currentUserId={currentUserId}
+        onAddAgent={addAgentToActiveChannel}
+        onRemoveAgent={removeAgentFromActiveChannel}
+        onAddPerson={addPersonToActiveChannel}
+        onRemovePerson={removePersonFromActiveChannel}
+        currentUserRole={currentUserRole}
+        uploading={uploading}
+        uploadError={uploadError}
+        onUploadFile={handleUploadFile}
       />
       <ContextPanel
         messages={messages}
@@ -200,12 +386,16 @@ export default function ChatPage() {
         onAttach={setAttachedContext}
         onClear={() => setAttachedContext(null)}
         onGoToApprovals={() => router.push("/approvals")}
+        currentUserRole={currentUserRole}
+        token={token}
+        sessionId={activeSessionId}
       />
       <TaskCreateModal
         token={token}
         open={taskModalOpen}
         onClose={() => setTaskModalOpen(false)}
         sessionId={activeSessionId ?? undefined}
+        channelAgentIds={channelDetailQuery.data?.agents.map((a) => a.id)}
         onCreated={(task: TaskItem) => {
           const taskCardMsg: LocalChatMessage = {
             role: "assistant", content: "", tool_calls: [], timestamp: new Date().toISOString(),

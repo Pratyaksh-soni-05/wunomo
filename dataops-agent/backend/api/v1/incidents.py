@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from datetime import datetime, timezone
 from .auth import get_current_user, require_permission
 from database import AsyncSessionLocal
@@ -40,18 +40,36 @@ class IncidentUpdate(BaseModel):
 async def list_incidents(
     status: Optional[str] = None,
     severity: Optional[str] = None,
+    unscoped: Optional[bool] = None,
     limit: int = 50,
+    offset: int = 0,
     user=Depends(get_current_user)
 ):
     async with AsyncSessionLocal() as db:
-        q = select(Incident).where(
-            Incident.tenant_id == user["tenant_id"]
-        ).order_by(desc(Incident.detected_at)).limit(limit)
+        filters = [Incident.tenant_id == user["tenant_id"]]
         if status:
-            q = q.where(Incident.status == IncidentStatus(status))
+            filters.append(Incident.status == IncidentStatus(status))
         if severity:
-            q = q.where(Incident.severity == IncidentSeverity(severity))
-        r = await db.execute(q)
+            filters.append(Incident.severity == IncidentSeverity(severity))
+        # unscoped=True: incidents with no pipeline_id -- can never resolve
+        # into any project's scope regardless of which project is asking
+        # (Wunomo UI-rebuild slice 6b, 2026-09-14).
+        if unscoped:
+            filters.append(Incident.pipeline_id.is_(None))
+
+        # item 55 fix: "count" previously echoed len(page) - always equal to
+        # whatever the truncated page returned, never the true total. A
+        # real total needs its own COUNT(*) query, run against the same
+        # filters as the page query, not derived from the page itself.
+        count_q = select(func.count()).select_from(Incident).where(*filters)
+        total = (await db.execute(count_q)).scalar_one()
+
+        page_q = (
+            select(Incident).where(*filters)
+            .order_by(desc(Incident.detected_at))
+            .offset(offset).limit(limit)
+        )
+        r = await db.execute(page_q)
         incidents = r.scalars().all()
         return {
             "incidents": [
@@ -67,7 +85,9 @@ async def list_incidents(
                 }
                 for i in incidents
             ],
-            "count": len(incidents)
+            "count": total,
+            "offset": offset,
+            "limit": limit
         }
 
 

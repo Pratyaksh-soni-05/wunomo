@@ -47,7 +47,7 @@ function InviteAcceptInner() {
     try {
       const result = await acceptInvite({ token, password, full_name: fullName });
       saveSession(result.access_token, result.tenant_id, result.user_id);
-      router.push("/dashboard");
+      router.push("/home");
     } catch (err) {
       toast.push(err instanceof ApiError ? String(err.detail ?? "Failed to accept invite") : "Failed to accept invite", "danger");
       setSubmitting(false);
@@ -64,7 +64,7 @@ function InviteAcceptInner() {
       ) : invalidReason ? (
         <div className="flex flex-col gap-3">
           <p className="text-danger font-medium">{invalidReason}</p>
-          <a href="/login" className="auth-link-btn">Back to login</a>
+          <a href="/login" className="btn btn-text">Back to login</a>
         </div>
       ) : (
         <form onSubmit={handleAccept} className="flex flex-col gap-4">

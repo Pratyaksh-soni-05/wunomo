@@ -25,7 +25,7 @@ const instrumentSerif = Instrument_Serif({
 const FEATURES = [
   {
     title: "Chat is the whole interface.",
-    desc: "Ask AXIOM in plain language — it runs real pipelines, quality checks, and incident triage against your actual data.",
+    desc: "Ask AXIOM in plain language, and it runs real pipelines, quality checks, and incident triage against your actual data.",
   },
   {
     title: "Pipelines without the plumbing.",
@@ -43,19 +43,33 @@ const FEATURES = [
     title: "Works like a team tool.",
     desc: "Real roles and permissions, usage-based plans, from day one.",
   },
+  {
+    title: "Plans the multi-step work, too.",
+    desc: "Ask for more than one action and AXIOM turns it into a real plan, executing step by step with your approval on anything risky.",
+  },
 ];
 
-// Phase 8 (2026-08-19): exactly these two, both dark-theme, both real and
-// unedited from the demo tenant. Every other screen was considered and
-// held — Incidents lies about its own count until item 55 is fixed,
-// Dashboard's real Open Incidents KPI is accurate but an artifact of the
-// still-growing item 53 bug, and Sources/Pipelines/Quality are honest but
-// thin (a two-source demo tenant). Two clean screenshots beat five that
-// need caveats — see WALKTHROUGH_FINDINGS_2026-08.md items 53/55 and the
-// Phase 7 handoff note.
+// 2026-08-27 recapture, filenames content-hash-suffixed 2026-08-27 (see
+// WALKTHROUGH_FINDINGS_2026-08.md #68): 5 screens, all dark-theme/1440@2x,
+// all real and unedited from demo@axiom-yc.ai — the real, long-running demo
+// tenant, its real contents exactly as they stand (real 22 open incidents,
+// a real failed pipeline run, real task history including QA-verification
+// debris; see #67), not a tenant seeded for the capture. Chat's raw
+// pipeline/source/run/incident/tenant UUIDs are visually redacted (black
+// bars, DOM-level) before the screenshot, not edited out of the underlying
+// message. Incidents stays excluded (item 55 still lies about its own
+// count) and Analytics stays excluded (dropped from nav) — every other
+// screen this tenant can show honestly is here now. Filenames carry a
+// content-hash suffix (first 8 hex chars of the file's own sha256) so a
+// future recapture at the same logical slot never again collides with a
+// still-cached same-path file across Vercel/Cloudflare's two independent
+// CDN layers — see #68 for the wunomo.in incident this fixes.
 const SCREENSHOTS = [
-  { src: "/landing/shot-axiom-chat.png", title: "AXIOM chat", desc: "A real conversation, with a visible trace of every tool call AXIOM made." },
-  { src: "/landing/shot-tasks.png", title: "Tasks", desc: "Real multi-step plans AXIOM generates, reviews, and executes with human approval on the risky steps." },
+  { src: "/landing/shot-dashboard-9fa65854.png", title: "Dashboard", desc: "Real pipeline health, quality score, and pending approvals. Nothing fabricated." },
+  { src: "/landing/shot-chat-c03e8bc4.png", title: "AXIOM chat", desc: "A real conversation, with a visible trace of every tool call AXIOM made." },
+  { src: "/landing/shot-pipelines-33954878.png", title: "Pipelines", desc: "Create, schedule, and trigger real pipelines with real run history." },
+  { src: "/landing/shot-tasks-36aa441b.png", title: "Tasks", desc: "Real multi-step plans AXIOM generates, reviews, and executes with human approval on the risky steps." },
+  { src: "/landing/shot-quality-f9db6e45.png", title: "Quality", desc: "Real quality rules against real data, with a real pass/fail record." },
 ];
 
 // The landing page is the signed-off, light-tuned "public mode" and must
@@ -114,7 +128,7 @@ export default function LandingPage() {
           </div>
           <div className="landing-nav-actions">
             {authed ? (
-              <Link href="/dashboard" className="btn btn-primary">Go to Dashboard</Link>
+              <Link href="/home" className="btn btn-primary">Go to Home</Link>
             ) : (
               <>
                 <Link href="/login" className="btn btn-secondary">Log in</Link>
@@ -132,8 +146,8 @@ export default function LandingPage() {
               </span>
               <h1 className="landing-animate-in delay-1">The AI workforce for <em>modern</em> companies.</h1>
               <p className="landing-hero-sub landing-animate-in delay-1">
-                We&apos;re building autonomous <b>AI employees</b> that handle real operational work —
-                starting with AXIOM, an AI DataOps engineer.
+                We&apos;re building autonomous <b>AI employees</b> that handle real operational work,
+                beginning with AXIOM, an AI DataOps engineer.
               </p>
               <div className="landing-animate-in delay-2">
                 <Link href="/signup" className="btn btn-primary btn-lg">Try Wunomo</Link>
@@ -142,10 +156,14 @@ export default function LandingPage() {
           </div>
         </div>
 
-        <div className="landing-hero-frame">
-          <div className="landing-hero-frame-bar"><i /><i /><i /></div>
-          <ScreenshotCarousel slides={SCREENSHOTS} />
+      </section>
+
+      <section className="landing-section" aria-label="Product screenshots">
+        <div className="landing-section-header">
+          <div className="landing-eyebrow">See It Live</div>
+          <h2 className="font-display">See AXIOM in the product</h2>
         </div>
+        <ScreenshotCarousel slides={SCREENSHOTS} />
       </section>
 
       <section className="landing-section" id="features">
@@ -195,7 +213,7 @@ export default function LandingPage() {
         <div className="landing-about">
           <p>
             Wunomo is building the AI workforce for modern companies. We think the next generation
-            of operational work — data, finance, DevOps, analytics, security, HR — gets done by
+            of operational work, across data, finance, DevOps, analytics, security, and HR, gets done by
             autonomous AI employees working alongside your team, not another dashboard your team
             has to babysit. We started with the hardest one: AXIOM, an AI DataOps engineer that
             manages pipelines, data quality, and incidents through conversation, with real access

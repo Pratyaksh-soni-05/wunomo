@@ -54,7 +54,9 @@ clean COMPLETED that silently ignores it.
 """
 import asyncio
 import json
+import re
 import uuid
+from collections import Counter
 from datetime import datetime
 
 import structlog
@@ -66,11 +68,13 @@ from agent.personality import get_risk_level
 from modules.governance.policy_engine import PolicyEngine
 from modules.orchestration.task_planner import tool_by_name, tool_schema_for_prompt
 from models.all_models import (
-    ApprovalRequest, ApprovalStatus, RunStatus, Task, TaskStatus, TaskStep,
+    AgentInstance, AgentInstanceStatus, ApprovalRequest, ApprovalStatus, Incident, IncidentSeverity,
+    IncidentStatus, RUNNABLE_TASK_STATUSES, RunStatus, Task, TaskShape, TaskStatus, TaskStep,
     TaskStepSource, TaskStepStatus, User,
 )
+from services.agent_scope import agent_scope_denial_reason
 from services.llm_service import invoke_llm
-from services.quota_service import get_quota_status
+from services.quota_service import get_agent_quota_status, get_quota_status
 from services.rbac import TOOL_CAPABILITIES, has_permission
 
 MAX_ATTEMPTS_PER_STEP = 3  # 1 initial + up to 2 recovery attempts
@@ -100,20 +104,60 @@ _VERIFIABLE_TOOLS = {"run_pipeline"}
 log = structlog.get_logger()
 
 
-async def _caller_still_authorized(db, task: Task, tool_name: str) -> tuple[bool, str | None]:
+async def _caller_still_authorized(db, task: Task, tool_name: str, tool_args: dict) -> tuple[bool, str | None, dict | None]:
     """Fresh, per-step re-read of the task's initiating user's
-    is_active/role -- never trusts anything cached on Task (there is
-    nothing to trust; Task carries no role column by design, see
-    amendment 3). Mirrors get_current_user()'s own per-request re-read
-    for REST, applied here at the step-execution boundary instead."""
+    is_active/role, the calling agent's own status (Wunomo Projects Phase
+    2 frontend, slice 4 -- OFFBOARDED must be enforced, not just
+    displayed: a status that only greys out a UI card is a label, not a
+    state), AND (Wunomo Projects Phase 1) the calling agent's current
+    scope -- never trusts anything cached on Task (there is nothing to
+    trust; Task carries no role column by design, see amendment 3).
+    Mirrors get_current_user()'s own per-request re-read for REST, applied
+    here at the step-execution boundary instead. An agent can be
+    re-scoped, offboarded, or a user demoted mid-task; this re-checks all
+    three, the same way, at the same call site.
+
+    The scope half only ever has something real to check when tool_args
+    already holds a resolved value, not a planner/human-edit placeholder
+    -- agent_scope_denial_reason() treats an unresolved/absent value as
+    nothing to check yet, not as allowed forever. That's correct here:
+    the unconditional backstop that always sees fully-resolved args is
+    the separate scope check immediately before _call_tool() in
+    execute_next_step()'s attempt loop below -- "this is where the
+    guarantee lives" per CLAUDE.md's plan-time-vs-enforcement split, not
+    this function. This function's own scope check earns its keep on a
+    RESUME (a step whose args were already resolved on an earlier call,
+    e.g. while waiting on approval) where the agent's scope may have
+    changed since resolution happened.
+
+    Returns (authorized, message, scope_denial) -- scope_denial is the
+    full structured dict from agent_scope_denial_reason() (Wunomo
+    Projects Phase 2 frontend, slice 9), non-None ONLY when the denial was
+    specifically a scope gap, so the caller can trigger the deduped
+    "grant access" notification for that cause alone -- not for the other
+    three (user deactivated, role changed, agent offboarded), which have
+    no comparable single-action fix or "recurs across many tasks" shape."""
     r = await db.execute(select(User.is_active, User.role).where(User.id == task.user_id))
     row = r.first()
     if row is None or not row.is_active:
-        return False, "the initiating user's account is no longer active"
+        return False, "the initiating user's account is no longer active", None
+
+    # task.agent_id is nullable -- older/agent-less tasks predate Wunomo
+    # Projects Phase 1's agent wiring and never set it. No agent_id means
+    # no agent to offboard-check, not an offboarded one: skip, don't block.
+    if task.agent_id is not None:
+        r = await db.execute(select(AgentInstance.status).where(AgentInstance.id == task.agent_id))
+        agent_status_row = r.first()
+        if agent_status_row is None or agent_status_row[0] != AgentInstanceStatus.ACTIVE:
+            return False, "the calling agent has been offboarded", None
+
     capability = TOOL_CAPABILITIES.get(tool_name)
     if capability is None or not has_permission(row.role, capability):
-        return False, f"the initiating user's role ('{row.role}') no longer has permission to use '{tool_name}'"
-    return True, None
+        return False, f"the initiating user's role ('{row.role}') no longer has permission to use '{tool_name}'", None
+    scope_denial = await agent_scope_denial_reason(db, task.agent_id, tool_name, tool_args)
+    if scope_denial is not None:
+        return False, scope_denial["message"], scope_denial
+    return True, None, None
 
 
 
@@ -129,11 +173,99 @@ async def _caller_still_authorized(db, task: Task, tool_name: str) -> tuple[bool
 # id key "id", name key "name"; list_open_incidents returns a bare list
 # (cap_tool_result only wraps empty results), id key "incident_id", name
 # key "title" — not "id"/"name" like the other two.
+#
+# generic_terms (2026-09): words inherent to this entity type that must
+# never carry matching signal, regardless of pool size — see
+# _score_candidates' own docstring for why pool-relative IDF alone isn't
+# enough (it degrades to a no-op at pool size 1, exactly the case
+# test_honest_failure_message_when_neither_tier_resolves guards against:
+# a description sharing only the word "pipeline" with the one discovered
+# pipeline must never count as a real match).
 _ARG_RESOLUTION_SOURCES = {
-    "source_id": {"discovery_tool": "list_data_sources", "list_key": "sources", "id_key": "id", "name_key": "name"},
-    "pipeline_id": {"discovery_tool": "list_pipelines", "list_key": "pipelines", "id_key": "id", "name_key": "name"},
-    "incident_id": {"discovery_tool": "list_open_incidents", "list_key": None, "id_key": "incident_id", "name_key": "title"},
+    "source_id": {
+        "discovery_tool": "list_data_sources", "list_key": "sources", "id_key": "id", "name_key": "name",
+        "generic_terms": frozenset({"source", "sources", "data"}),
+    },
+    "pipeline_id": {
+        "discovery_tool": "list_pipelines", "list_key": "pipelines", "id_key": "id", "name_key": "name",
+        "generic_terms": frozenset({"pipeline", "pipelines"}),
+    },
+    "incident_id": {
+        "discovery_tool": "list_open_incidents", "list_key": None, "id_key": "incident_id", "name_key": "title",
+        "generic_terms": frozenset({"incident", "incidents", "data", "stale", "overdue"}),
+    },
 }
+
+# Tuned against two real failures from the 2026-09-02 measurement session,
+# not from first principles — see docs/context/GOTCHAS.md for the full
+# worked numbers this was tuned against:
+#   Case 1 (should resolve): "the sales pipeline" vs {Sales Ingestion
+#   Pipeline, HR Sync Pipeline} scored 0.500 vs 0.000 (HR Sync Pipeline's
+#   own tokens never appear in the description at all) — an infinite
+#   margin, floor cleared by a wide margin too.
+#   Case 2 (should refuse): "the stale sales data incident" vs 20 near-
+#   identical "Stale data: <X> (Nh overdue)" incidents scored 0.025 tied
+#   across all 10 same-source candidates — a 1.0x margin (no margin at
+#   all), and 0.025 sits well below the floor independently.
+_TIER1_MATCH_FLOOR = 0.1     # case 2's top score (0.025) sits well below this
+_TIER1_MATCH_MARGIN = 1.5    # case 1's real margin clears this; case 2's 1.0x doesn't
+
+# General-purpose English function words — deliberately small, tuned
+# against the real descriptions seen so far, not an exhaustive list.
+_STOPWORDS = frozenset({
+    "the", "a", "an", "to", "of", "for", "on", "in", "is", "and", "its",
+    "that", "this", "with", "it", "why", "was", "be",
+})
+
+
+def _tokenize(text: str, generic_terms: frozenset = frozenset()) -> set:
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return {t for t in tokens if t not in _STOPWORDS and t not in generic_terms}
+
+
+def _score_candidates(description: str, records: list[dict], generic_terms: frozenset) -> list[tuple]:
+    """Tokenized, pool-relative overlap scoring — replaces plain substring
+    containment (2026-09; see docs/context/GOTCHAS.md for why: "sales
+    pipeline" is not a substring of "Sales Ingestion Pipeline" in either
+    direction, so a real, unambiguous match used to refuse and cost an
+    extra real LLM call every time).
+
+    Each candidate's score is the sum of its own name-tokens found in the
+    description, weighted inversely by how many OTHER candidates in this
+    same pool share that token, normalized by the candidate's own token
+    count — a word every candidate's name has in common carries near-zero
+    discriminating weight; a word only one candidate has carries most of
+    the score. Deliberately cheap (pool sizes here are single digits to a
+    few dozen) — no LLM call, matching Tier 1's existing design rationale.
+
+    Pool-relative weighting alone isn't sufficient at small pool sizes: a
+    pool of one candidate makes every one of its own tokens trivially
+    "unique" (df=1) even if the word is a generic type-name like
+    "pipeline" that carries zero real signal. generic_terms (per arg_key,
+    see _ARG_RESOLUTION_SOURCES) is stripped from both sides before
+    scoring specifically to close that gap, rather than relying on IDF to
+    catch something IDF structurally cannot catch at pool size 1.
+
+    Returns a list of (id, name, score) sorted by score descending —
+    never mutates, never picks a winner itself; the caller applies the
+    floor/margin decision."""
+    desc_tokens = _tokenize(description, generic_terms)
+    name_tokens = {rec["id"]: _tokenize(str(rec["name"]), generic_terms) for rec in records}
+    df = Counter()
+    for toks in name_tokens.values():
+        for t in toks:
+            df[t] += 1
+    scored = []
+    for rec in records:
+        toks = name_tokens[rec["id"]]
+        if not toks:
+            scored.append((rec["id"], rec["name"], 0.0))
+            continue
+        matched = toks & desc_tokens
+        score = sum(1.0 / df[t] for t in matched) / len(toks)
+        scored.append((rec["id"], rec["name"], score))
+    scored.sort(key=lambda x: x[2], reverse=True)
+    return scored
 
 
 async def _discovered_records_for_arg(db, task_id: str, arg_key: str) -> list[dict]:
@@ -178,10 +310,45 @@ async def _candidate_ids_for_arg(db, task_id: str, step: TaskStep, arg_key: str)
     so both "resolve it" and "explain why it's still wrong" read the
     identical evidence — a message that says "no source matched" must be
     checking the same thing resolution itself checked, not a second,
-    possibly-inconsistent notion of a match."""
-    description = (step.description or "").lower()
+    possibly-inconsistent notion of a match.
+
+    Every real decision this function makes — matched or refused — is
+    logged with the top two candidates' scores (2026-09), so a resolution
+    misfire in front of a customer is diagnosable from logs alone, without
+    needing to reproduce the exact discovered pool and description that
+    produced it. Always returns a set of size 0 or 1, never more — an
+    ambiguous pool is reported as a refusal (with both leading scores in
+    the log line), not as a multi-candidate set; callers only ever
+    branched on "exactly one" vs "not exactly one" anyway."""
     records = await _discovered_records_for_arg(db, task_id, arg_key)
-    return {rec["id"] for rec in records if str(rec["name"]).lower() in description}
+    if not records:
+        log.info(
+            "tier1_match_refused", task_id=task_id, step_id=step.id, arg_key=arg_key,
+            reason="no_candidates_discovered",
+        )
+        return set()
+
+    generic_terms = _ARG_RESOLUTION_SOURCES[arg_key].get("generic_terms", frozenset())
+    scored = _score_candidates(step.description or "", records, generic_terms)
+    top_id, top_name, top_score = scored[0]
+    second_name, second_score = (scored[1][1], scored[1][2]) if len(scored) > 1 else (None, 0.0)
+    margin = (top_score / second_score) if second_score > 0 else float("inf")
+
+    if top_score >= _TIER1_MATCH_FLOOR and margin >= _TIER1_MATCH_MARGIN:
+        log.info(
+            "tier1_match_resolved", task_id=task_id, step_id=step.id, arg_key=arg_key,
+            matched_id=top_id, matched_name=top_name,
+            top_score=round(top_score, 4), second_name=second_name, second_score=round(second_score, 4),
+        )
+        return {top_id}
+
+    reason = "below_floor" if top_score < _TIER1_MATCH_FLOOR else "no_clear_margin"
+    log.info(
+        "tier1_match_refused", task_id=task_id, step_id=step.id, arg_key=arg_key, reason=reason,
+        top_name=top_name, top_score=round(top_score, 4),
+        second_name=second_name, second_score=round(second_score, 4),
+    )
+    return set()
 
 
 async def _all_discovered_ids_for_arg(db, task_id: str, arg_key: str) -> set:
@@ -313,8 +480,8 @@ _ADAPT_PRIOR_RESULTS_MAX_CHARS = 3000  # keeps the adapt prompt bounded regardle
 
 
 async def _adapt_step_args(
-    tenant_id: str, user_id: str, description: str, tool_name: str, tool_args: dict, error_message: str,
-    prior_results: list[dict] | None = None,
+    tenant_id: str, user_id: str, description: str, tool_name: str, tool_args: dict,
+    error_message: str, prior_results: list[dict] | None = None, task_id: str | None = None,
 ) -> dict:
     """One LLM call: shows the real failure to the model and asks for
     corrected arguments. Falls back to the original arguments (a no-op
@@ -329,7 +496,14 @@ async def _adapt_step_args(
     real, fetched records) is given directly, for the same reason Tier 1
     reads raw_result instead of guessing: an LLM correcting a wrong ID
     from the schema and an error message alone is guessing blind, with no
-    way to know what the real ID actually is unless shown it."""
+    way to know what the real ID actually is unless shown it.
+
+    task_id is trailing/keyword-only, not inserted alongside the original
+    positional params, deliberately: a test fixture that monkeypatches this
+    whole function with its own fake (several do, in tests/test_task_executor*.py)
+    and doesn't yet accept task_id gets a clean, obvious TypeError for a
+    missing kwarg instead of every downstream positional argument silently
+    shifting by one slot."""
     quota = await get_quota_status(tenant_id, "ai_credits")
     if quota["status"] == "exceeded":
         return tool_args
@@ -360,7 +534,7 @@ async def _adapt_step_args(
         raw = await invoke_llm(
             [SystemMessage(content="You output ONLY a JSON object, no prose, no markdown fences."),
              HumanMessage(content=prompt)],
-            tenant_id=tenant_id, user_id=user_id, request_type="task_step_adapt",
+            tenant_id=tenant_id, user_id=user_id, task_id=task_id, request_type="task_step_adapt",
         )
         text = raw.strip().strip("`")
         if text.startswith("json"):
@@ -373,14 +547,35 @@ async def _adapt_step_args(
     return tool_args
 
 
-async def _call_tool(tenant_id: str, tool_name: str, tool_args: dict) -> dict:
+async def _call_tool(
+    tenant_id: str, tool_name: str, tool_args: dict,
+    user_id: str | None = None, task_id: str | None = None, agent_id: str | None = None,
+) -> dict:
     """Invokes the real registered tool directly (not through the agent's
     ToolNode/LangGraph machinery -- there's no LLM reasoning a task step
     needs to trigger the call itself, the plan already decided that).
     tenant_id is force-injected here, same convention agent_node uses for
-    real chat tool calls -- never trusted from tool_args."""
+    real chat tool calls -- never trusted from tool_args.
+
+    user_id/task_id/agent_id are injected the same way, but conditionally:
+    unlike tenant_id (every registered tool declares it, by hard rule),
+    most tools don't accept these at all, and merging an argument a tool's
+    schema doesn't declare would break its own ainvoke() validation. Only
+    inject when the target tool's own schema actually asks for it -- this
+    makes the convention generic, not tool-specific: any future tool that
+    adds a user_id/task_id/agent_id parameter gets it force-injected here
+    automatically, with no further change to this function. agent_id
+    (Wunomo Projects Phase 2, item 5) is the calling agent's real identity,
+    used by the source-lock-aware tools to label a lock's holder."""
     tool_obj = tool_by_name(tool_name)
-    result = await tool_obj.ainvoke({**tool_args, "tenant_id": tenant_id})
+    call_args = {**tool_args, "tenant_id": tenant_id}
+    if "user_id" in tool_obj.args:
+        call_args["user_id"] = user_id
+    if "task_id" in tool_obj.args:
+        call_args["task_id"] = task_id
+    if "agent_id" in tool_obj.args:
+        call_args["agent_id"] = agent_id
+    result = await tool_obj.ainvoke(call_args)
     if isinstance(result, str):
         try:
             result = json.loads(result)
@@ -443,13 +638,25 @@ def _set_task_status_unless_cancelled(task: Task, new_status: TaskStatus) -> boo
 
 
 def _check_wall_clock_cap(task: Task) -> str | None:
+    """Bounds real execution exposure, not raw calendar time since
+    started_at -- item 72 (WALKTHROUGH_FINDINGS_2026-08.md): a task
+    approved more than MAX_TASK_WALL_CLOCK_HOURS after it started used
+    to be killed the instant it was approved, undoing the approval that
+    was just granted. task.paused_seconds (accumulated at every
+    pause->RUNNING transition -- see the two call sites that increment
+    it) is subtracted here, so time spent waiting on a human/quota/lock
+    is free, exactly like the walk-away feature this cap has to coexist
+    with requires."""
     if task.started_at is None:
         return None
-    elapsed_hours = (datetime.utcnow() - task.started_at).total_seconds() / 3600
+    raw_elapsed_seconds = (datetime.utcnow() - task.started_at).total_seconds()
+    paused_seconds = task.paused_seconds or 0
+    elapsed_hours = (raw_elapsed_seconds - paused_seconds) / 3600
     if elapsed_hours > MAX_TASK_WALL_CLOCK_HOURS:
         return (
-            f"Stopped: exceeded the {MAX_TASK_WALL_CLOCK_HOURS}-hour wall-clock budget "
-            f"(started at {task.started_at.isoformat()}, running for {elapsed_hours:.1f}h)."
+            f"Stopped: exceeded the {MAX_TASK_WALL_CLOCK_HOURS}-hour wall-clock execution budget "
+            f"(started at {task.started_at.isoformat()}, {elapsed_hours:.1f}h of active execution "
+            f"excluding {paused_seconds / 3600:.1f}h spent paused for approval/quota/a source lock)."
         )
     return None
 
@@ -494,11 +701,24 @@ async def _notify_task_stopped(task: Task, title: str, message: str, severity: s
     tells you when it's done or needs you. Fires at the transitions that
     genuinely warrant it -- every terminal state, plus mid-task approval
     (someone needs to act) -- never for the retry-prone pauses
-    (PAUSED_FAILED_STEP, PAUSED_QUOTA_EXCEEDED) that are already visible
-    the moment anyone checks the Tasks screen and would otherwise spam on
-    every failed attempt. Best-effort, matching this module's own
-    NotificationService contract: a delivery failure must never break
-    the actual state transition it's describing."""
+    (PAUSED_QUOTA_EXCEEDED, PAUSED_SOURCE_LOCKED) that self-heal via the
+    beat tick and would otherwise spam on every failed attempt.
+
+    PAUSED_FAILED_STEP is a partial exception (Wunomo Projects Phase 2
+    frontend, slice 9): unlike the two pauses above, it never resolves on
+    its own -- there is no resume path for it at all, for any cause. Its
+    scope-denial cause specifically gets its own notification
+    (_notify_scope_denial_once, below) because it has a real, one-action
+    fix (grant the source) and a real reason to alert someone even though
+    nobody's watching an unattended run; its other causes (attempt-budget
+    exhaustion, the initiating user losing access) still don't notify
+    here, matching the original reasoning -- they don't have an
+    equally clean single fix to point someone at, and are rarer in
+    practice than a scope gap recurring across several tasks.
+
+    Best-effort, matching this module's own NotificationService contract:
+    a delivery failure must never break the actual state transition it's
+    describing."""
     try:
         from modules.reporting.notification_service import NotificationService
         await NotificationService(task.tenant_id).send_alert(
@@ -509,16 +729,103 @@ async def _notify_task_stopped(task: Task, title: str, message: str, severity: s
         log.warning("task_notification_failed", task_id=task.id, error=str(exc))
 
 
+async def _notify_scope_denial_once(task: Task, scope_denial: dict) -> None:
+    """One notification per distinct (agent, source) scope gap, not one
+    per task (Wunomo Projects Phase 2 frontend, slice 9, explicit
+    requirement) -- several tasks can independently hit the identical
+    already-known gap (e.g. a recurring workflow needing a source that
+    was never granted), and alerting once per task would mean N Slack
+    messages for one real fix, the exact shape that gets a channel muted.
+    Deduped via a real, visible Incident row -- the same dedup shape
+    services/tasks.py's _check_freshness() already uses for stale
+    sources: an OPEN incident for this exact cause is loaded and, if
+    found, no new alert fires (the open incident IS the record); only a
+    genuinely new (agent_id, source_id) pair creates one and alerts.
+
+    The message names the fix (a real, absolute link to the agent's
+    detail page) AND the consequence (this specific task can't resume
+    even after the fix) -- a notification that says only "a task
+    stopped" costs the same round trip through the app as no
+    notification at all; one that says "grant access" without saying the
+    paused task is already unrecoverable sends someone to fix the scope
+    and then wait for a task that will never move (see finding 76)."""
+    agent_id, source_id = scope_denial["agent_id"], scope_denial["source_id"]
+    already_known = False
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(Incident).where(
+            Incident.tenant_id == task.tenant_id, Incident.status == IncidentStatus.OPEN,
+            Incident.title.like("Scope gap:%"),
+        ))
+        for existing in r.scalars().all():
+            if existing.affected_assets == [agent_id, source_id]:
+                already_known = True
+                break
+        if not already_known:
+            db.add(Incident(
+                id=str(uuid.uuid4()), tenant_id=task.tenant_id,
+                title=f"Scope gap: {scope_denial['agent_name']} → {scope_denial['source_name']}",
+                description=scope_denial["message"], severity=IncidentSeverity.MEDIUM,
+                affected_assets=[agent_id, source_id], detected_at=datetime.utcnow(),
+            ))
+            await db.commit()
+
+    if already_known:
+        return
+
+    try:
+        from config import settings
+        from modules.reporting.notification_service import NotificationService
+        grant_url = f"{settings.FRONTEND_URL}/agents/{agent_id}?highlight_source={source_id}"
+        await NotificationService(task.tenant_id).send_alert(
+            channel="both", severity="medium", title=f"Task paused — {scope_denial['agent_name']} denied access",
+            message=(
+                f"{scope_denial['agent_name']} doesn't have access to \"{scope_denial['source_name']}\" "
+                f"(needed by \"{scope_denial['tool_name']}\") on task \"{task.goal}\". "
+                f"Grant it here: {grant_url} — this task can't be resumed, so you'll need to start a new one."
+            ),
+            metadata={"task_id": task.id, "agent_id": agent_id, "source_id": source_id},
+        )
+    except Exception as exc:
+        log.warning("scope_denial_notification_failed", task_id=task.id, error=str(exc))
+
+
 async def execute_next_step(task_id: str) -> dict:
+    """Thin locking wrapper -- see _execute_next_step_locked for the real
+    logic. Wraps the ENTIRE call (not just the DB reads) in a per-task
+    advisory lock (services/task_lock.py, item 73): two concurrent calls
+    on the same task_id -- a beat tick and a human's /advance click, two
+    overlapping ticks, or just two overlapping human clicks, which could
+    already race before auto-advance ever existed -- can otherwise both
+    read the same step as PENDING before either commits, and both call
+    that step's tool. The lock is held for the full duration of the real
+    call below, including its internal retry-backoff sleeps, so a denied
+    caller gets {"outcome": "task_busy"} immediately rather than racing."""
+    from services.task_lock import acquire_task_lock, TaskLockHeld
+    try:
+        async with acquire_task_lock(task_id):
+            return await _execute_next_step_locked(task_id)
+    except TaskLockHeld:
+        return {"outcome": "task_busy"}
+
+
+async def _execute_next_step_locked(task_id: str) -> dict:
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one_or_none()
         if task is None:
             return {"outcome": "task_not_found"}
-        if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.PAUSED_QUOTA_EXCEEDED):
+        if task.status not in RUNNABLE_TASK_STATUSES:
             return {"outcome": "not_runnable", "status": task.status.value}
 
-        if task.status in (TaskStatus.QUEUED, TaskStatus.PAUSED_QUOTA_EXCEEDED):
+        if task.status in (TaskStatus.QUEUED, TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED):
+            # paused_seconds only accumulates for a status that was
+            # actually a pause (QUEUED never was -- nothing to subtract
+            # for a task that hasn't started yet, and its paused_at is
+            # always None here).
+            if task.status in (TaskStatus.PAUSED_QUOTA_EXCEEDED, TaskStatus.PAUSED_SOURCE_LOCKED) and task.paused_at is not None:
+                task.paused_seconds = (task.paused_seconds or 0) + int(
+                    (datetime.utcnow() - task.paused_at).total_seconds()
+                )
             _set_task_status_unless_cancelled(task, TaskStatus.RUNNING)
             task.started_at = task.started_at or datetime.utcnow()
             await db.commit()
@@ -647,7 +954,7 @@ async def execute_next_step(task_id: str) -> dict:
             )
             return {"outcome": "task_completed"}
 
-        authorized, denial_reason = await _caller_still_authorized(db, task, step.tool_name)
+        authorized, denial_reason, scope_denial = await _caller_still_authorized(db, task, step.tool_name, step.tool_args or {})
         if not authorized:
             step.attempt_count += 1
             step.status = TaskStepStatus.FAILED
@@ -656,6 +963,8 @@ async def execute_next_step(task_id: str) -> dict:
             step.completed_at = datetime.utcnow()
             _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
             await db.commit()
+            if scope_denial is not None:
+                await _notify_scope_denial_once(task, scope_denial)
             return {
                 "outcome": "blocked_permission", "step_id": step.id,
                 "attempt_count": step.attempt_count, "reason": denial_reason,
@@ -740,7 +1049,7 @@ async def execute_next_step(task_id: str) -> dict:
 
         step.status = TaskStepStatus.RUNNING
         step.started_at = step.started_at or datetime.utcnow()
-        tenant_id, task_user_id = task.tenant_id, task.user_id
+        tenant_id, task_user_id, agent_id = task.tenant_id, task.user_id, task.agent_id
         tool_name, tool_args, step_id = step.tool_name, dict(step.tool_args or {}), step.id
         description = step.description
         # Resuming after a credit-exhaustion pause continues the SAME
@@ -766,10 +1075,45 @@ async def execute_next_step(task_id: str) -> dict:
     last_error = None
     adapted_once = False
     quota_paused_attempt = None
+    source_locked_paused_attempt = None
     current_args = tool_args
     for attempt in range(starting_attempt, MAX_ATTEMPTS_PER_STEP + 1):
+        # Scope re-check (Wunomo Projects Phase 1), immediately before the
+        # real tool call -- this is THE enforcement point, not a cost
+        # optimisation (see CLAUDE.md's plan-time-vs-enforcement split):
+        # current_args is always fully resolved by the time execution
+        # reaches here, whichever tier resolved it (Tier 1 discovery-pool
+        # match, Tier 2 LLM-adapt, or HUMAN_EDITED). Re-checked on every
+        # attempt, not just the first, because Tier 2 adaptation can
+        # redirect current_args at a different, out-of-scope entity
+        # between attempts -- a real, current id always exists here, so
+        # there's no "placeholder, nothing to check yet" case to worry
+        # about the way _caller_still_authorized's own scope check does.
+        async with AsyncSessionLocal() as scope_db:
+            scope_denial = await agent_scope_denial_reason(scope_db, agent_id, tool_name, current_args)
+        if scope_denial is not None:
+            async with AsyncSessionLocal() as db:
+                r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
+                step = r.scalar_one()
+                step.attempt_count = attempt
+                step.status = TaskStepStatus.FAILED
+                step.error_message = f"Blocked: {scope_denial['message']}"
+                step.completed_at = datetime.utcnow()
+
+                r = await db.execute(select(Task).where(Task.id == task_id))
+                task = r.scalar_one()
+                _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
+                await db.commit()
+            await _notify_scope_denial_once(task, scope_denial)
+            return {
+                "outcome": "blocked_permission", "step_id": step_id,
+                "attempt_count": attempt, "reason": scope_denial["message"],
+            }
+
         try:
-            result = await _call_tool(tenant_id, tool_name, current_args)
+            result = await _call_tool(
+                tenant_id, tool_name, current_args, user_id=task_user_id, task_id=task_id, agent_id=agent_id,
+            )
         except Exception as exc:
             last_error = f"{type(exc).__name__}: {exc}"
             if attempt < MAX_ATTEMPTS_PER_STEP:
@@ -778,18 +1122,46 @@ async def execute_next_step(task_id: str) -> dict:
 
         if isinstance(result, dict) and result.get("error"):
             last_error = str(result["error"])
+            if result.get("lock_conflict"):
+                # A source lock conflict (Wunomo Projects Phase 2, item 5)
+                # is not a domain error to adapt around -- current_args
+                # are already correct, the resource is just busy -- and
+                # not a quota exhaustion either. Pause immediately,
+                # regardless of attempt count or adapted_once, using the
+                # same pause/resume shape as quota_paused_attempt: the
+                # step goes back to PENDING (not FAILED), so resumption
+                # retries with the same attempt budget once the lock frees,
+                # rather than burning an attempt/adapt cycle racing it.
+                source_locked_paused_attempt = attempt
+                break
             if attempt < MAX_ATTEMPTS_PER_STEP and not adapted_once:
                 # Credit exhaustion pauses the task instead of silently
                 # degrading to an unadapted retry (Q4) -- the only real
                 # LLM spend anywhere in step execution is this adapt call,
                 # so this is the one place quota needs to be checked.
+                # Two-gate (Wunomo Projects Phase 1, part two): the
+                # tenant-level check existed first; the agent-level one
+                # is the second, independent gate -- either exceeded
+                # pauses the task the same way, and last_error is
+                # overwritten so the pause reason names the actual gate
+                # that blocked it, not the stale domain error from the
+                # tool call that triggered this adapt attempt.
                 quota = await get_quota_status(tenant_id, "ai_credits")
                 if quota["status"] == "exceeded":
+                    last_error = "Paused: the tenant's AI-credit quota is exhausted for this billing period."
+                    quota_paused_attempt = attempt
+                    break
+                agent_quota = await get_agent_quota_status(agent_id) if agent_id else {"status": "ok"}
+                if agent_quota["status"] == "exceeded":
+                    last_error = (
+                        f"Paused: this agent's monthly token budget "
+                        f"({agent_quota['used']}/{agent_quota['limit']} tokens) is exhausted."
+                    )
                     quota_paused_attempt = attempt
                     break
                 adapted_args = await _adapt_step_args(
                     tenant_id, task_user_id, description, tool_name, current_args, last_error,
-                    prior_results=prior_results,
+                    prior_results=prior_results, task_id=task_id,
                 )
                 async with AsyncSessionLocal() as guard_db:
                     current_args = await _reject_ungrounded_adaptation(
@@ -868,6 +1240,28 @@ async def execute_next_step(task_id: str) -> dict:
             "attempt_count": quota_paused_attempt, "reason": last_error,
         }
 
+    if source_locked_paused_attempt is not None:
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
+            step = r.scalar_one()
+            # Same shape as the quota_paused_attempt branch above: back to
+            # PENDING (not FAILED), resuming picks up at
+            # starting_attempt = attempt_count + 1, the SAME budget.
+            step.attempt_count = source_locked_paused_attempt
+            step.error_message = last_error
+            step.status = TaskStepStatus.PENDING
+
+            r = await db.execute(select(Task).where(Task.id == task_id))
+            task = r.scalar_one()
+            if _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_SOURCE_LOCKED):
+                task.paused_at = datetime.utcnow()
+            await db.commit()
+
+        return {
+            "outcome": "paused_source_locked", "step_id": step_id,
+            "attempt_count": source_locked_paused_attempt, "reason": last_error,
+        }
+
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
         step = r.scalar_one()
@@ -911,7 +1305,22 @@ async def resume_task(task_id: str, resolved_by: str, notes: str = "") -> dict:
     replay, so it re-validates its own real-world preconditions (Q5's
     precondition requirement). Nothing here holds any in-memory state --
     a worker/backend restart between pause and resume changes nothing,
-    since every fact this function reads comes from the DB."""
+    since every fact this function reads comes from the DB.
+
+    A SUPERVISOR_INTENT task is the one exception to "re-enters the normal
+    execution pipeline": its single step has no tool_name/tool_args for
+    execute_next_step() below to dispatch (see supervisor.py's own "WHY
+    SUPERVISOR-DISPATCHED TASKS NEVER TOUCH task_executor.py") -- there is
+    nothing here for the structured-plan engine to run. PolicyEngine
+    already owns "execute the approved action" for this case (the same
+    TOOL_REGISTRY dispatch a standalone chat approval uses); its approve()
+    also resolves the Task/dependents side via
+    supervisor.resolve_task_approval() once execution finishes. Detected
+    and delegated below rather than silently no-op'ing (the previous
+    behavior: step.approval_request_id was never populated for a
+    supervisor task at all, so "no_blocked_step" -- read: nothing
+    happened -- is exactly what a click on the Needs You screen's resume
+    button produced)."""
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one_or_none()
@@ -938,16 +1347,34 @@ async def resume_task(task_id: str, resolved_by: str, notes: str = "") -> dict:
         if step is None or step.approval_request_id is None:
             return {"outcome": "no_blocked_step"}
 
-        r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == step.approval_request_id))
-        approval_req = r.scalar_one()
-        approval_req.status = ApprovalStatus.APPROVED
-        approval_req.resolved_by = resolved_by
-        approval_req.resolved_at = datetime.utcnow()
-        approval_req.resolution_note = notes
+        if task.task_shape == TaskShape.SUPERVISOR_INTENT:
+            approval_request_id, tenant_id = step.approval_request_id, task.tenant_id
+        else:
+            approval_request_id = None
 
-        step.status = TaskStepStatus.PENDING
-        _set_task_status_unless_cancelled(task, TaskStatus.RUNNING)
-        await db.commit()
+        if approval_request_id is None:
+            r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == step.approval_request_id))
+            approval_req = r.scalar_one()
+            approval_req.status = ApprovalStatus.APPROVED
+            approval_req.resolved_by = resolved_by
+            approval_req.resolved_at = datetime.utcnow()
+            approval_req.resolution_note = notes
+
+            if task.paused_at is not None:
+                task.paused_seconds = (task.paused_seconds or 0) + int(
+                    (datetime.utcnow() - task.paused_at).total_seconds()
+                )
+            step.status = TaskStepStatus.PENDING
+            _set_task_status_unless_cancelled(task, TaskStatus.RUNNING)
+            await db.commit()
+
+    # Falls outside the session above on purpose: PolicyEngine.approve()
+    # opens its own sessions rather than reusing one already held open by
+    # its caller, and the supervisor branch never wrote anything above
+    # (there's nothing to commit before calling out).
+    if approval_request_id is not None:
+        result = await PolicyEngine(tenant_id).approve(approval_request_id, reviewer=resolved_by, notes=notes)
+        return {"outcome": "resumed", "policy_result": result}
 
     return await execute_next_step(task_id)
 
@@ -956,7 +1383,14 @@ async def reject_task_step(task_id: str, resolved_by: str, notes: str = "") -> d
     """Declines the blocked step outright -- no re-entry into execution,
     since there's nothing to re-attempt. Reuses the existing
     PAUSED_FAILED_STEP pause/pause_reason machinery rather than inventing
-    a parallel one for "rejected" specifically."""
+    a parallel one for "rejected" specifically.
+
+    A SUPERVISOR_INTENT task delegates to PolicyEngine.reject() instead --
+    see resume_task()'s own docstring for why (the same reasoning applies
+    to rejection: PolicyEngine.reject() calls
+    supervisor.resolve_task_approval(approved=False), which moves this
+    task's dependents to BLOCKED_ON_DEPENDENCY rather than leaving them
+    queued forever)."""
     async with AsyncSessionLocal() as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one_or_none()
@@ -983,20 +1417,31 @@ async def reject_task_step(task_id: str, resolved_by: str, notes: str = "") -> d
         if step is None or step.approval_request_id is None:
             return {"outcome": "no_blocked_step"}
 
-        r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == step.approval_request_id))
-        approval_req = r.scalar_one()
-        approval_req.status = ApprovalStatus.REJECTED
-        approval_req.resolved_by = resolved_by
-        approval_req.resolved_at = datetime.utcnow()
-        approval_req.resolution_note = notes
+        if task.task_shape == TaskShape.SUPERVISOR_INTENT:
+            approval_request_id, tenant_id = step.approval_request_id, task.tenant_id
+        else:
+            approval_request_id = None
 
-        step.status = TaskStepStatus.FAILED
-        step.error_message = f"Step rejected: {notes or 'no reason given'}."
-        step.completed_at = datetime.utcnow()
-        _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
-        await db.commit()
+        if approval_request_id is None:
+            r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == step.approval_request_id))
+            approval_req = r.scalar_one()
+            approval_req.status = ApprovalStatus.REJECTED
+            approval_req.resolved_by = resolved_by
+            approval_req.resolved_at = datetime.utcnow()
+            approval_req.resolution_note = notes
 
-    return {"outcome": "step_rejected", "step_id": step.id}
+            step.status = TaskStepStatus.FAILED
+            step.error_message = f"Step rejected: {notes or 'no reason given'}."
+            step.completed_at = datetime.utcnow()
+            _set_task_status_unless_cancelled(task, TaskStatus.PAUSED_FAILED_STEP)
+            await db.commit()
+            step_id = step.id
+
+    if approval_request_id is not None:
+        result = await PolicyEngine(tenant_id).reject(approval_request_id, reviewer=resolved_by, notes=notes)
+        return {"outcome": "step_rejected", "policy_result": result}
+
+    return {"outcome": "step_rejected", "step_id": step_id}
 
 
 _NON_CANCELLABLE_STATUSES = (

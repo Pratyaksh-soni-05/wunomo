@@ -1,8 +1,14 @@
 import uuid
+from datetime import datetime
+from unittest.mock import AsyncMock
+
 import pytest
 from langchain_core.messages import AIMessage
+from sqlalchemy import select
 
 import agent.dataops_agent as dataops_agent
+from database import AsyncSessionLocal
+from models.all_models import Channel, ChatMessage
 from langchain_core.tools import tool
 
 
@@ -50,7 +56,7 @@ async def test_chat_response_includes_tool_trace(client, monkeypatch):
         ]),
         AIMessage(content="Found widgets."),
     ])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
@@ -81,7 +87,7 @@ async def test_blocked_tool_call_shows_up_in_trace(client, monkeypatch):
             {"name": "fake_lookup_tool", "args": {"x": "risky"}, "id": "call_1"},
         ]),
     ])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: True)
@@ -105,7 +111,7 @@ async def test_chat_sessions_list_is_scoped_to_the_requesting_user(client, monke
     coincidence (they're always different tenants here, but the query must
     filter on user_id too, not just tenant_id, for defense in depth)."""
     fake_llm = FakeToolCallLLM([AIMessage(content="hi there")])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
@@ -116,7 +122,7 @@ async def test_chat_sessions_list_is_scoped_to_the_requesting_user(client, monke
     session_a = r.json()["session_id"]
 
     fake_llm2 = FakeToolCallLLM([AIMessage(content="hi there")])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm2)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm2)
     dataops_agent._cache.clear()
     token_b, _, _ = await _register(client, "sessionsb")
     r = await client.post("/api/v1/chat/", json={"message": "hello from B"}, headers=_auth(token_b))
@@ -135,12 +141,43 @@ async def test_chat_sessions_list_is_scoped_to_the_requesting_user(client, monke
 
 
 @pytest.mark.asyncio
+async def test_chat_sessions_list_excludes_channel_backed_session_ids(client):
+    """Finding #70: a channel's session_id must never appear in
+    GET /chat/sessions as if it were a private session, even though a
+    channel message the caller posted has their own real user_id on it
+    -- exactly the row shape a private session has. Real private
+    sessions must still list normally alongside the exclusion."""
+    token, tenant_id, user_id = await _register(client, "sessionexcl")
+
+    async with AsyncSessionLocal() as db:
+        channel = Channel(id=str(uuid.uuid4()), tenant_id=tenant_id, name="General")
+        db.add(channel)
+        db.add(ChatMessage(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
+            session_id=channel.id, role="user", content="@Nova hello",
+            created_at=datetime.utcnow(),
+        ))
+        private_session_id = str(uuid.uuid4())
+        db.add(ChatMessage(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
+            session_id=private_session_id, role="user", content="a real private message",
+            created_at=datetime.utcnow(),
+        ))
+        await db.commit()
+
+    r = await client.get("/api/v1/chat/sessions", headers=_auth(token))
+    ids = {s["session_id"] for s in r.json()["sessions"]}
+    assert private_session_id in ids
+    assert channel.id not in ids
+
+
+@pytest.mark.asyncio
 async def test_chat_sessions_list_shape_and_title(client, monkeypatch):
     """Each session summary must include a title derived from the first
     user message, real started_at/last_activity timestamps, and an accurate
     message_count (user + assistant messages both counted)."""
     fake_llm = FakeToolCallLLM([AIMessage(content="Paris is the capital.")])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
@@ -172,7 +209,7 @@ async def test_session_history_includes_tool_calls(client, monkeypatch):
         ]),
         AIMessage(content="Found gadgets."),
     ])
-    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0: fake_llm)
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
@@ -190,3 +227,107 @@ async def test_session_history_includes_tool_calls(client, monkeypatch):
 
     user_msg = next(m for m in messages if m["role"] == "user")
     assert user_msg["tool_calls"] == []
+
+
+@pytest.mark.asyncio
+async def test_long_session_persists_a_rolling_summary_row(client, monkeypatch):
+    """Wunomo Projects Phase 0, commit 6: once a session's real history
+    exceeds CONTEXT_WINDOW_SIZE, the turn that crosses that line must
+    persist a real ChatMessage(role="summary") row - that's the only way
+    the compression round-trips to the next request instead of re-growing
+    unbounded token cost on every future turn."""
+    fake_llm = FakeToolCallLLM([AIMessage(content=f"reply {i}") for i in range(8)])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    fake_summarize = AsyncMock(return_value="Session summary text.")
+    monkeypatch.setattr(dataops_agent, "invoke_llm", fake_summarize)
+    dataops_agent._cache.clear()
+
+    token, tenant_id, _ = await _register(client, "longsession")
+    session_id = None
+    for i in range(8):
+        r = await client.post(
+            "/api/v1/chat/",
+            json={"message": f"turn {i}", "session_id": session_id},
+            headers=_auth(token),
+        )
+        assert r.status_code == 200
+        session_id = r.json()["session_id"]
+
+    fake_summarize.assert_called()
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(ChatMessage).where(
+            ChatMessage.session_id == session_id, ChatMessage.role == "summary",
+        ))
+        summary_rows = result.scalars().all()
+
+    assert len(summary_rows) == 1
+    assert summary_rows[0].content == "Session summary text."
+
+
+async def _add_member(tenant_id: str, role: str = "owner"):
+    """A second real user in the SAME tenant as an existing one -
+    _register() always creates a brand-new tenant, which can't exercise
+    a same-tenant cross-user session collision."""
+    from services.auth_service import hash_password, issue_token_for_user
+    from models.all_models import User
+
+    async with AsyncSessionLocal() as db:
+        user = User(
+            id=str(uuid.uuid4()), tenant_id=tenant_id, email=unique_email("member"),
+            hashed_password=hash_password("test1234"), full_name="Second User", role=role,
+            is_active=True, email_verified=True,
+        )
+        db.add(user)
+        await db.commit()
+        return issue_token_for_user(user, "password"), user.id
+
+
+@pytest.mark.asyncio
+async def test_a_users_session_cannot_be_continued_by_another_tenant_member(client, monkeypatch):
+    """The real gap this closes: POST /api/v1/chat/'s history load
+    checked tenant_id and session_id but never user_id, unlike GET
+    /sessions and GET /sessions/{id}/history, which always have. Any
+    tenant member who knew another user's session_id could post into it."""
+    fake_llm = FakeToolCallLLM([AIMessage(content="hi there")])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    token_a, tenant_id, _ = await _register(client, "ownersess")
+    r = await client.post("/api/v1/chat/", json={"message": "hello from A"}, headers=_auth(token_a))
+    assert r.status_code == 200
+    session_id = r.json()["session_id"]
+
+    token_b, _ = await _add_member(tenant_id, role="owner")
+    r = await client.post(
+        "/api/v1/chat/", json={"message": "trying to ride along", "session_id": session_id},
+        headers=_auth(token_b),
+    )
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_brand_new_session_id_has_no_owner_conflict(client, monkeypatch):
+    """A session_id with zero existing rows is fine for anyone to start -
+    the check only fires once a real owner already exists."""
+    fake_llm = FakeToolCallLLM([AIMessage(content="hi there")])
+    monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
+    monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [fake_lookup_tool])
+    monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_lookup_tool": "view"})
+    monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
+    dataops_agent._cache.clear()
+
+    token, tenant_id, _ = await _register(client, "freshsess")
+    fresh_session_id = str(uuid.uuid4())
+    r = await client.post(
+        "/api/v1/chat/", json={"message": "hello", "session_id": fresh_session_id},
+        headers=_auth(token),
+    )
+    assert r.status_code == 200
+    assert r.json()["session_id"] == fresh_session_id

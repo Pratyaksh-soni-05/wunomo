@@ -63,6 +63,24 @@ export function formatApiDate(iso: string | null | undefined, fallback = "—"):
   }
 }
 
+/**
+ * "14m ago" / "2h ago" / "Yesterday" / "3d ago" - extracted from
+ * SessionList.tsx (slice 9, 2026-09-15) once a second real consumer
+ * (Needs You) needed the exact same logic; duplicating a third time
+ * wasn't worth it once two did.
+ */
+export function timeAgo(iso: string | null | undefined): string {
+  const d = parseApiDate(iso);
+  const diffMs = Date.now() - (d ? d.getTime() : 0);
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return days === 1 ? "Yesterday" : `${days}d ago`;
+}
+
 /** Date only (no time), in the workspace's configured timezone - see formatApiDate. */
 export function formatApiDateOnly(iso: string | null | undefined, fallback = "—"): string {
   const d = parseApiDate(iso);

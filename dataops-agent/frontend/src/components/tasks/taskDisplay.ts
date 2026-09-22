@@ -2,7 +2,11 @@
 // status/provenance -> Badge variant + label, used by the Tasks list page,
 // the Task detail page, and the chat inline "Started task" card, so the
 // three surfaces can never silently drift apart on what a status means.
-import type { TaskStepProvenance } from "@/lib/api";
+import { TASK_SHAPES, type TaskStepProvenance } from "@/lib/api";
+
+export function shapeLabel(shape: string): string {
+  return TASK_SHAPES.find((s) => s.value === shape)?.label ?? shape;
+}
 
 type BadgeVariant = "success" | "danger" | "warning" | "info" | "gray" | "midnight";
 
@@ -15,6 +19,7 @@ export function taskStatusVariant(status: string): BadgeVariant {
     case "paused_failed_step":
     case "paused_plan_invalid":
     case "paused_quota_exceeded":
+    case "paused_source_locked":
       return "warning";
     case "completed": return "success";
     case "completed_with_unconfirmed_steps": return "warning";
@@ -43,10 +48,16 @@ export function taskReasonText(task: {
   approval_pending_reason: string | null;
   expiry_reason: string | null;
   quota_paused_reason: string | null;
+  source_locked_reason: string | null;
   termination_reason: string | null;
 }): { text: string; variant: BadgeVariant } | null {
   if (task.approval_pending_reason) return { text: task.approval_pending_reason, variant: "warning" };
   if (task.quota_paused_reason) return { text: task.quota_paused_reason, variant: "warning" };
+  // source_locked_reason (Wunomo Projects Phase 2 frontend, slice 9): the
+  // backend has always computed and serialized this ("in use by X since
+  // HH:MM UTC") -- it was simply never read here, so a lock-paused task
+  // rendered as a bare gray badge with no text at all.
+  if (task.source_locked_reason) return { text: task.source_locked_reason, variant: "warning" };
   if (task.pause_reason) return { text: task.pause_reason, variant: "warning" };
   if (task.completion_note) return { text: task.completion_note, variant: "warning" };
   if (task.expiry_reason) return { text: task.expiry_reason, variant: "gray" };

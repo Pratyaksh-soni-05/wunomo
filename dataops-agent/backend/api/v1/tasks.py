@@ -9,6 +9,7 @@ amendment 3 -- role is re-read fresh right before each step runs, never
 cached here).
 """
 import json
+import re
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -18,13 +19,17 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from database import AsyncSessionLocal
-from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus
+from models.all_models import (
+    AgentInstance, AgentInstanceStatus, Project, ProjectAgent, RUNNABLE_TASK_STATUSES, TERMINAL_TASK_STATUSES,
+    Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus,
+)
+from modules.orchestration.task_executor import APPROVAL_PAUSE_TIMEOUT_HOURS
 from modules.orchestration.task_planner import (
-    PlanGenerationError, PlanValidationError, generate_plan, validate_step_plan,
+    PlanGenerationError, PlanValidationError, generate_plan, validate_step_plan, validate_step_plan_scope,
 )
 from services.rbac import has_permission
 
-from .auth import enforce_quota, get_current_user, require_permission
+from .auth import enforce_agent_budget, enforce_quota, get_current_user, require_permission
 
 router = APIRouter()
 
@@ -43,6 +48,13 @@ class CreateTaskRequest(BaseModel):
     # Optional because "+ New Task" on the bare Tasks list genuinely has
     # no session to attribute.
     originating_session_id: Optional[str] = None
+    # Explicit agent selection (Wunomo Projects Phase 4): omitted keeps the
+    # exact pre-existing "oldest active agent" fallback below, so every
+    # caller that predates this field keeps working identically. Provided,
+    # it's validated fresh against this tenant's real, ACTIVE agents --
+    # never trusted blindly, same as every other caller-supplied id in
+    # this codebase.
+    agent_id: Optional[str] = None
 
 
 class StepInput(BaseModel):
@@ -77,13 +89,49 @@ def _pause_reason(task: Task, steps: list[TaskStep]) -> str | None:
     """Computed at read time from the real, already-persisted step data --
     never a separate stored field to drift out of sync. 'Step 3 failed' is
     useless; this surfaces which step, its own description, and the real
-    underlying error every time, not a generic wrapper message."""
+    underlying error every time, not a generic wrapper message.
+
+    Always appends the "can't be resumed" disclosure (Wunomo Projects
+    Phase 2 frontend, slice 9, logged as finding 76): PAUSED_FAILED_STEP
+    has no resume path anywhere in this codebase, for any of its causes
+    (scope denial, attempt-budget exhaustion, the initiating user losing
+    access) -- computed here rather than baked into error_message at
+    write time so it can never go stale if a resume path is ever built
+    later. Fixing the scope-denial half of this (granting the missing
+    source) is a real, separate action a human can take, but performing
+    it does not unblock THIS task -- only a new one. Telling someone to
+    grant access without this line leads them to fix the scope and then
+    wait for a task that will never move."""
     if task.status != TaskStatus.PAUSED_FAILED_STEP:
         return None
     failed = next((s for s in sorted(steps, key=lambda s: s.step_index) if s.status == TaskStepStatus.FAILED), None)
     if failed is None:
         return None
-    return f'Step {failed.step_index} ("{failed.description}") failed after {failed.attempt_count} attempt(s): {failed.error_message}'
+    return (
+        f'Step {failed.step_index} ("{failed.description}") failed after {failed.attempt_count} attempt(s): '
+        f'{failed.error_message} This task can\'t be resumed — start a new one once the underlying problem is fixed.'
+    )
+
+
+def _plan_invalid_reason(task: Task, steps: list[TaskStep]) -> str | None:
+    """PAUSED_PLAN_INVALID (models/all_models.py) has no resume path
+    anywhere in this codebase either -- same unrecoverable shape as
+    PAUSED_FAILED_STEP above, discovered while building the tenant-wide
+    task rail (Wunomo Projects Phase 4 frontend, slice 12): the rail's
+    'needs attention' set is derived as active-minus-runnable rather than
+    a hardcoded list specifically so a status like this can't be
+    forgotten, which immediately surfaced that this one had no reason
+    text at all -- not even the narrower gap finding 76 was about. No
+    code path sets this status today (confirmed by grep), so there is no
+    established per-step detail to name yet; this stays a generic, honest
+    message rather than inventing structure that doesn't exist, and can
+    be sharpened the day something actually assigns this status."""
+    if task.status != TaskStatus.PAUSED_PLAN_INVALID:
+        return None
+    return (
+        "A completed step's result showed the remaining plan can no longer reach the goal. "
+        "This task can't be resumed — start a new one once the underlying problem is fixed."
+    )
 
 
 def _completion_note(task: Task, steps: list[TaskStep]) -> str | None:
@@ -135,7 +183,20 @@ def _expiry_reason(task: Task) -> str | None:
 
 def _quota_paused_reason(task: Task, steps: list[TaskStep]) -> str | None:
     """Q4: credit exhaustion pauses (resumable) rather than fails -- names
-    the step waiting on quota, distinct from every other pause reason."""
+    the step waiting on quota, distinct from every other pause reason.
+
+    Two genuinely different causes share this one TaskStatus (Wunomo
+    Projects Phase 2 frontend, slice 9): the TENANT's overall AI-credit
+    quota, or THIS AGENT's own monthly_token_budget -- two separate gates
+    with two separate fixes (upgrade the plan vs. raise/clear one agent's
+    budget), so conflating them sends whoever's reading this to the wrong
+    screen. task_executor.py's own last_error already distinguishes them
+    correctly at write time ("the tenant's AI-credit quota is exhausted"
+    vs. "this agent's monthly token budget (X/Y tokens) is exhausted") --
+    this function used to discard that distinction and always claim the
+    tenant was the cause, even when it was the agent's own budget. Fixed
+    by reading the real blocked.error_message instead of a hardcoded
+    guess, the same way _source_locked_reason() below already does."""
     if task.status != TaskStatus.PAUSED_QUOTA_EXCEEDED:
         return None
     blocked = next(
@@ -143,14 +204,57 @@ def _quota_paused_reason(task: Task, steps: list[TaskStep]) -> str | None:
         None,
     )
     if blocked is None:
-        return "Paused: tenant AI-credit quota exhausted. Resumable once quota is available again."
+        return "Paused: a token/credit budget is exhausted. Resumable once it's available again."
     return (
-        f'Step {blocked.step_index} ("{blocked.description}") is paused after attempt {blocked.attempt_count} '
-        f'because the tenant\'s AI-credit quota is exhausted. Resumable once quota is available again.'
+        f'Step {blocked.step_index} ("{blocked.description}") is paused after attempt {blocked.attempt_count}: '
+        f'{blocked.error_message}'
     )
 
 
+def _source_locked_reason(task: Task, steps: list[TaskStep]) -> str | None:
+    """Wunomo Projects Phase 2, item 5: a source lock conflict pauses
+    (resumable) rather than fails, same shape as _quota_paused_reason
+    above -- names the step and the real "in use by X since HH:MM"
+    message the lock itself produced, not a generic "locked"."""
+    if task.status != TaskStatus.PAUSED_SOURCE_LOCKED:
+        return None
+    blocked = next(
+        (s for s in sorted(steps, key=lambda s: s.step_index) if s.status == TaskStepStatus.PENDING and s.attempt_count),
+        None,
+    )
+    if blocked is None:
+        return "Paused: the source this step needs is in use by another caller. Resumable once it frees."
+    return (
+        f'Step {blocked.step_index} ("{blocked.description}") is paused after attempt {blocked.attempt_count}: '
+        f'{blocked.error_message}'
+    )
+
+
+_SCOPE_DENIAL_GRANT_PATTERN = re.compile(r"POST /api/v1/agents/([^/]+)/sources/([^.\s]+)\.")
+
+
+def _scope_denial_grant_ids(pause_reason: str | None) -> dict | None:
+    """Recovers {agent_id, source_id} from a PAUSED_FAILED_STEP's own
+    persisted error message when it names a scope denial's real grant
+    endpoint (Wunomo Projects Phase 2 frontend, slice 9) -- lets the task
+    detail page render a real, pre-scoped "Grant access" link the same
+    way the chat trace does (api/v1/chat.py's _extract_tool_trace), by
+    parsing the ids straight out of agent_scope_denial_reason()'s own
+    fixed message format rather than adding a schema column just to
+    duplicate ids the message already names exactly. Returns None for
+    every other PAUSED_FAILED_STEP cause (attempt-budget exhaustion, the
+    initiating user losing access) -- their messages don't contain this
+    pattern at all."""
+    if not pause_reason:
+        return None
+    m = _SCOPE_DENIAL_GRANT_PATTERN.search(pause_reason)
+    if not m:
+        return None
+    return {"agent_id": m.group(1), "source_id": m.group(2)}
+
+
 def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
+    pause_reason = _pause_reason(task, steps)
     return {
         "id": task.id,
         "tenant_id": task.tenant_id,
@@ -158,11 +262,23 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
         "goal": task.goal,
         "task_shape": task.task_shape.value,
         "status": task.status.value,
-        "pause_reason": _pause_reason(task, steps),
+        # Real, persisted since item 46's own fix (the write path was
+        # already correct) -- Wunomo Projects Phase 4 frontend, slice 11
+        # is the read side: this was simply never in the API response.
+        "originating_session_id": task.originating_session_id,
+        # Wunomo Projects Phase 4, slice 14: which ScheduledAgentTask (if
+        # any) created this task -- backend-only for now, exposed so a
+        # future rail/detail-page UI slice doesn't need another backend
+        # round trip just to add a "Scheduled" badge.
+        "originating_schedule_id": task.originating_schedule_id,
+        "pause_reason": pause_reason,
+        "scope_denial": _scope_denial_grant_ids(pause_reason),
+        "plan_invalid_reason": _plan_invalid_reason(task, steps),
         "completion_note": _completion_note(task, steps),
         "approval_pending_reason": _approval_pending_reason(task, steps),
         "expiry_reason": _expiry_reason(task),
         "quota_paused_reason": _quota_paused_reason(task, steps),
+        "source_locked_reason": _source_locked_reason(task, steps),
         # Real, persisted (not computed) -- set once, at the moment of a
         # cap-triggered stop or a cancel; see the Task model docstring.
         "termination_reason": task.termination_reason,
@@ -180,10 +296,18 @@ def _serialize_task(task: Task, steps: list[TaskStep]) -> dict:
 
 def _serialize_task_summary(task: Task) -> dict:
     """List view -- no step list (avoids an N+1 join for something the
-    list screen doesn't need; GET /{id} returns the full detail)."""
+    list screen doesn't need; GET /{id} returns the full detail).
+
+    agent_id added (Wunomo UI-rebuild slice 5, 2026-09-14): the column has
+    existed on Task since Wunomo Projects Phase 0, but this serializer
+    never surfaced it, so no list-view consumer could filter by it. The
+    project container's Tasks tab is the first one that needs to -- a
+    project's tasks are exactly the tasks whose agent_id is one of that
+    project's agents, filtered client-side against this field."""
     return {
         "id": task.id,
         "user_id": task.user_id,
+        "agent_id": task.agent_id,
         "goal": task.goal,
         "task_shape": task.task_shape.value,
         "status": task.status.value,
@@ -233,36 +357,189 @@ async def list_all_tenant_tasks(current_user: dict = Depends(require_permission(
     return [_serialize_task_summary(t) for t in tasks]
 
 
-# Anything not in this set needs a human's attention or is actively
-# working -- a draft plan awaiting review, a step blocked on approval or
-# quota, or genuinely running. The topbar counter (stage 7) and the Tasks
-# list's badge both read this same definition.
-_TERMINAL_STATUSES = frozenset({
-    TaskStatus.PLAN_REJECTED, TaskStatus.COMPLETED, TaskStatus.COMPLETED_WITH_UNCONFIRMED_STEPS,
-    TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.EXPIRED,
-})
+# attention_tier: lower sorts first. PAUSED_NEEDS_APPROVAL alone has a real
+# clock (APPROVAL_PAUSE_TIMEOUT_HOURS) -- ignoring it costs a task that dies
+# on its own. PAUSED_FAILED_STEP/PAUSED_PLAN_INVALID are already dead (no
+# resume path either has, see _plan_invalid_reason above) -- ignoring them
+# costs nothing further, but they're still worth surfacing over a
+# never-started draft. DRAFT_PLAN just sits, forever, with no decay at all.
+_ATTENTION_TIERS: dict[TaskStatus, int] = {
+    TaskStatus.PAUSED_NEEDS_APPROVAL: 0,
+    TaskStatus.PAUSED_FAILED_STEP: 1,
+    TaskStatus.PAUSED_PLAN_INVALID: 1,
+    TaskStatus.DRAFT_PLAN: 2,
+}
 
 
-@router.get("/counts")
-async def task_counts(current_user: dict = Depends(get_current_user)):
-    """One real number: how many tasks (own, or every tenant task if you
-    hold tasks.manage_all) are not yet in a terminal state -- running,
-    queued, or waiting on you. Real or absent was the explicit
-    requirement for the topbar counter this backs; this endpoint is what
-    makes that number real."""
+async def _rail_action_text(task: Task) -> str | None:
+    """Short, imperative "what do I do now" for the rail's compact row --
+    same requirement as slice 9's denial messaging, applied to every
+    status that can land in _ATTENTION_TIERS above. Deliberately a
+    one-liner distinct from the longer *_reason() prose used on the task
+    detail page (those explain what happened; this says what to do).
+
+    §7.3.E: "Where a dependent task is held behind this one, the card
+    must say so." A SUPERVISOR_INTENT task paused on approval is the one
+    case where this rail row IS effectively the approval card (a
+    supervisor task's pause never reaches the in-chat Shape-E component
+    today -- see chat_stream()'s own docstring on the supervisor path
+    having no live per-turn UI beyond this rail/Needs-You screen), so the
+    same consequence PolicyEngine._serialize()'s `unblocks` field carries
+    for a standalone approval belongs here too."""
+    if task.status == TaskStatus.PAUSED_NEEDS_APPROVAL:
+        base = "Review to approve or reject."
+        if task.paused_at is not None:
+            elapsed_hours = (datetime.utcnow() - task.paused_at).total_seconds() / 3600
+            remaining = max(0, round(APPROVAL_PAUSE_TIMEOUT_HOURS - elapsed_hours))
+            base = f"Review to approve or reject — expires in {remaining}h."
+        if task.task_shape == TaskShape.SUPERVISOR_INTENT:
+            from modules.orchestration.supervisor import describe_unblocked_dependents
+            unblocks = await describe_unblocked_dependents(task.id)
+            if unblocks:
+                base = f"{base} {unblocks}"
+        return base
+    if task.status in (TaskStatus.PAUSED_FAILED_STEP, TaskStatus.PAUSED_PLAN_INVALID):
+        return "Can't be resumed — start a new task."
+    if task.status == TaskStatus.DRAFT_PLAN:
+        return "Review the plan to approve or reject."
+    return None
+
+
+def _current_step_summary(steps: list[TaskStep]) -> dict | None:
+    """The next thing this task will do, or the last thing it did if
+    every step is already done -- not stored, derived the same way every
+    other per-task read-time field in this file is.
+
+    approval_request_id added (Wunomo UI-rebuild slice 9, 2026-09-15) so
+    a caller can tell whether a given PolicyEngine ApprovalRequest is
+    already represented by this task -- GET /approvals/merged returns the
+    same underlying request independently (task_executor.py creates it
+    via the same PolicyEngine.create_request() an ad-hoc chat approval
+    uses), and without this field there was no way to dedupe the two
+    without guessing. See findings item 98: approving that duplicate via
+    the generic /approvals endpoint executes the action but never
+    touches this Task row, leaving it stuck in PAUSED_NEEDS_APPROVAL
+    forever -- the Needs You screen routes around this by always
+    resolving a task-linked approval through the task's own
+    resume/reject-step endpoints, never the generic one."""
+    if not steps:
+        return None
+    ordered = sorted(steps, key=lambda s: s.step_index)
+    current = next(
+        (s for s in ordered if s.status not in (TaskStepStatus.SUCCEEDED, TaskStepStatus.SKIPPED)), ordered[-1],
+    )
+    return {
+        "step_index": current.step_index, "description": current.description, "status": current.status.value,
+        "approval_request_id": current.approval_request_id,
+    }
+
+
+@router.get("/active")
+async def list_active_tasks(current_user: dict = Depends(get_current_user)):
+    """The tenant-wide task rail (Wunomo Projects Phase 4 frontend, slice
+    12): every non-terminal task visible to the caller (own tasks always,
+    every tenant task with tasks.manage_all -- same visibility rule as
+    GET / and the retired GET /counts, which this endpoint replaces so
+    the topbar badge and the rail can never disagree about what "active"
+    means -- both are now literally len() of this one response instead of
+    two independently-maintained definitions).
+
+    "Needs attention" is derived as active-minus-RUNNABLE_TASK_STATUSES,
+    not a hardcoded list, specifically so a status nobody remembers to
+    add later is still caught -- this is exactly how building this
+    endpoint surfaced that PAUSED_PLAN_INVALID had no reason text
+    anywhere (see _plan_invalid_reason above).
+
+    Two bulk queries total regardless of how many tasks are active, not
+    one per task: the Task+AgentInstance join below, then one TaskStep
+    fetch batched by task_id IN (...). With a batch cap of 25
+    auto-advancing at once (task_executor.py), per-task queries here
+    would mean up to 25 round trips on every single poll tick."""
     tenant_id = current_user["tenant_id"]
     user_id = current_user["sub"]
     can_view_all = has_permission(current_user.get("role"), "tasks.manage_all")
 
     async with AsyncSessionLocal() as db:
-        query = select(Task.status).where(Task.tenant_id == tenant_id)
+        # ProjectAgent/Project outerjoined the same way AgentInstance is --
+        # an agent belongs to zero or one project by convention today, not
+        # by constraint (ProjectAgent's own docstring), so this assumes
+        # that convention holds rather than guarding against a pathological
+        # multi-project agent producing duplicate rows for one task. Needs
+        # You (slice 9, 2026-09-15) is the first consumer that needs to
+        # show which project a task belongs to.
+        query = (
+            select(Task, AgentInstance.name, Project.id, Project.name)
+            .outerjoin(AgentInstance, Task.agent_id == AgentInstance.id)
+            .outerjoin(ProjectAgent, Task.agent_id == ProjectAgent.agent_id)
+            .outerjoin(Project, ProjectAgent.project_id == Project.id)
+            .where(Task.tenant_id == tenant_id, Task.status.notin_(TERMINAL_TASK_STATUSES))
+        )
         if not can_view_all:
             query = query.where(Task.user_id == user_id)
         r = await db.execute(query)
-        statuses = r.scalars().all()
+        rows = r.all()
 
-    active = sum(1 for s in statuses if s not in _TERMINAL_STATUSES)
-    return {"active": active}
+        task_ids = [row[0].id for row in rows]
+        steps_by_task: dict[str, list[TaskStep]] = {tid: [] for tid in task_ids}
+        if task_ids:
+            r = await db.execute(select(TaskStep).where(TaskStep.task_id.in_(task_ids)))
+            for step in r.scalars().all():
+                steps_by_task[step.task_id].append(step)
+
+    # Sort on the raw datetimes before serializing to ISO strings below --
+    # tier 0 wants oldest paused_at first (soonest to expire), tier 1 wants
+    # newest updated_at first (most recently died), tier 2 wants oldest
+    # created_at first (longest waiting); everything else (not needing
+    # attention) sorts newest-updated-first, same as any normal activity
+    # list. A missing timestamp sorts last within its own tier rather than
+    # crashing the comparison or silently floating to the top.
+    _EPOCH = datetime(1970, 1, 1)
+
+    def _sort_key(row):
+        task = row[0]
+        tier = _ATTENTION_TIERS.get(task.status)
+        if tier is None:
+            return (1, -(task.updated_at or _EPOCH).timestamp())
+        if tier == 0:
+            return (0, tier, (task.paused_at or datetime.max).timestamp())
+        if tier == 1:
+            return (0, tier, -(task.updated_at or _EPOCH).timestamp())
+        return (0, tier, (task.created_at or datetime.max).timestamp())
+
+    rows = sorted(rows, key=_sort_key)
+
+    items = []
+    for task, agent_name, project_id, project_name in rows:
+        tier = _ATTENTION_TIERS.get(task.status)
+        items.append({
+            "id": task.id,
+            "goal": task.goal,
+            "status": task.status.value,
+            "task_shape": task.task_shape.value,
+            "agent_id": task.agent_id,
+            "agent_name": agent_name,
+            "project_id": project_id,
+            "project_name": project_name,
+            "originating_session_id": task.originating_session_id,
+            "originating_schedule_id": task.originating_schedule_id,
+            "current_step": _current_step_summary(steps_by_task[task.id]),
+            "needs_attention": tier is not None,
+            "attention_tier": tier,
+            "action_text": await _rail_action_text(task),
+            # Both already computed from data this endpoint already loaded
+            # (steps_by_task) -- reused rather than re-fetched, same
+            # "compute once, read everywhere" reasoning as agent_name/
+            # project_name above. Added for Needs You (slice 9, 2026-09-15)
+            # so a blocked row can show the real, specific failure instead
+            # of only the generic action_text.
+            "pause_reason": _pause_reason(task, steps_by_task[task.id]),
+            "plan_invalid_reason": _plan_invalid_reason(task, steps_by_task[task.id]),
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+            "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+            "paused_at": task.paused_at.isoformat() if task.paused_at else None,
+        })
+
+    return items
 
 
 @router.get("/{task_id}")
@@ -282,7 +559,10 @@ async def get_task(task_id: str, current_user: dict = Depends(get_current_user))
         r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
         steps = r.scalars().all()
 
-    return _serialize_task(task, steps)
+        from services.quota_service import get_task_cost
+        cost = await get_task_cost(db, tenant_id, task_id)
+
+    return {**_serialize_task(task, steps), "cost": cost}
 
 
 @router.post("/")
@@ -306,16 +586,70 @@ async def create_task(body: CreateTaskRequest, current_user: dict = Depends(enfo
     tenant_id = current_user["tenant_id"]
     user_id = current_user["sub"]
 
+    # Generated before generate_plan() runs (not after, at Task-construction
+    # time) so the planning LLM call can be tagged with the real task_id for
+    # cost attribution -- Task.id has no DB-side default that would force
+    # this ordering (it's a plain client-generated uuid4, same as always),
+    # so this is a pure reorder, not a behavior change to ID assignment. If
+    # the plan fails generation/validation below, this id is never written
+    # to `tasks` -- the real, already-logged llm_usage_events row(s) for
+    # this attempt end up carrying a task_id with no matching Task, which
+    # is expected (see generate_plan()'s docstring), not a bug.
+    task_id = str(uuid.uuid4())
+
+    # Wunomo Projects Phase 1: resolve the tenant's real agent BEFORE
+    # planning, not after -- generate_plan() uses it to list only the
+    # agent's in-scope sources in the prompt and to reject a plan that
+    # already names an out-of-scope source (both a cost optimisation
+    # only, per CLAUDE.md's rule; see validate_step_plan_scope's own
+    # docstring). task_executor's real enforcement (_caller_still_
+    # authorized, the pre-_call_tool() check) is also keyed off this
+    # same agent_id on the persisted Task row below -- without either,
+    # every task keeps agent_id=None and both stay permanently inert.
+    #
+    # Wunomo Projects Phase 4: body.agent_id, when the caller supplies one,
+    # is who actually runs this task -- the "oldest ACTIVE agent" fallback
+    # below now only fires when it's omitted. That fallback made sense when
+    # written (exactly one agent existed per tenant, pre-Phase-0 hiring);
+    # kept as the default for every caller that doesn't think about agent
+    # selection, but no longer the only option now that a tenant can have
+    # several named, differently-scoped agents -- see finding 76's own
+    # lesson: picking the wrong one here is a scope denial that kills this
+    # task permanently, not something to leave to chance.
+    async with AsyncSessionLocal() as agent_db:
+        if body.agent_id is not None:
+            r = await agent_db.execute(select(AgentInstance).where(
+                AgentInstance.id == body.agent_id, AgentInstance.tenant_id == tenant_id,
+            ))
+            chosen = r.scalar_one_or_none()
+            if chosen is None:
+                raise HTTPException(status_code=404, detail="Agent not found.")
+            if chosen.status != AgentInstanceStatus.ACTIVE:
+                raise HTTPException(status_code=409, detail=f"'{chosen.name}' has been offboarded and can't run a new task.")
+            agent_id = chosen.id
+        else:
+            r = await agent_db.execute(select(AgentInstance).where(
+                AgentInstance.tenant_id == tenant_id, AgentInstance.status == AgentInstanceStatus.ACTIVE,
+            ).order_by(AgentInstance.created_at.asc()).limit(1))
+            agent_row = r.scalar_one_or_none()
+            agent_id = agent_row.id if agent_row is not None else None
+
+    # Gate 2 of the two-gate token-budget path (Wunomo Projects Phase 1,
+    # part two) - before the real planning LLM call, same reasoning as
+    # chat.py's own placement of this check.
+    await enforce_agent_budget(agent_id)
+
     try:
-        steps = await generate_plan(tenant_id, user_id, body.goal, task_shape)
+        steps = await generate_plan(tenant_id, user_id, body.goal, task_shape, task_id=task_id, agent_id=agent_id)
     except (PlanGenerationError, PlanValidationError) as exc:
         raise HTTPException(status_code=422, detail=f"Could not generate a valid plan: {exc}")
 
     async with AsyncSessionLocal() as db:
         task = Task(
-            id=str(uuid.uuid4()),
+            id=task_id,
             tenant_id=tenant_id,
             user_id=user_id,
+            agent_id=agent_id,
             goal=body.goal,
             task_shape=task_shape,
             status=TaskStatus.DRAFT_PLAN,
@@ -387,6 +721,13 @@ async def edit_task_steps(task_id: str, body: EditStepsRequest, current_user: di
 
         try:
             validate_step_plan(task.task_shape, incoming_steps)
+            if task.agent_id is not None:
+                # Cost optimisation only, same as plan generation's own
+                # use of this check (see validate_step_plan_scope's
+                # docstring) -- a human editing in a source the agent
+                # isn't scoped to is just as much "a plan that cannot
+                # succeed" as the planner proposing one.
+                await validate_step_plan_scope(db, task.agent_id, incoming_steps)
         except PlanValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
@@ -543,7 +884,7 @@ async def advance_task(task_id: str, current_user: dict = Depends(get_current_us
             raise HTTPException(status_code=404, detail="Task not found.")
         if task.user_id != user_id:
             raise HTTPException(status_code=403, detail="Only the task's creator may advance it.")
-        if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING, TaskStatus.PAUSED_QUOTA_EXCEEDED):
+        if task.status not in RUNNABLE_TASK_STATUSES:
             raise HTTPException(
                 status_code=409,
                 detail=f"Task is not runnable (current status: {task.status.value}).",

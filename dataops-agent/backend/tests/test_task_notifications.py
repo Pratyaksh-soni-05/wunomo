@@ -162,7 +162,7 @@ async def test_task_completed_notifies_with_the_real_goal(client, monkeypatch):
         "tool_name": "get_system_health", "tool_args": {}, "status": TaskStepStatus.PENDING,
     }], status=TaskStatus.RUNNING, started_at=datetime.utcnow())
 
-    async def _ok(tenant_id, tool_name, tool_args):
+    async def _ok(tenant_id, tool_name, tool_args, **kwargs):
         return {"status": "ok"}
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
@@ -294,7 +294,7 @@ async def test_paused_failed_step_does_not_notify(client, monkeypatch):
         "tool_name": "get_system_health", "tool_args": {}, "status": TaskStepStatus.PENDING,
     }], status=TaskStatus.RUNNING, started_at=datetime.utcnow())
 
-    async def _always_fails(tenant_id, tool_name, tool_args):
+    async def _always_fails(tenant_id, tool_name, tool_args, **kwargs):
         raise RuntimeError("simulated: the underlying service is down")
 
     monkeypatch.setattr(executor_module, "_call_tool", _always_fails)
@@ -320,7 +320,7 @@ async def test_paused_quota_exceeded_does_not_notify(client, monkeypatch):
         "status": TaskStepStatus.PENDING,
     }], status=TaskStatus.RUNNING, started_at=datetime.utcnow())
 
-    async def _domain_error(tenant_id, tool_name, tool_args):
+    async def _domain_error(tenant_id, tool_name, tool_args, **kwargs):
         return {"error": "Pipeline not found"}
 
     async def _quota_exceeded(tenant_id, resource):

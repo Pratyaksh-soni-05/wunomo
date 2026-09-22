@@ -43,7 +43,7 @@ export default function OnboardingPage() {
     }
     getOnboarding(token)
       .then((profile) => {
-        if (profile.completed) router.push("/dashboard");
+        if (profile.completed) router.push("/home");
         else setChecking(false);
       })
       .catch(() => setChecking(false));
@@ -71,7 +71,7 @@ export default function OnboardingPage() {
     setLoading(true);
     try {
       await submitOnboarding(token, { role, industry, company_size: companySize, use_cases: useCases, data_stack: dataStack });
-      router.push("/dashboard");
+      router.push("/home");
     } catch {
       toast.push("Couldn't save your answers. Try again.", "danger");
     } finally {

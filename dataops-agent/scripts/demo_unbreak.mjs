@@ -15,12 +15,12 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getDemoCredentials } from "./demo_env.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = path.join(__dirname, ".demo_state.json");
 const BASE = "http://localhost:8000/api/v1";
-const EMAIL = "demo@axiom-yc.ai";
-const PASSWORD = "AxiomDemo2026!";
+const { EMAIL, PASSWORD } = getDemoCredentials();
 
 async function j(method, urlPath, { token, body, form } = {}) {
   const headers = {};

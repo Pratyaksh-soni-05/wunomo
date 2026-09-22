@@ -1,8 +1,9 @@
 // Read-only sanity check of the demo tenant's current state (dashboard KPIs,
 // incidents, quality, lineage/governance). Run after demo_reset.mjs.
+import { getDemoCredentials } from "./demo_env.mjs";
+
 const BASE = "http://localhost:8000/api/v1";
-const EMAIL = "demo@axiom-yc.ai";
-const PASSWORD = "AxiomDemo2026!";
+const { EMAIL, PASSWORD } = getDemoCredentials();
 
 async function j(method, urlPath, { token, body, form } = {}) {
   const headers = {};

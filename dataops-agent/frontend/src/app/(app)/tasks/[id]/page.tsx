@@ -21,7 +21,12 @@ const ACTIVE_POLL_MS = 4000;
 const AUTO_ADVANCE_DELAY_MS = 600;
 const AUTO_ADVANCE_MAX_STEPS = 50;
 
-const ADVANCEABLE_STATUSES = new Set(["queued", "running", "paused_quota_exceeded"]);
+// Wunomo Projects Phase 2 frontend, slice 9: paused_source_locked was
+// missing here even though the backend's own RUNNABLE_TASK_STATUSES
+// (models/all_models.py) already includes it and the beat tick auto-
+// retries it -- the manual "Advance" button was disappearing for a task
+// that the system was actively retrying in the background.
+const ADVANCEABLE_STATUSES = new Set(["queued", "running", "paused_quota_exceeded", "paused_source_locked"]);
 
 function shapeLabel(shape: string): string {
   return TASK_SHAPES.find((s) => s.value === shape)?.label ?? shape;
@@ -146,7 +151,7 @@ export default function TaskDetailPage() {
     if (updated) qc.setQueryData(["task", taskId], updated);
     qc.invalidateQueries({ queryKey: ["task", taskId] });
     qc.invalidateQueries({ queryKey: ["tasks"] });
-    qc.invalidateQueries({ queryKey: ["task-counts"] });
+    qc.invalidateQueries({ queryKey: ["active-tasks"] });
   };
 
   const approveMut = useMutation({
@@ -257,7 +262,7 @@ export default function TaskDetailPage() {
       <div className="page-header">
         <div className="flex items-center justify-between">
           <div>
-            <button className="auth-link-btn text-sm" onClick={() => router.push("/tasks")}>← All tasks</button>
+            <Button variant="text" className="text-sm" onClick={() => router.push("/tasks")}>← All tasks</Button>
             <h1 className="page-title" style={{ marginTop: 4 }}>{task.goal}</h1>
             <div className="flex items-center gap-2" style={{ marginTop: 6 }}>
               <Badge variant={taskStatusVariant(task.status)}>{taskStatusLabel(task.status)}</Badge>
@@ -266,6 +271,19 @@ export default function TaskDetailPage() {
               <span className="text-xs text-muted">
                 {task.step_budget_used}/{task.step_budget_max} steps used
               </span>
+              {task.cost && (
+                <span className="text-xs text-muted">
+                  · {task.cost.credits.toLocaleString()} AI Credits
+                </span>
+              )}
+              {task.originating_session_id && (
+                <Button
+                  variant="text" className="text-xs"
+                  onClick={() => router.push(`/chat?session=${task.originating_session_id}`)}
+                >
+                  ← Back to conversation
+                </Button>
+              )}
             </div>
           </div>
           <div className="flex gap-2">
@@ -291,11 +309,49 @@ export default function TaskDetailPage() {
       <div style={{ padding: "20px 24px" }}>
         {reason && (
           <Card style={{ marginBottom: 16, borderLeft: `3px solid var(--${reason.variant === "gray" ? "border" : reason.variant})` }}>
-            <CardBody>
+            <CardBody className={task.scope_denial ? "flex items-center justify-between" : undefined}>
               <div className="text-sm">{reason.text}</div>
+              {/* Wunomo Projects Phase 2 frontend, slice 9: a real,
+                  pre-scoped link, role-gated the same way the chat
+                  version is -- the grant endpoint is Owner/Admin only
+                  server-side, so a button someone can't use is worse
+                  than none (explicit requirement). */}
+              {task.scope_denial && (
+                user?.role && ["owner", "admin"].includes(user.role.toLowerCase()) ? (
+                  <Button
+                    size="sm"
+                    onClick={() => router.push(`/agents/${task.scope_denial!.agent_id}?highlight_source=${task.scope_denial!.source_id}`)}
+                  >
+                    Grant access
+                  </Button>
+                ) : (
+                  <span className="text-xs text-muted">An Owner or Admin needs to grant this.</span>
+                )
+              )}
             </CardBody>
           </Card>
         )}
+
+        <Card style={{ marginBottom: 16 }}>
+          <CardHeader><span className="font-medium text-sm">Cost</span></CardHeader>
+          <CardBody>
+            {!task.cost || task.cost.llm_calls === 0 ? (
+              <span className="text-sm text-muted">No LLM calls yet — nothing spent.</span>
+            ) : (
+              <div className="flex items-center gap-4 flex-wrap">
+                <span className="text-sm">
+                  <strong>{task.cost.credits.toLocaleString()}</strong> AI Credits
+                </span>
+                <span className="text-xs text-muted">{task.cost.llm_calls} LLM call{task.cost.llm_calls === 1 ? "" : "s"}</span>
+                <span className="text-xs text-muted">{task.cost.input_tokens.toLocaleString()} input tokens</span>
+                <span className="text-xs text-muted">{task.cost.output_tokens.toLocaleString()} output tokens</span>
+                {task.cost.reasoning_tokens > 0 && (
+                  <span className="text-xs text-muted">{task.cost.reasoning_tokens.toLocaleString()} reasoning tokens</span>
+                )}
+              </div>
+            )}
+          </CardBody>
+        </Card>
 
         {task.status === "draft_plan" ? (
           <Card>

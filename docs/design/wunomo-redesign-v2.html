@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wunomo — redesign preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0A0A0A;
+  --rail:#0D0D0D;
+  --surface:#141414;
+  --raised:#1A1A1A;
+  --hover:#202020;
+  --line:#242424;
+  --line-2:#1A1A1A;
+  --text:#EDEDED;
+  --text-2:#A3A3A3;
+  --text-3:#6B6B6B;
+  --brand:#2F6BFF;
+  --ok:#4E9E6F;
+  --ok-bg:rgba(78,158,111,.12);
+  --warn:#B8893D;
+  --warn-bg:rgba(184,137,61,.12);
+  --r:8px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:13.5px;line-height:1.55;-webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,.serif{font-family:Newsreader,Georgia,serif;font-weight:400;letter-spacing:-.01em;margin:0}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+svg{display:block}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:#262626;border-radius:8px}
+::-webkit-scrollbar-track{background:transparent}
+
+.wrap{max-width:1560px;margin:0 auto;padding:22px 20px 40px}
+.note{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap;margin-bottom:14px}
+.note h1{font-size:25px}
+.note p{margin:4px 0 0;color:var(--text-3);font-size:12.5px;max-width:62ch}
+.badge-top{border:1px solid var(--line);border-radius:6px;padding:5px 11px;color:var(--text-3);font-size:11px;white-space:nowrap}
+
+.app{display:grid;grid-template-columns:228px minmax(0,1fr);height:740px;
+  border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg)}
+
+/* rail */
+.rail{background:var(--rail);border-right:1px solid var(--line-2);display:flex;flex-direction:column;overflow:hidden}
+.logo{display:flex;align-items:center;gap:8px;padding:16px 14px 13px}
+.logo .m{width:21px;height:21px;border-radius:5px;background:var(--brand);display:grid;place-items:center;font-size:11px;font-weight:600;color:#fff;font-family:Inter,sans-serif}
+.logo b{font-family:Newsreader,Georgia,serif;font-size:16px;font-weight:400;letter-spacing:0}
+.newbtn{margin:0 10px 12px;padding:7px 10px;border:1px solid var(--line);border-radius:var(--r);
+  display:flex;align-items:center;gap:8px;color:var(--text-2);font-size:13px;background:transparent;
+  transition:background .13s,color .13s;width:calc(100% - 20px)}
+.newbtn:hover{background:var(--surface);color:var(--text)}
+.rsec{padding:12px 14px 5px;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);display:flex;justify-content:space-between;align-items:center}
+.rsec button{color:var(--text-3);padding:2px;border-radius:4px;display:grid;place-items:center}
+.rsec button:hover{color:var(--text)}
+.ritem{display:flex;align-items:center;gap:9px;margin:1px 8px;padding:6px 8px;border-radius:var(--r);
+  color:var(--text-2);font-size:13px;transition:background .12s,color .12s;width:calc(100% - 16px);text-align:left}
+.ritem:hover{background:var(--surface);color:var(--text)}
+.ritem.on{background:var(--raised);color:var(--text)}
+.ritem .ico{flex:none;opacity:.6;display:grid;place-items:center}
+.ritem.on .ico{opacity:.9}
+.count{margin-left:auto;font-size:11px;color:var(--warn);background:var(--warn-bg);padding:0 6px;border-radius:5px;line-height:17px}
+.rsub{display:block;margin:0 8px 0 30px;padding:4px 8px;border-radius:6px;color:var(--text-3);font-size:12.5px;
+  width:calc(100% - 38px);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rsub:hover{background:var(--surface);color:var(--text-2)}
+.rfoot{margin-top:auto;border-top:1px solid var(--line-2);padding:8px 0 6px}
+.me{display:flex;align-items:center;gap:9px;padding:7px 8px;margin:2px 8px 0;border-radius:var(--r)}
+.me:hover{background:var(--surface)}
+.me .av{width:22px;height:22px;border-radius:5px;background:#262626;display:grid;place-items:center;font-size:10px;font-weight:500;color:var(--text-2)}
+.me .n{font-size:12.5px;color:var(--text-2)}
+
+/* main */
+.main{overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.screen{display:none;height:100%;flex-direction:column;min-height:0}
+.screen.on{display:flex}
+
+.home{overflow-y:auto;padding:78px 44px 40px;max-width:940px;margin:0 auto;width:100%}
+.hello{font-size:32px;margin-bottom:5px}
+.home .sub{color:var(--text-3);margin:0 0 28px;font-size:13.5px}
+.startcard{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:16px 18px;
+  display:flex;align-items:center;gap:14px;cursor:pointer;transition:border-color .14s,background .14s;width:100%;text-align:left}
+.startcard:hover{border-color:#333;background:var(--raised)}
+.startcard .plus{width:34px;height:34px;border-radius:8px;background:var(--raised);color:var(--text-2);display:grid;place-items:center;flex:none;border:1px solid var(--line)}
+.startcard b{display:block;font-size:14px;font-weight:500;margin-bottom:1px}
+.startcard span{color:var(--text-3);font-size:12.5px}
+.secttl{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin:32px 0 11px}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(262px,1fr));gap:10px}
+.pcard{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:15px 16px;
+  cursor:pointer;transition:border-color .14s,background .14s;text-align:left;width:100%}
+.pcard:hover{border-color:#333;background:var(--raised)}
+.pcard .t{font-family:Newsreader,Georgia,serif;font-size:16px;margin-bottom:2px}
+.pcard .d{color:var(--text-3);font-size:12.5px;margin-bottom:16px;min-height:19px}
+.pcard .f{display:flex;align-items:center;gap:8px;color:var(--text-3);font-size:11.5px}
+.mini{width:19px;height:19px;border-radius:5px;display:grid;place-items:center;font-size:9px;font-weight:600;color:#0A0A0A;margin-right:-5px;border:1.5px solid var(--surface)}
+
+.phead{padding:13px 20px;border-bottom:1px solid var(--line-2);display:flex;align-items:center;gap:10px;flex:none}
+.crumb{color:var(--text-3);font-size:12.5px}
+.crumb b{color:var(--text);font-family:Newsreader,Georgia,serif;font-size:15.5px;font-weight:400}
+.phead .sp{flex:1}
+.btn{padding:6px 12px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--text-2);
+  font-size:12.5px;transition:background .13s,color .13s,border-color .13s;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:var(--surface);color:var(--text);border-color:#2e2e2e}
+.btn.pri{background:#EDEDED;border-color:#EDEDED;color:#0A0A0A;font-weight:500}
+.btn.pri:hover{background:#fff;border-color:#fff;color:#0A0A0A}
+.btn.sm{padding:5px 10px;font-size:12px}
+.btn.gh{border-color:transparent}
+
+.pbody{display:grid;grid-template-columns:minmax(0,1fr) 300px;flex:1;min-height:0}
+.chatcol{display:flex;flex-direction:column;min-width:0;border-right:1px solid var(--line-2)}
+.thread{flex:1;overflow-y:auto;padding:26px 30px 10px;scroll-behavior:smooth}
+.blank{max-width:600px;margin:60px auto 0;text-align:center}
+.blank h2{font-size:24px;margin-bottom:7px}
+.blank p{color:var(--text-3);margin:0 auto 24px;max-width:46ch;font-size:13.5px}
+.chips{display:flex;gap:7px;justify-content:center;flex-wrap:wrap}
+.chip{border:1px solid var(--line);border-radius:7px;padding:6px 12px;font-size:12.5px;color:var(--text-2);background:transparent}
+.chip:hover{background:var(--surface);color:var(--text)}
+
+.msg{display:flex;gap:11px;margin-bottom:20px;opacity:0;transform:translateY(4px);animation:up .28s ease forwards}
+@keyframes up{to{opacity:1;transform:none}}
+.msg .av{width:25px;height:25px;border-radius:6px;flex:none;display:grid;place-items:center;font-size:10px;font-weight:600;color:#0A0A0A}
+.msg .bd{min-width:0;flex:1}
+.who{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
+.who b{font-size:12.5px;font-weight:600}
+.who .tag{font-size:9.5px;letter-spacing:.04em;padding:1px 5px;border-radius:4px;background:var(--raised);color:var(--text-3)}
+.who .tm{font-size:11px;color:var(--text-3)}
+.txt{font-size:13.5px;max-width:70ch;color:#DEDEDE}
+.txt code{background:var(--raised);padding:1px 5px;border-radius:4px;font-size:12.5px;color:#CFCFCF;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.at{color:var(--text);background:var(--raised);padding:1px 5px;border-radius:4px;border:1px solid var(--line)}
+.filechip{display:inline-flex;align-items:center;gap:8px;margin-top:8px;border:1px solid var(--line);border-radius:7px;padding:6px 10px;background:var(--surface);font-size:12.5px;color:var(--text-2)}
+.filechip .x{font-size:10px;color:var(--text-3);letter-spacing:.04em}
+
+.card{border:1px solid var(--line);border-radius:9px;background:var(--surface);padding:12px 14px;margin-top:9px;max-width:540px}
+.card .h{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+.card .h b{font-size:12.5px;font-weight:600}
+.pill{font-size:10.5px;padding:1px 8px;border-radius:5px;background:var(--raised);color:var(--text-3)}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.steps{list-style:none;margin:0;padding:0;font-size:12.5px}
+.steps li{display:flex;gap:9px;padding:2.5px 0;color:var(--text-3);align-items:center}
+.steps li .k{width:12px;flex:none;font-size:11px}
+.steps li.done{color:var(--text-2)}
+.steps li.done .k{color:var(--ok)}
+.steps li.now{color:var(--text)}
+.gate{border:1px solid #2E2517;background:var(--warn-bg);border-radius:9px;padding:12px 14px;margin-top:9px;max-width:540px}
+.gate .g{font-size:12.5px;margin-bottom:4px;font-weight:600}
+.gate .s{font-size:12.5px;color:#C4A470}
+.gact{display:flex;gap:7px;margin-top:11px}
+
+.composer{border-top:1px solid var(--line-2);padding:14px 30px 16px;flex:none}
+.cbox{border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:11px 13px 9px;transition:border-color .14s}
+.cbox:focus-within{border-color:#333}
+.cinput{color:var(--text-3);font-size:13.5px;min-height:21px}
+.crow{display:flex;align-items:center;gap:6px;margin-top:8px}
+.ic{width:27px;height:27px;border-radius:7px;display:grid;place-items:center;color:var(--text-3)}
+.ic:hover{background:var(--hover);color:var(--text)}
+.crow .sp{flex:1}
+.hintline{margin:8px 2px 0;font-size:11.5px;color:var(--text-3)}
+.hintline b{color:var(--text-2);font-weight:500}
+
+.side{display:flex;flex-direction:column;min-width:0;background:var(--rail)}
+.tabs{display:flex;gap:1px;padding:10px 11px 0;border-bottom:1px solid var(--line-2)}
+.tab{padding:6px 11px;border-radius:7px 7px 0 0;font-size:12.5px;color:var(--text-3);position:relative;bottom:-1px;border:1px solid transparent}
+.tab.on{color:var(--text);background:var(--bg);border-color:var(--line-2);border-bottom-color:var(--bg)}
+.tab:hover{color:var(--text-2)}
+.pane{display:none;flex:1;overflow-y:auto;padding:13px}
+.pane.on{display:block}
+.emptyp{color:var(--text-3);font-size:12.5px;text-align:center;padding:30px 12px}
+.emptyp b{display:block;color:var(--text-2);font-size:13px;margin-bottom:4px;font-weight:500}
+
+.agent,.src{display:flex;gap:10px;align-items:center;border:1px solid var(--line-2);border-radius:8px;padding:9px 10px;margin-bottom:7px;background:var(--surface)}
+.agent .av{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;font-size:10px;font-weight:600;color:#0A0A0A;flex:none}
+.agent .n{font-size:12.5px;font-weight:500;display:flex;align-items:center;gap:6px}
+.agent .s,.src .s{font-size:11px;color:var(--text-3)}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--ok);flex:none}
+.dot.idle{background:#3A3A3A}
+.src .i{width:25px;height:25px;border-radius:6px;background:var(--raised);display:grid;place-items:center;font-size:9.5px;color:var(--text-3);flex:none;letter-spacing:.03em}
+.src .n{font-size:12.5px}
+
+.ev{border-left:1px solid var(--line);padding:0 0 13px 12px;margin-left:4px;position:relative;opacity:0;animation:up .26s ease forwards}
+.ev:last-child{padding-bottom:2px}
+.ev::before{content:"";position:absolute;left:-3.5px;top:5px;width:6px;height:6px;border-radius:50%;background:#333}
+.ev.done::before{background:var(--ok)}
+.ev.wait::before{background:var(--warn)}
+.ev .k{font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
+.ev .v{font-size:12.5px;color:var(--text-2);margin-top:1px}
+.ev .who2{font-size:11px;color:var(--text-3);margin-top:1px}
+
+.costbar{border-top:1px solid var(--line-2);padding:10px 13px;font-size:11.5px;color:var(--text-3);display:none;justify-content:space-between}
+.costbar b{color:var(--text-2);font-weight:500}
+
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;place-items:center;padding:26px;z-index:40}
+.scrim.on{display:grid}
+.modal{background:var(--surface);border:1px solid var(--line);border-radius:11px;width:100%;max-width:520px;overflow:hidden}
+.modal.wide{max-width:700px}
+.mh{padding:18px 20px 12px;border-bottom:1px solid var(--line-2)}
+.mh h3{font-size:18px;margin-bottom:2px}
+.mh p{margin:0;color:var(--text-3);font-size:12.5px}
+.mb{padding:17px 20px}
+.fl{display:block;font-size:12px;color:var(--text-2);margin:0 0 6px}
+.inp{width:100%;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);
+  padding:8px 11px;font:inherit;font-size:13px;margin-bottom:14px;outline:none}
+.inp:focus{border-color:#333}
+.inp::placeholder{color:var(--text-3)}
+.mf{padding:13px 20px 17px;border-top:1px solid var(--line-2);display:flex;justify-content:flex-end;gap:8px}
+
+.agrid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:16px}
+.acard{border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:12px;text-align:left;
+  transition:border-color .14s,background .14s;position:relative}
+.acard:hover:not(.off){border-color:#333;background:var(--raised)}
+.acard.pick{border-color:#4A4A4A;background:var(--raised)}
+.acard.off{opacity:.38;cursor:not-allowed}
+.acard .r1{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.acard .av{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;font-size:9.5px;font-weight:600;color:#0A0A0A}
+.acard b{font-size:13px;font-weight:500}
+.acard p{margin:0;font-size:11.5px;color:var(--text-3);line-height:1.45}
+.soon{position:absolute;top:10px;right:10px;font-size:9.5px;color:var(--text-3);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+
+.chk{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px;background:var(--bg)}
+.chk .box{width:14px;height:14px;border-radius:3px;border:1px solid #3A3A3A;flex:none;display:grid;place-items:center;font-size:9px;color:#0A0A0A}
+.chk.on .box{background:#EDEDED;border-color:#EDEDED}
+.chk .n{font-size:12.5px}
+.chk .s{font-size:11px;color:var(--text-3)}
+
+.footn{margin-top:20px;color:var(--text-3);font-size:12.5px;max-width:80ch;line-height:1.65}
+.footn b{color:var(--text-2);font-weight:500}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+:focus-visible{outline:1px solid #555;outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="note">
+    <div>
+      <h1>Wunomo, rebuilt around the project</h1>
+      <p>Nineteen sidebar items become four. A project is the container, chat is the surface, and
+         everything else is a panel inside it.</p>
+    </div>
+    <div class="badge-top">Preview · clickable, not a working build</div>
+  </div>
+
+  <div class="app">
+
+    <div class="rail">
+      <div class="logo"><span class="m">W</span><b>Wunomo</b></div>
+
+      <button class="newbtn" onclick="openNew()">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg>
+        New project
+      </button>
+
+      <button class="ritem on" id="navHome" onclick="go('home')">
+        <span class="ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2.5 6.8 8 2.5l5.5 4.3V13a.7.7 0 0 1-.7.7H3.2a.7.7 0 0 1-.7-.7z"/></svg></span>Home</button>
+      <button class="ritem">
+        <span class="ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2 1.2" stroke-linecap="round"/></svg></span>Scheduled</button>
+      <button class="ritem">
+        <span class="ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M4 2.8v10.4M4 3.2h7.2l-1.4 2.3 1.4 2.3H4"/></svg></span>Needs you
+        <span class="count">2</span></button>
+
+      <div class="rsec"><span>Projects</span>
+        <button onclick="openNew()"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></button>
+      </div>
+
+      <button class="ritem" onclick="go('project')">
+        <span class="ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2.5" y="4" width="11" height="8.5" rx="1.2"/><path d="M2.5 6.2h11M6 2.5v2"/></svg></span>Q3 Revenue Migration</button>
+      <button class="rsub">Warehouse drift check</button>
+      <button class="rsub">Finance table profiling</button>
+      <button class="ritem">
+        <span class="ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2.5" y="4" width="11" height="8.5" rx="1.2"/><path d="M2.5 6.2h11M6 2.5v2"/></svg></span>Ingestion Cleanup</button>
+
+      <div class="rfoot">
+        <button class="ritem">
+          <span class="ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="2.1"/><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1"/></svg></span>Settings</button>
+        <button class="ritem">
+          <span class="ico"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6" cy="6" r="2.3"/><path d="M2 13.2c0-2.2 1.8-3.6 4-3.6s4 1.4 4 3.6M10.6 4.2a2.2 2.2 0 0 1 0 4M11.5 9.9c1.6.4 2.5 1.6 2.5 3.3"/></svg></span>Team &amp; billing</button>
+        <div class="me"><span class="av">PS</span><span class="n">Pratyaksh · Owner</span></div>
+      </div>
+    </div>
+
+    <div class="main">
+
+      <div class="screen on" id="s-home">
+        <div class="home">
+          <h2 class="hello">Welcome back, Pratyaksh</h2>
+          <p class="sub">Pick up a project, or start a new one and hire the team it needs.</p>
+
+          <button class="startcard" onclick="openNew()">
+            <span class="plus"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg></span>
+            <span>
+              <b>Start a new project</b>
+              <span>Name it, describe the work, then hire the agents it needs.</span>
+            </span>
+          </button>
+
+          <div class="secttl">Recent</div>
+          <div class="pgrid">
+            <button class="pcard" onclick="go('project')">
+              <div class="t">Q3 Revenue Migration</div>
+              <div class="d">Move finance reporting onto the new warehouse.</div>
+              <div class="f">
+                <span style="display:flex"><span class="mini" style="background:#8C9B8F">NV</span><span class="mini" style="background:#8E94A8">AT</span></span>
+                <span style="margin-left:8px">2 agents · 4 sources · 2h ago</span>
+              </div>
+            </button>
+            <button class="pcard">
+              <div class="t">Ingestion Cleanup</div>
+              <div class="d">Retire the legacy CSV drops.</div>
+              <div class="f">
+                <span style="display:flex"><span class="mini" style="background:#A89B84">OR</span></span>
+                <span style="margin-left:8px">1 agent · 2 sources · yesterday</span>
+              </div>
+            </button>
+            <button class="pcard">
+              <div class="t">Customer 360</div>
+              <div class="d"></div>
+              <div class="f"><span>No agents yet</span></div>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="screen" id="s-project">
+        <div class="phead">
+          <span class="crumb">Projects /</span>
+          <span class="crumb"><b>Q3 Revenue Migration</b></span>
+          <span class="sp"></span>
+          <button class="btn sm" onclick="openHire()">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3.5v9M3.5 8h9"/></svg>
+            Hire agent</button>
+          <button class="btn sm gh"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3.5" r="1.15"/><circle cx="8" cy="8" r="1.15"/><circle cx="8" cy="12.5" r="1.15"/></svg></button>
+        </div>
+
+        <div class="pbody">
+          <div class="chatcol">
+            <div class="thread" id="thread">
+              <div class="blank" id="blank">
+                <h2>What needs doing?</h2>
+                <p>Nova and Atlas are on this project. Tag one of them, or drop a file in and they'll take it from there.</p>
+                <div class="chips">
+                  <button class="chip" onclick="play()">@Nova profile the finance tables</button>
+                  <button class="chip">@Atlas check ingestion freshness</button>
+                  <button class="chip" onclick="openHire()">Hire another agent</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer">
+              <div class="cbox">
+                <div class="cinput">Message the project… type @ to tag an agent</div>
+                <div class="crow">
+                  <button class="ic" title="Attach a file" onclick="play()">
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M10.8 7.2 6.6 11.4a2.1 2.1 0 0 1-3-3l4.8-4.8a1.4 1.4 0 0 1 2 2l-4.8 4.8a.7.7 0 0 1-1-1l4.4-4.4"/></svg></button>
+                  <span class="sp"></span>
+                  <button class="btn sm pri" onclick="play()">Send</button>
+                </div>
+              </div>
+              <div class="hintline">Files dropped here land in <b>Data</b>, profiled automatically, scoped to the agent you tagged.</div>
+            </div>
+          </div>
+
+          <div class="side">
+            <div class="tabs">
+              <button class="tab on" onclick="tab(this,'p-agents')">Agents</button>
+              <button class="tab" onclick="tab(this,'p-data')">Data</button>
+              <button class="tab" onclick="tab(this,'p-act')">Activity</button>
+            </div>
+
+            <div class="pane on" id="p-agents">
+              <div class="agent">
+                <span class="av" style="background:#8C9B8F">NV</span>
+                <div style="min-width:0"><div class="n"><span class="dot idle" id="novaDot"></span>Nova</div>
+                <div class="s" id="novaSub">DataOps · 2 sources · idle</div></div>
+              </div>
+              <div class="agent">
+                <span class="av" style="background:#8E94A8">AT</span>
+                <div style="min-width:0"><div class="n"><span class="dot idle"></span>Atlas</div>
+                <div class="s">DataOps · 2 sources · idle</div></div>
+              </div>
+              <button class="btn sm" style="width:100%;margin-top:3px;justify-content:center" onclick="openHire()">Hire another</button>
+            </div>
+
+            <div class="pane" id="p-data">
+              <div class="src"><span class="i">CSV</span><div><div class="n">sf_revenue_q3</div><div class="s">Nova · profiled · 12,480 rows</div></div></div>
+              <div class="src"><span class="i">PG</span><div><div class="n">warehouse_prod</div><div class="s">Nova · profiled · 61 columns</div></div></div>
+              <div class="src"><span class="i">CSV</span><div><div class="n">ingest_drop_aug</div><div class="s">Atlas · profiled</div></div></div>
+              <div class="src" id="newSrc" style="display:none;border-color:#333"><span class="i">CSV</span><div><div class="n">finance_tables_q3</div><div class="s">Nova · profiling…</div></div></div>
+              <div style="margin-top:10px;color:var(--text-3);font-size:11.5px;line-height:1.5">Everything here arrived through chat. Nothing was added by hand.</div>
+            </div>
+
+            <div class="pane" id="p-act">
+              <div class="emptyp" id="actEmpty"><b>Nothing running</b>Steps appear here as agents work, whether or not you're watching.</div>
+              <div id="events"></div>
+            </div>
+
+            <div class="costbar" id="costbar"><span>This task so far</span><span><b>1,340 tokens</b> · ₹0.34</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <p class="footn">
+    <b>What changed.</b> Pipelines, Quality, Incidents, Governance, CI/CD, Transforms and Catalog are no
+    longer destinations — they're views of a project's data, reached from the <b>Data</b> panel. The rail
+    holds four things plus your projects. Every action is a real button. Files enter through the composer
+    and land in Data already profiled and scoped. Agents are hired inside the project that needs them, and
+    Activity shows their steps whether or not you're on the screen.
+  </p>
+</div>
+
+<div class="scrim" id="scrimNew">
+  <div class="modal">
+    <div class="mh"><h3>New project</h3><p>A project holds its own agents, data and history.</p></div>
+    <div class="mb">
+      <label class="fl">Name</label>
+      <input class="inp" placeholder="e.g. Q3 Revenue Migration" value="Q3 Revenue Migration">
+      <label class="fl">What's this project for? <span style="color:var(--text-3)">(optional)</span></label>
+      <input class="inp" placeholder="One line your agents will read as context" value="Move finance reporting onto the new warehouse.">
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="shut('scrimNew')">Cancel</button>
+      <button class="btn pri" onclick="shut('scrimNew');go('project')">Create project</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="scrimHire">
+  <div class="modal wide">
+    <div class="mh"><h3>Hire an agent</h3><p>Pick a type, name it, and choose what it's allowed to reach.</p></div>
+    <div class="mb">
+      <div class="agrid">
+        <button class="acard pick"><div class="r1"><span class="av" style="background:#8C9B8F">AX</span><b>DataOps</b></div><p>Pipelines, quality, incidents, lineage, transforms, CI/CD.</p></button>
+        <button class="acard off"><span class="soon">coming soon</span><div class="r1"><span class="av" style="background:#A89B84">LE</span><b>Finance</b></div><p>Reporting, variance analysis, reconciliation.</p></button>
+        <button class="acard off"><span class="soon">coming soon</span><div class="r1"><span class="av" style="background:#A89191">PU</span><b>People ops</b></div><p>Workforce analytics, attrition, org reporting.</p></button>
+        <button class="acard off"><span class="soon">coming soon</span><div class="r1"><span class="av" style="background:#8E94A8">SE</span><b>Security</b></div><p>Threat detection, compliance audit, access review.</p></button>
+      </div>
+      <label class="fl">Name this agent</label>
+      <input class="inp" placeholder="e.g. Nova" value="Nova">
+      <label class="fl">What can it reach?</label>
+      <div class="chk on"><span class="box">✓</span><div><div class="n">sf_revenue_q3</div><div class="s">CSV · 12,480 rows</div></div></div>
+      <div class="chk"><span class="box"></span><div><div class="n">warehouse_prod</div><div class="s">Postgres · 61 columns</div></div></div>
+      <div style="color:var(--text-3);font-size:11.5px;margin-top:4px">Scope is enforced on every call, through chat and through the API. You can change it any time.</div>
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="shut('scrimHire')">Cancel</button>
+      <button class="btn pri" onclick="shut('scrimHire')">Hire agent</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function go(s){
+  document.querySelectorAll('.screen').forEach(x=>x.classList.remove('on'));
+  document.getElementById('s-'+s).classList.add('on');
+  document.querySelectorAll('.rail .ritem').forEach(b=>b.classList.remove('on'));
+  if(s==='home') document.getElementById('navHome').classList.add('on');
+}
+function openNew(){document.getElementById('scrimNew').classList.add('on')}
+function openHire(){document.getElementById('scrimHire').classList.add('on')}
+function shut(id){document.getElementById(id).classList.remove('on')}
+document.querySelectorAll('.scrim').forEach(s=>s.addEventListener('click',e=>{if(e.target===s)s.classList.remove('on')}));
+addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.scrim').forEach(s=>s.classList.remove('on'))});
+function tab(btn,id){
+  btn.parentElement.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  btn.classList.add('on');
+  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('on'));
+  document.getElementById(id).classList.add('on');
+}
+
+const thread=document.getElementById('thread'), events=document.getElementById('events');
+function el(h){const d=document.createElement('div');d.innerHTML=h.trim();return d.firstElementChild}
+function push(n){thread.appendChild(n);thread.scrollTop=thread.scrollHeight;return n}
+function ev(k,v,w,cls){
+  document.getElementById('actEmpty').style.display='none';
+  const e=el(`<div class="ev ${cls||''}"><div class="k">${k}</div><div class="v">${v}</div><div class="who2">${w}</div></div>`);
+  events.appendChild(e); events.parentElement.scrollTop=events.parentElement.scrollHeight; return e;
+}
+let T=[];function at(ms,fn){T.push(setTimeout(fn,reduce?0:ms))}
+let played=false;
+
+function play(){
+  if(played) return; played=true;
+  const b=document.getElementById('blank'); if(b) b.remove();
+  document.querySelector('.tabs .tab:nth-child(3)').click();
+
+  at(100,()=>push(el(`
+    <div class="msg"><span class="av" style="background:#3A3A3A;color:#C4C4C4">PS</span><div class="bd">
+      <div class="who"><b>You</b><span class="tm">09:14</span></div>
+      <div class="txt"><span class="at">@Nova</span> the finance tables landed this morning — profile them and flag anything that drifted from last week.</div>
+      <span class="filechip"><span class="x">CSV</span>finance_tables_q3.csv · 2.4 MB</span>
+    </div></div>`)));
+
+  at(700,()=>{
+    document.getElementById('novaDot').classList.remove('idle');
+    document.getElementById('novaSub').textContent='DataOps · 3 sources · working';
+    document.getElementById('newSrc').style.display='flex';
+    ev('upload','finance_tables_q3 registered and profiling','Nova','done');
+  });
+
+  at(1500,()=>push(el(`
+    <div class="msg"><span class="av" style="background:#8C9B8F">NV</span><div class="bd">
+      <div class="who"><b>Nova</b><span class="tag">DATAOPS</span><span class="tm">09:14</span></div>
+      <div class="txt">Registered <code>finance_tables_q3</code> and pulled it into my scope. Here's the plan — nothing runs until you approve it.</div>
+      <div class="card"><div class="h"><b>Profile &amp; drift check</b><span class="pill" id="tp">awaiting approval</span></div>
+        <ul class="steps">
+          <li id="s1"><span class="k">1</span>List sources in scope</li>
+          <li id="s2"><span class="k">2</span>Profile schema across 4 tables</li>
+          <li id="s3"><span class="k">3</span>Run quality checks <span class="pill warn" style="margin-left:5px">needs you</span></li>
+          <li id="s4"><span class="k">4</span>Compare against last week</li>
+        </ul></div>
+    </div></div>`)));
+
+  at(2100,()=>ev('plan generated','4 steps · 1 needs your approval','Nova'));
+  at(3000,()=>{mark('s1');ev('step 1','list_data_sources — 3 sources in scope','Nova','done')});
+  at(4200,()=>{mark('s2');ev('step 2','profile_schema — 4 tables, 61 columns','Nova','done')});
+  at(5400,()=>{
+    document.getElementById('s3').classList.add('now');
+    ev('step 3','Paused — waiting on your approval','Nova','wait');
+    push(el(`
+    <div class="msg"><span class="av" style="background:#8C9B8F">NV</span><div class="bd">
+      <div class="who"><b>Nova</b><span class="tag">DATAOPS</span><span class="tm">09:15</span></div>
+      <div class="txt">Step 3 touches production. I need sign-off before running it.</div>
+      <div class="gate"><div class="g">Approve this action?</div>
+        <div class="s"><code>run_quality_checks</code> on <code>finance_tables_q3</code> · medium risk</div>
+        <div class="gact"><button class="btn sm pri" onclick="ok(this)">Approve and continue</button><button class="btn sm">Reject</button></div>
+      </div></div></div>`));
+    document.getElementById('costbar').style.display='flex';
+  });
+}
+function mark(id){const n=document.getElementById(id);if(n){n.classList.add('done');n.querySelector('.k').textContent='✓'}}
+function ok(btn){
+  btn.closest('.gate').innerHTML='<div class="s">Approved by you at 09:15 · recorded in the audit trail</div>';
+  at(600,()=>{mark('s3');ev('step 3','run_quality_checks — 38 rules, 38 passed','Nova','done')});
+  at(1900,()=>{mark('s4');ev('step 4','detect_schema_drift — 1 change found','Nova','done')});
+  at(2900,()=>{
+    document.getElementById('tp').textContent='completed';
+    document.getElementById('tp').className='pill ok';
+    document.getElementById('novaDot').classList.add('idle');
+    document.getElementById('novaSub').textContent='DataOps · 3 sources · idle';
+    push(el(`
+    <div class="msg"><span class="av" style="background:#8C9B8F">NV</span><div class="bd">
+      <div class="who"><b>Nova</b><span class="tag">DATAOPS</span><span class="tm">09:17</span></div>
+      <div class="txt">Done. 4 tables profiled, 38 rules passed, one drift: <code>net_revenue</code> moved from
+      <code>decimal(12,2)</code> to <code>decimal(14,2)</code> since last Tuesday. Opened incident
+      <b>INC-204</b>. Nothing downstream has broken yet, but the warehouse column needs widening before
+      the next load.</div>
+    </div></div>`));
+  });
+}
+</script>
+</body>
+</html>

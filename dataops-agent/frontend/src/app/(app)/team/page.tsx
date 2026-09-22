@@ -1,17 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Card, Badge, Button, Modal, Input, Select, Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast, RowActionsMenu,
+  Card, Badge, Button, Modal, Input, Select, Tabs, Progress,
+  Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast, RowActionsMenu,
 } from "@/components/ui";
 import { formatApiDateOnly } from "@/lib/dates";
 import {
   getToken, decodeUserFromToken,
   getTeamMembers, changeMemberRole, removeTeamMember,
   getTeamInvites, createTeamInvite, revokeTeamInvite,
-  type TeamMember, type TeamInviteItem,
+  getUsage, getCurrentPlan,
+  type TeamMember, type TeamInviteItem, type QuotaStatus,
 } from "@/lib/api";
+
+const PAGE_TABS = [
+  { id: "team", label: "Team" },
+  { id: "billing", label: "Billing" },
+];
+const PAGE_TAB_IDS = new Set(PAGE_TABS.map((t) => t.id));
 
 // Kept in sync manually with backend/services/rbac.py's Role/ALL_ROLES - a
 // genuinely locked, rarely-changing set (unlike the AI Model allowlist),
@@ -43,10 +51,21 @@ export default function TeamPage() {
   const canManage = user?.role === "owner" || user?.role === "admin";
   const toast = useToast();
   const qc = useQueryClient();
+  const [pageTab, setPageTab] = useState("team");
   const [modalOpen, setModalOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState("viewer");
   const [createdInvite, setCreatedInvite] = useState<(TeamInviteItem & { invite_link_token: string }) | null>(null);
+
+  // Billing merged into this page (slice 12, 2026-09-15) -- ?tab=billing
+  // is the real deep link the quota-exceeded toast (chat, TaskCreateModal)
+  // now points at, so that landing has to work, not just look right by
+  // default. Same window.location.search pattern as Settings' own
+  // ?tab= reader -- see that file's comment for why not useSearchParams().
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (requested && PAGE_TAB_IDS.has(requested)) setPageTab(requested);
+  }, []);
 
   const members = useQuery({ queryKey: ["team-members"], queryFn: () => getTeamMembers(token) });
   const invites = useQuery({ queryKey: ["team-invites"], queryFn: () => getTeamInvites(token), enabled: canManage });
@@ -107,12 +126,23 @@ export default function TeamPage() {
     <div>
       <div className="page-header">
         <div className="flex items-center justify-between">
-          <h1 className="page-title">Team</h1>
-          {canManage && <Button size="sm" onClick={() => setModalOpen(true)}>+ Invite Member</Button>}
+          <h1 className="page-title">Team &amp; Billing</h1>
+          {pageTab === "team" && canManage && <Button size="sm" onClick={() => setModalOpen(true)}>+ Invite Member</Button>}
         </div>
       </div>
 
-      <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 24 }}>
+      <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 20 }}>
+        <Tabs items={PAGE_TABS} activeId={pageTab} onChange={setPageTab} />
+      </div>
+
+      {pageTab === "billing" && (
+        <div style={{ padding: "0 24px 20px" }}>
+          <BillingTab token={token} />
+        </div>
+      )}
+
+      {pageTab === "team" && (
+      <div style={{ padding: "0 24px 20px", display: "flex", flexDirection: "column", gap: 24 }}>
         {members.isLoading ? (
           <Skeleton style={{ height: 200, borderRadius: 12 }} />
         ) : (
@@ -213,6 +243,7 @@ export default function TeamPage() {
           )
         )}
       </div>
+      )}
 
       <Modal open={modalOpen} onClose={() => { setModalOpen(false); setCreatedInvite(null); }} title="Invite a team member" size="sm">
         {createdInvite ? (
@@ -239,6 +270,81 @@ export default function TeamPage() {
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+// ---------- Billing (moved from the retired /billing page, slice 12) ----------
+
+const RESOURCE_LABELS: Record<string, string> = {
+  ai_credits: "AI Credits",
+  pipeline_runs: "Pipeline Runs",
+  data_sources: "Data Sources",
+  team_members: "Team Members",
+};
+
+function progressVariant(status: QuotaStatus["status"]): "default" | "success" | "warning" | "danger" {
+  if (status === "exceeded") return "danger";
+  if (status === "warning") return "warning";
+  return "success";
+}
+
+function planLabel(name: string) {
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function BillingTab({ token }: { token: string }) {
+  const usage = useQuery({ queryKey: ["billing-usage"], queryFn: () => getUsage(token) });
+  const plan = useQuery({ queryKey: ["billing-plan"], queryFn: () => getCurrentPlan(token) });
+
+  const usageEntries = Object.entries(usage.data?.usage ?? {}) as [string, QuotaStatus][];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 640 }}>
+      {plan.isLoading ? (
+        <Skeleton style={{ height: 100, borderRadius: 12 }} />
+      ) : (
+        <Card>
+          <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div>
+              <div className="text-muted text-sm">Current plan</div>
+              <div className="font-display text-xl">{plan.data ? planLabel(plan.data.plan) : "—"}</div>
+            </div>
+            <p className="text-muted text-sm">
+              Plan changes are handled manually by the AXIOM team for now — self-serve upgrades are
+              disabled until Stripe billing is live. Contact us if you&apos;d like to change your plan.
+            </p>
+          </div>
+        </Card>
+      )}
+
+      {usage.isLoading ? (
+        <Skeleton style={{ height: 220, borderRadius: 12 }} />
+      ) : (
+        <Card>
+          <div className="card-header text-sm text-muted">Usage this month</div>
+          <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {usageEntries.map(([key, q]) => (
+              <div key={key}>
+                <div className="flex items-center justify-between text-sm" style={{ marginBottom: 6 }}>
+                  <span>{RESOURCE_LABELS[key] ?? key}</span>
+                  <span className="text-muted">
+                    {q.used.toLocaleString()} {q.limit === null ? "· Unlimited" : `/ ${q.limit.toLocaleString()}`}
+                  </span>
+                </div>
+                <Progress value={q.limit === null ? 0 : q.percent} variant={progressVariant(q.status)} />
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <div className="card-body">
+          <div className="font-display" style={{ marginBottom: 4 }}>Checkout &amp; invoices</div>
+          <p className="text-muted text-sm">Coming soon — Stripe billing isn&apos;t wired up yet.</p>
+        </div>
+      </Card>
     </div>
   );
 }

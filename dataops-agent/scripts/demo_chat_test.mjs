@@ -1,8 +1,9 @@
 // Ad-hoc live chat test harness for demo-script verification.
 // Usage: node demo_chat_test.mjs "<message>" [personality] [operation] [sessionId]
+import { getDemoCredentials } from "./demo_env.mjs";
+
 const BASE = "http://localhost:8000/api/v1";
-const EMAIL = "demo@axiom-yc.ai";
-const PASSWORD = "AxiomDemo2026!";
+const { EMAIL, PASSWORD } = getDemoCredentials();
 
 async function main() {
   const [, , message, personality = "engineer", operation = "assisted", sessionId] = process.argv;

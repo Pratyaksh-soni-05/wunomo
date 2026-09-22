@@ -7,6 +7,7 @@ import {
   Table, Thead, Tbody, Tr, Th, Td, Skeleton, useToast,
 } from "@/components/ui";
 import { formatApiDate } from "@/lib/dates";
+import { ScopeBanner } from "@/components/shell";
 import {
   getToken, getIncidents, createIncident, resolveIncident, getPipelines,
   type Incident,
@@ -17,12 +18,10 @@ const SEVERITIES = ["low", "medium", "high", "critical"];
 // Mirrors the backend's own default (backend/api/v1/incidents.py:list_incidents,
 // `limit: int = 50`) - not fetched from anywhere, since the API exposes no
 // endpoint to ask "what's your current default." getIncidents() never
-// passes a limit, so this is what actually comes back. The API's own
-// `count` field always equals len(returned) (finding 55, backend), so it
-// can never be trusted to mean "how many exist" - this screen doesn't read
-// it at all. If the returned page is exactly this size, more rows may
-// exist that this screen has no way to fetch (no offset/cursor param
-// exists yet) - say that plainly instead of pretending 50 is everything.
+// passes a limit, so this is what actually comes back. Finding 55 already
+// fixed the `count` field itself (it's a real COUNT(*) now, not len(page)) -
+// this screen still can't page past the limit (no offset/cursor param
+// exists yet), which is the part worth saying plainly below.
 const INCIDENTS_DEFAULT_LIMIT = 50;
 
 function severityVariant(sev: string): "success" | "warning" | "danger" | "gray" {
@@ -54,11 +53,13 @@ export default function IncidentsPage() {
   const [pipelineId, setPipelineId] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
 
-  // This screen needs the full history (it renders a Resolve button
-  // conditionally per row, including already-resolved ones) - genuinely
-  // different data from the Dashboard's open-only health banner query, not
-  // a duplicate of it (finding 21). Unfiltered on purpose.
-  const incidents = useQuery({ queryKey: ["incidents"], queryFn: () => getIncidents(token) });
+  // Repurposed (slice 6b, 2026-09-14): this route used to list every
+  // incident tenant-wide (full history, including resolved ones -
+  // genuinely different data from the Dashboard's open-only health banner
+  // query, finding 21). Now scoped to unscoped-only (no pipeline_id) -
+  // project-scoped incidents moved into each project's Workbench - but
+  // still the full history within that, resolved included.
+  const incidents = useQuery({ queryKey: ["incidents", "unscoped"], queryFn: () => getIncidents(token, { unscoped: true }) });
   const pipelines = useQuery({ queryKey: ["pipelines"], queryFn: () => getPipelines(token) });
 
   // Resolving/logging an incident here changes what the Dashboard's
@@ -107,13 +108,15 @@ export default function IncidentsPage() {
       </div>
 
       <div style={{ padding: "20px 24px" }}>
+        <ScopeBanner label="incidents" />
         {incidents.isLoading ? (
           <Skeleton style={{ height: 300, borderRadius: 12 }} />
         ) : list.length === 0 ? (
           <div className="empty-state">
-            <h2 className="font-display text-xl">No incidents</h2>
-            <p className="text-muted text-sm" style={{ maxWidth: 360 }}>
-              Nothing&apos;s on fire. Incidents raised by AXIOM or logged manually will show up here.
+            <h2 className="font-display text-xl">No unscoped incidents</h2>
+            <p className="text-muted text-sm" style={{ maxWidth: 380 }}>
+              Every incident in this tenant is tied to a pipeline and lives in a project&apos;s
+              Workbench. Logging one here without a pipeline keeps it here instead.
             </p>
             <Button size="sm" onClick={() => setModalOpen(true)}>+ Log Incident</Button>
           </div>
@@ -181,6 +184,10 @@ export default function IncidentsPage() {
         }
       >
         <div className="flex flex-col gap-3">
+          <p className="text-muted text-xs">
+            Picking a pipeline here scopes this incident to whichever project it belongs to —
+            it&apos;ll appear in that project&apos;s Workbench, not in this list, right after logging.
+          </p>
           <Input id="incident-title" label="Title" value={title} onChange={(e) => setTitle(e.target.value)} required />
           <Input id="incident-desc" label="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
           <Select id="incident-severity" label="Severity" value={severity} onChange={(e) => setSeverity(e.target.value)}>

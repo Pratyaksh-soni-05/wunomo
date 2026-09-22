@@ -151,10 +151,22 @@ async def test_task_step_provenance_and_fk_integrity(client):
 
 
 @pytest.mark.asyncio
-async def test_task_shape_is_constrained_to_the_three_narrow_v1_values():
+async def test_task_shape_is_constrained_to_the_three_narrow_v1_planner_shapes_plus_supervisor_intent():
+    """The three original v1 shapes stay exactly as narrow as designed --
+    each still drives task_planner.py's LLM plan generation against a
+    fixed, pre-vetted tool allowlist, and no fourth *planner* shape has
+    snuck in. SUPERVISOR_INTENT (Stage 2, modules/orchestration/
+    supervisor.py) is deliberately not part of that guarantee: it never
+    reaches task_planner.py at all -- a single free-form instruction run
+    once through the existing per-agent graph (run_agent(), unchanged),
+    dispatched directly by the supervisor. Widening this set again in the
+    future should mean a fifth real, separate execution path, the same
+    bar SUPERVISOR_INTENT itself had to clear -- not a quiet loosening of
+    either group."""
     real_values = {s.value for s in TaskShape}
     assert real_values == {
         "diagnose_pipeline_failure", "investigate_incident", "sync_profile_quality",
+        "supervisor_intent",
     }
 
 

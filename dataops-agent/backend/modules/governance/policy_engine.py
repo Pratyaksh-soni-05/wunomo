@@ -134,7 +134,7 @@ class PolicyEngine:
                 )
                 requests = result.scalars().all()
 
-                output = [self._serialize(r) for r in requests]
+                output = [await self._serialize(r) for r in requests]
                 log.info("policy.list_pending.done", count=len(output))
                 return output
 
@@ -159,7 +159,7 @@ class PolicyEngine:
                 req = result.scalar_one_or_none()
                 if req is None:
                     return {"error": f"Approval {approval_id} not found"}
-                return self._serialize(req)
+                return await self._serialize(req)
         except Exception as exc:
             return {"error": str(exc)}
 
@@ -232,6 +232,22 @@ class PolicyEngine:
                 db.add(req)
                 await db.commit()
 
+            # If this approval was blocking a supervisor-dispatched task
+            # (never a plain chat-originated one -- see
+            # find_supervisor_task_for_approval's own SUPERVISOR_INTENT
+            # filter), the task itself never learns the action ran unless
+            # something tells it: this is that link. Lazy import to avoid
+            # a module-load cycle (supervisor.py doesn't import this
+            # module, but several modules it touches transitively do).
+            # PolicyEngine stays domain-agnostic either way -- it only
+            # ever checks "is there a task_id", never what a Task is.
+            from modules.orchestration.supervisor import (
+                find_supervisor_task_for_approval, resolve_task_approval,
+            )
+            task_id = await find_supervisor_task_for_approval(approval_id)
+            if task_id is not None:
+                await resolve_task_approval(task_id, approval_id, approved=True)
+
             log.info(
                 "policy.approve.done",
                 approval_id=approval_id,
@@ -290,14 +306,25 @@ class PolicyEngine:
                 db.add(req)
                 await db.commit()
 
-                log.info("policy.reject.done", approval_id=approval_id)
-                return {
-                    "approval_id": approval_id,
-                    "status": "rejected",
-                    "reviewer": reviewer,
-                    "notes": notes,
-                    "resolved_at": now.isoformat(),
-                }
+            # Same task-aware link approve() uses above -- a rejection is
+            # a decision, not a pause, so a supervisor task's dependents
+            # must move to BLOCKED_ON_DEPENDENCY rather than keep sitting
+            # queued with nothing ever telling them the wait is over.
+            from modules.orchestration.supervisor import (
+                find_supervisor_task_for_approval, resolve_task_approval,
+            )
+            task_id = await find_supervisor_task_for_approval(approval_id)
+            if task_id is not None:
+                await resolve_task_approval(task_id, approval_id, approved=False)
+
+            log.info("policy.reject.done", approval_id=approval_id)
+            return {
+                "approval_id": approval_id,
+                "status": "rejected",
+                "reviewer": reviewer,
+                "notes": notes,
+                "resolved_at": now.isoformat(),
+            }
 
         except Exception as exc:
             log.error("policy.reject.error", approval_id=approval_id, error=str(exc))
@@ -355,7 +382,23 @@ class PolicyEngine:
     # Helper
     # ------------------------------------------------------------------
 
-    def _serialize(self, req: ApprovalRequest) -> dict:
+    async def _serialize(self, req: ApprovalRequest) -> dict:
+        # §7.3.E: "Where a dependent task is held behind this one, the
+        # card must say so." Only ever non-None for a PENDING approval
+        # blocking a supervisor task with a real SUPERVISOR_QUEUED
+        # dependent -- find_supervisor_task_for_approval's own
+        # SUPERVISOR_INTENT filter means a plain chat-originated or
+        # structured-task approval always gets None here, unchanged from
+        # before this field existed.
+        unblocks = None
+        if req.status == ApprovalStatus.PENDING:
+            from modules.orchestration.supervisor import (
+                describe_unblocked_dependents, find_supervisor_task_for_approval,
+            )
+            task_id = await find_supervisor_task_for_approval(str(req.id))
+            if task_id is not None:
+                unblocks = await describe_unblocked_dependents(task_id)
+
         return {
             "approval_id": str(req.id),
             "user_id": str(req.user_id) if req.user_id else None,
@@ -365,6 +408,7 @@ class PolicyEngine:
             "risk_level": req.risk_level,
             "risk_description": RISK_DESCRIPTIONS.get(req.risk_level or "", ""),
             "reason": req.reason,
+            "unblocks": unblocks,
             "status": req.status.value if hasattr(req.status, "value") else str(req.status),
             "resolution_note": req.resolution_note,
             "resolved_by": req.resolved_by,

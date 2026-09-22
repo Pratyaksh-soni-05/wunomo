@@ -26,10 +26,12 @@ async def list_open_incidents(tenant_id: str) -> dict:
     return cap_tool_result(await IncidentManager(tenant_id).list_incidents(status="open"))
 
 @tool
-async def triage_incident(tenant_id: str, incident_id: str) -> dict:
+async def triage_incident(
+    tenant_id: str, incident_id: str, user_id: str | None = None, task_id: str | None = None,
+) -> dict:
     """AI-assisted root cause analysis for an incident."""
     from modules.observability.incident_manager import IncidentManager
-    return await IncidentManager(tenant_id).triage_incident(incident_id)
+    return await IncidentManager(tenant_id).triage_incident(incident_id, user_id=user_id, task_id=task_id)
 
 @tool
 async def resolve_incident(tenant_id: str, incident_id: str, resolution_notes: str) -> dict:
