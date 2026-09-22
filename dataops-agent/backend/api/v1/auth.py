@@ -189,6 +189,34 @@ async def revoke_tokens(body: RevokeRequest, user=Depends(get_current_user)):
     return {"revoked": "all_sessions", "epoch": epoch}
 
 
+async def enforce_agent_budget(agent_id: str | None) -> None:
+    """Gate 2 of the two-gate per-agent token-budget path (Wunomo
+    Projects Phase 1, part two) - both gates must pass, and this one
+    never replaces enforce_quota("ai_credits")'s existing tenant-level
+    gate above, which keeps running as its own dependency. Not a
+    dependency itself, unlike enforce_quota: a real agent_id isn't known
+    until chat.py/tasks.py resolve the tenant's real agent deeper in the
+    endpoint body (mirroring the same reason agent_scope_denial_reason()
+    can't be a dependency either), so this is a plain function callers
+    invoke directly once they have one. agent_id=None is a no-op - no
+    agent context, nothing to check - matching every other agent-scope
+    check's own convention this phase."""
+    if agent_id is None:
+        return
+    from services.quota_service import get_agent_quota_status
+    result = await get_agent_quota_status(agent_id)
+    if result["status"] == "exceeded":
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            # agent_id (Wunomo Projects Phase 2 frontend, slice 9): without
+            # it, a frontend catching this 402 has no way to link to the
+            # one agent whose budget is actually the problem -- the caller
+            # already has it (it's this function's own argument), so there
+            # was no reason to make the frontend re-resolve it.
+            detail={"error": "agent_budget_exceeded", "agent_id": agent_id, **result},
+        )
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str

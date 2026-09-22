@@ -286,6 +286,218 @@ async def _check_scheduled_pipelines():
     log.info("scheduled_pipeline_check_complete", checked=len(pipelines), fired=fired)
 
 
+# Found live while building this: this dev DB alone has 788 RUNNING +
+# 353 QUEUED + 102 PAUSED_QUOTA_EXCEEDED tasks (WALKTHROUGH_FINDINGS_
+# 2026-08.md item 74) -- doing each one's real execute_next_step() work
+# inline, sequentially, inside the beat tick itself hung past two
+# minutes against real data, not a hypothetical. At 4 worker processes
+# (docker-compose's celery_worker --concurrency=4) and a conservative
+# worst case of ~10s per task (this module's own MAX_ATTEMPTS_PER_STEP=3
+# / TRANSIENT_RETRY_BACKOFF_SECONDS=2 already bound one call's internal
+# retry sleeps to a few seconds, plus real tool/LLM latency), 25 tasks
+# split across 4 workers is ~6-7 per worker -- comfortably inside the
+# 60s tick window even at that pessimistic estimate, with real headroom
+# for the common case. A backlog beyond 25 simply drains across
+# multiple ticks, oldest-first (see the index/order-by below) -- fine,
+# per instruction; a queue that never empties would not be.
+ADVANCE_BATCH_SIZE = 25
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def advance_active_tasks(self):
+    """The auto-advance loop's beat tick (Wunomo Projects Phase 3, item
+    71 / slice 10): "give it a task and walk away" has always actually
+    meant a human had to keep clicking /advance -- this is the second
+    half of that already-shipped feature, not new scope.
+
+    Deliberately does NOT do any task's real advancing work itself --
+    only selects up to ADVANCE_BATCH_SIZE runnable task_ids (oldest-
+    updated-first) and dispatches one advance_one_task.delay(task_id)
+    per id, the same way check_scheduled_pipelines above dispatches
+    execute_scheduled_pipeline_run.delay(...) rather than running a
+    pipeline inline. This is a correction, not the original design: an
+    earlier version of this function called execute_next_step() inline
+    in a loop here, and hung for over two minutes against this dev DB's
+    own real backlog (item 74) -- the fix is dispatching to the worker
+    pool's own concurrency, not doing the work in the scheduler.
+
+    If the same task_id is still sitting on the queue from a previous
+    tick when this one dispatches it again (the worker pool falling
+    behind ADVANCE_BATCH_SIZE/tick), the duplicate is harmless -- the
+    per-task advisory lock (services/task_lock.py, item 73) means
+    whichever copy runs second just gets {"outcome": "task_busy"} and
+    exits immediately. Accepted as a wasted-cycle cost, not fixed with
+    dispatch de-duplication, given ADVANCE_BATCH_SIZE's own headroom."""
+    import asyncio
+    from database import engine
+
+    async def _run():
+        await engine.dispose()
+        return await _select_tasks_to_advance()
+
+    try:
+        task_ids, total_runnable = asyncio.run(_run())
+    except Exception as exc:
+        log.error("advance_active_tasks_failed", error=str(exc))
+        raise self.retry(exc=exc)
+
+    for task_id in task_ids:
+        advance_one_task.delay(task_id)
+    # Backlog visibility (added after the fact, per instruction): a
+    # 25/tick cap against a real backlog otherwise has no way to show
+    # whether it's draining or growing between observations -- comparing
+    # total_runnable across consecutive tick logs is what answers that.
+    # Also exposed on demand via GET /health/tasks (main.py), which uses
+    # the identical RUNNABLE_TASK_STATUSES this query does.
+    log.info(
+        "advance_active_tasks_dispatched",
+        dispatched=len(task_ids), total_runnable=total_runnable, batch_size=ADVANCE_BATCH_SIZE,
+    )
+
+
+async def _select_tasks_to_advance() -> tuple[list[str], int]:
+    """Returns (task_ids to dispatch this tick, total runnable count).
+    Selects up to ADVANCE_BATCH_SIZE runnable task_ids, oldest-updated-
+    first -- ix_tasks_status_updated_at (status, updated_at) keeps this
+    an index scan, not a full scan, as the tasks table keeps growing
+    (item 74). The total count is a second, cheap COUNT(*) against the
+    same index, purely for backlog visibility (see advance_active_tasks'
+    own log line and GET /health/tasks) -- it does no task-advancing
+    work itself; the actual execute_next_step() call happens in
+    advance_one_task below, on whichever worker eventually dequeues it."""
+    from sqlalchemy import func, select
+    from database import AsyncSessionLocal
+    from models.all_models import RUNNABLE_TASK_STATUSES, Task
+
+    async with AsyncSessionLocal() as db:
+        total_runnable = await db.scalar(
+            select(func.count()).select_from(Task).where(Task.status.in_(RUNNABLE_TASK_STATUSES))
+        )
+        r = await db.execute(
+            select(Task.id)
+            .where(Task.status.in_(RUNNABLE_TASK_STATUSES))
+            .order_by(Task.updated_at.asc())
+            .limit(ADVANCE_BATCH_SIZE)
+        )
+        return [row[0] for row in r.all()], total_runnable
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def advance_one_task(self, task_id: str):
+    """The real per-task work, dispatched by advance_active_tasks above
+    -- never called inline in the beat/scheduling process. Spreads the
+    actual execute_next_step() work (tool calls, possible LLM-adapt
+    calls) across the worker pool's own concurrency instead of
+    serializing every runnable task inside one beat tick.
+
+    not_runnable and task_busy are expected, silent outcomes -- a
+    tenant with 20 tasks paused for approval would otherwise produce 20
+    log lines a minute, forever, for nothing having happened. Every
+    other outcome (a real step succeeding, failing, completing the
+    task, pausing for quota/a source lock/approval) is logged, matching
+    check_scheduled_pipelines' own aggregate-logging convention."""
+    import asyncio
+    from database import engine
+    from modules.orchestration.task_executor import execute_next_step
+
+    async def _run():
+        await engine.dispose()
+        return await execute_next_step(task_id)
+
+    try:
+        outcome = asyncio.run(_run())
+    except Exception as exc:
+        log.error("advance_one_task_failed", task_id=task_id, error=str(exc))
+        raise self.retry(exc=exc)
+
+    if outcome.get("outcome") not in ("not_runnable", "task_busy"):
+        log.info("advance_one_task_outcome", task_id=task_id, outcome=outcome.get("outcome"))
+
+
+# Wunomo Projects Phase 4, slice 14 (per-agent scheduled work). Same
+# poll-real-DB-state-every-60s shape as check_scheduled_pipelines above --
+# one static beat entry, croniter-matched against every ACTIVE schedule,
+# dispatching one fire_scheduled_agent_task.delay(...) per due schedule
+# rather than doing the real work inline (item 74's own lesson: an early
+# version of advance_active_tasks that ran inline hung past two minutes
+# against this dev DB's real backlog -- dispatch, don't loop-and-execute
+# in the scheduler process).
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def check_scheduled_agent_tasks(self):
+    import asyncio
+    from database import engine
+
+    async def _run():
+        await engine.dispose()
+        return await _check_scheduled_agent_tasks()
+
+    try:
+        fired = asyncio.run(_run())
+    except Exception as exc:
+        log.error("scheduled_agent_task_check_failed", error=str(exc))
+        raise self.retry(exc=exc)
+
+    log.info("check_scheduled_agent_tasks_complete", dispatched=fired)
+
+
+async def _check_scheduled_agent_tasks() -> int:
+    from sqlalchemy import select
+    from database import AsyncSessionLocal
+    from models.all_models import ScheduledAgentTask
+    from croniter import croniter
+
+    now = utcnow().replace(second=0, microsecond=0)
+
+    async with AsyncSessionLocal() as db:
+        r = await db.execute(select(ScheduledAgentTask).where(ScheduledAgentTask.active.is_(True)))
+        schedules = r.scalars().all()
+
+    fired = 0
+    for s in schedules:
+        cron = (s.schedule_cron or "").strip()
+        if not cron:
+            continue
+        try:
+            is_due = croniter.match(cron, now)
+        except (ValueError, KeyError):
+            log.warning("scheduled_agent_task_invalid_cron", schedule_id=s.id, cron=cron)
+            continue
+        if not is_due:
+            continue
+        fire_scheduled_agent_task.delay(s.id)
+        fired += 1
+        log.info("scheduled_agent_task_dispatched", schedule_id=s.id, agent_id=s.agent_id, cron=cron)
+
+    return fired
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def fire_scheduled_agent_task(self, schedule_id: str):
+    """The real per-schedule work, dispatched by check_scheduled_agent_tasks
+    above -- never run inline in the beat/scheduling process, same
+    dispatch-per-item convention as advance_one_task/
+    execute_scheduled_pipeline_run."""
+    import asyncio
+    from database import engine
+    from modules.orchestration.scheduled_tasks import fire_scheduled_task
+
+    async def _run():
+        await engine.dispose()
+        return await fire_scheduled_task(schedule_id)
+
+    try:
+        outcome = asyncio.run(_run())
+    except Exception as exc:
+        log.error("fire_scheduled_agent_task_failed", schedule_id=schedule_id, error=str(exc))
+        raise self.retry(exc=exc)
+
+    # skipped_overlap is an expected, silent outcome (see fire_scheduled_
+    # task's own docstring) -- a daily schedule with an approval gate
+    # still pending from yesterday would otherwise log every single tick.
+    if outcome.get("outcome") != "skipped_overlap":
+        log.info("fire_scheduled_agent_task_outcome", schedule_id=schedule_id, outcome=outcome.get("outcome"))
+
+
 @celery_app.task
 def check_all_freshness():
     import asyncio
@@ -360,15 +572,15 @@ async def _check_freshness_for_tenant(tenant_id: str):
                 # Scoped session can't see it — deleted mid-sweep, or its RLS
                 # context didn't take. Skip rather than crash the whole sweep.
                 return
-            # Existing open staleness incidents for this tenant, so the new
-            # notification wire-up below only fires when a source *newly*
-            # becomes stale, not on every 15-minute tick for a source
-            # that's been stale for hours - this does NOT fix the known,
-            # accepted "creates duplicate Incident rows" gap (see CLAUDE.md's
-            # Known-broken row) - that behavior is untouched. It only
-            # prevents that pre-existing gap from also spamming a real
-            # Slack/email notification every 15 minutes once wired.
-            already_notified_source_ids: set[str] = set()
+            # Existing open staleness incidents for this tenant, keyed by the
+            # source they're about - item 53 fix. Previously this only gated
+            # the notification below; Incident creation itself was
+            # unconditional, so every 15-minute tick a source stayed stale
+            # added another near-duplicate row. Now a source with an
+            # already-open "Stale data:" incident gets that incident
+            # refreshed in place (title/description/severity re-derived from
+            # the current hours_since) instead of a brand-new row.
+            existing_by_source_id: dict[str, Incident] = {}
             existing_open = await db.execute(
                 select(Incident).where(
                     Incident.tenant_id == tenant.id,
@@ -378,7 +590,7 @@ async def _check_freshness_for_tenant(tenant_id: str):
             )
             for existing in existing_open.scalars().all():
                 for asset_id in (existing.affected_assets or []):
-                    already_notified_source_ids.add(asset_id)
+                    existing_by_source_id[asset_id] = existing
 
             newly_stale = []
             sources = await db.execute(
@@ -392,18 +604,25 @@ async def _check_freshness_for_tenant(tenant_id: str):
                 hours_since = (utcnow() - src.last_profiled_at).total_seconds() / 3600
                 sla_hours   = 24
                 if hours_since > sla_hours:
-                    incident = Incident(
-                        id=str(uuid.uuid4()),
-                        tenant_id=tenant.id,
-                        title=f"Stale data: {src.name} ({round(hours_since,1)}h overdue)",
-                        description=f"Source '{src.name}' has not been synced in {round(hours_since,1)} hours. SLA: {sla_hours}h.",
-                        severity=IncidentSeverity.HIGH if hours_since > sla_hours * 2
-                                 else IncidentSeverity.MEDIUM,
-                        affected_assets=[src.id],
-                        detected_at=utcnow()
-                    )
-                    db.add(incident)
-                    if src.id not in already_notified_source_ids:
+                    severity = (IncidentSeverity.HIGH if hours_since > sla_hours * 2
+                                else IncidentSeverity.MEDIUM)
+                    existing = existing_by_source_id.get(src.id)
+                    if existing is not None:
+                        existing.title = f"Stale data: {src.name} ({round(hours_since,1)}h overdue)"
+                        existing.description = f"Source '{src.name}' has not been synced in {round(hours_since,1)} hours. SLA: {sla_hours}h."
+                        existing.severity = severity
+                        db.add(existing)
+                    else:
+                        incident = Incident(
+                            id=str(uuid.uuid4()),
+                            tenant_id=tenant.id,
+                            title=f"Stale data: {src.name} ({round(hours_since,1)}h overdue)",
+                            description=f"Source '{src.name}' has not been synced in {round(hours_since,1)} hours. SLA: {sla_hours}h.",
+                            severity=severity,
+                            affected_assets=[src.id],
+                            detected_at=utcnow()
+                        )
+                        db.add(incident)
                         newly_stale.append({
                             "source_id": src.id, "source_name": src.name,
                             "hours_overdue": round(hours_since, 1),
