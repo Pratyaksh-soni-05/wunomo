@@ -234,6 +234,19 @@ def _coerce_stringified_object_args(tool_name: str, args: dict) -> None:
 MAX_AGENT_ITERATIONS = 10
 AGENT_RECURSION_LIMIT = 50
 
+# run_agent_stream()'s redaction holdback (Integration Phase 4 item 4).
+# tenant_id/user_id/session_id are all gen_uuid() strings — 36 characters,
+# always — so 36 is the true minimum to guarantee one can never be split
+# across a release boundary. This is well past that floor, deliberately:
+# the actual safety here comes from redacting the WHOLE buffer before any
+# slice (see run_agent_stream()'s own comment at the call site), not from
+# the exact holdback size — a UUID is caught the instant it's complete
+# regardless of buffer length. The margin exists so a real streamed
+# sentence doesn't visibly stall waiting for one lone trailing word to
+# clear the threshold, not because the redaction logic needs it to be
+# correct.
+_STREAM_HOLDBACK_CHARS = 64
+
 
 def build_full_system_prompt(sys_prompt: str, tenant_id: str, context: dict | None,
                              nonce: str | None = None) -> str:
@@ -714,12 +727,29 @@ async def run_agent_stream(user_message, tenant_id, user_id, session_id, caller_
     ApprovalRequest id; whether persistence itself failed), so building
     them here would just be guessed at and rebuilt anyway. See
     api/v1/chat.py's chat_stream() / _run_agent_and_persist_stream().
+
+    Streamed "token" deltas are redacted server-side, not just the final
+    assembled message (Integration Phase 4 item 4 — closes Phase 3 TEST
+    D's open finding). _finalize_agent_result()'s redact_identifiers()
+    call runs on the complete response text, after the fact; it cannot
+    reach text that already left over the wire mid-generation. Item #6's
+    B2 finding is exactly why this isn't treated as a theoretical residual
+    risk: the model volunteered a live tenant_id UNPROMPTED, in an
+    ordinary, otherwise-correct reply — not an adversarial edge case, the
+    normal shape of a real answer. A sliding buffer (_STREAM_HOLDBACK_CHARS,
+    below) holds back enough trailing text that a tenant_id/user_id/
+    session_id can never be split across two released chunks, and
+    redact_identifiers() (the same function, same values, reused rather
+    than reimplemented) runs on the whole buffer before any of it is
+    released — so a complete identifier is always caught in one atomic
+    match, however the underlying provider happened to chunk it.
     """
     agent, inputs = await _prepare_agent_invocation(
         user_message, tenant_id, user_id, session_id, caller_role,
         personality_mode, operation_mode, history, context, agent_id,
     )
     final_output = None
+    stream_buffer = ""
     async for ev in agent.astream_events(inputs, version="v2", config={"recursion_limit": AGENT_RECURSION_LIMIT}):
         et = ev["event"]
         if et == "on_chat_model_stream":
@@ -736,7 +766,22 @@ async def run_agent_stream(user_message, tenant_id, user_id, session_id, caller_
             # list-of-blocks shape, just partial.
             delta = content_as_text(ev["data"]["chunk"].content)
             if delta:
-                yield {"type": "token", "delta": delta}
+                stream_buffer += delta
+                # Redact the WHOLE buffer before any slicing, every time —
+                # not just the piece about to be released. This is what
+                # actually makes the holdback size not need to be exact:
+                # a complete identifier gets replaced the instant it's
+                # fully present anywhere in the buffer, regardless of
+                # where the release/keep boundary falls afterward. Without
+                # this ordering, an identifier could straddle two separate
+                # releases (front half already sent, back half arriving
+                # later) and never be seen as one contiguous match at all.
+                stream_buffer = prompt_guard.redact_identifiers(
+                    stream_buffer, (tenant_id, user_id, session_id))
+                if len(stream_buffer) > _STREAM_HOLDBACK_CHARS:
+                    release_len = len(stream_buffer) - _STREAM_HOLDBACK_CHARS
+                    to_release, stream_buffer = stream_buffer[:release_len], stream_buffer[release_len:]
+                    yield {"type": "token", "delta": to_release}
         elif et == "on_tool_start":
             yield {
                 "type": "tool_start",
@@ -773,6 +818,13 @@ async def run_agent_stream(user_message, tenant_id, user_id, session_id, caller_
             # ends, is correct regardless of what its absolute parent_ids
             # depth happens to be in a given calling context.
             final_output = ev["data"]["output"]
+    # Flush whatever's left in the holdback buffer — already redacted on
+    # every delta above, so this is just releasing the trailing chars that
+    # never crossed the holdback threshold — before final_state, matching
+    # this function's own contract that final_state is always the last
+    # event (the caller's "done" comes after it, one layer up).
+    if stream_buffer:
+        yield {"type": "token", "delta": stream_buffer}
     if final_output is not None:
         yield {"type": "final_state", "state": final_output}
 
