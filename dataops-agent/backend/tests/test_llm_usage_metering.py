@@ -201,34 +201,49 @@ async def test_invoke_llm_skips_logging_without_tenant_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_log_llm_usage_swallows_db_failure_but_leaves_it_detectable(monkeypatch):
-    """Gap 1 fix: a DB failure while persisting a usage row must still
-    never raise (log_llm_usage's core contract), but must no longer just
-    vanish into a warning line either. Forces the failure by making
-    LlmUsageEvent's own constructor raise - enough to blow up db.add()
-    without needing to fake an entire broken DB session - then checks
-    both new detectability traces: an error-level log carrying the full
-    would-be row, and the cumulative Redis counters."""
+async def test_log_llm_usage_transient_db_failure_is_swallowed_and_counted(monkeypatch):
+    """Gap 1 fix (his branch) + Integration Phase 2/3a's re-composition, now
+    tested together, correctly split. A TRANSIENT failure (dropped
+    connection, exhausted pool, DB briefly unreachable -- the
+    OperationalError/InterfaceError/DBAPIError tuple log_llm_usage's except
+    clause names explicitly) must still never raise: the LLM call already
+    happened and its answer is about to be returned, so a metering blip
+    must not fail the request. It must also no longer just vanish into a
+    bare warning -- both detectability traces this test checks (an
+    error... no, a WARNING-level log for the transient case specifically,
+    see the assertion below, plus the cumulative Redis counters) must
+    fire. Forces the failure by making LlmUsageEvent's own constructor
+    raise sqlalchemy.exc.OperationalError -- enough to blow up db.add()
+    without faking an entire broken DB session -- and asserts it lands in
+    the TRANSIENT branch specifically, not the permission-denial one this
+    same fix must also prove distinct (see the sibling test below)."""
     import models.all_models as models_module
+    from sqlalchemy.exc import OperationalError
 
     class _BoomLlmUsageEvent:
         def __init__(self, *a, **k):
-            raise RuntimeError("simulated DB failure")
+            raise OperationalError("INSERT INTO llm_usage_events ...", {}, Exception("connection lost"))
 
     monkeypatch.setattr(models_module, "LlmUsageEvent", _BoomLlmUsageEvent)
 
-    logged = []
+    warned = []
+    monkeypatch.setattr(
+        llm_service_module.log, "warning",
+        lambda event, **kw: warned.append((event, kw)),
+    )
+    errored = []
     monkeypatch.setattr(
         llm_service_module.log, "error",
-        lambda event, **kw: logged.append((event, kw)),
+        lambda event, **kw: errored.append((event, kw)),
     )
 
-    tenant_id = f"gap1-test-{uuid.uuid4().hex[:8]}"
+    tenant_id = f"gap1-transient-test-{uuid.uuid4().hex[:8]}"
     redis = llm_service_module._redis()
     dropped_key = f"llm_usage_meter:dropped_events:{tenant_id}"
     tokens_key = f"llm_usage_meter:dropped_tokens:{tenant_id}"
     await redis.delete(dropped_key, tokens_key)
 
+    # The core contract: must not raise.
     await llm_service_module.log_llm_usage(
         tenant_id=tenant_id, request_type="agent_chat",
         provider="gemini", model="gemini-3.5-flash", used_fallback=False,
@@ -236,12 +251,15 @@ async def test_log_llm_usage_swallows_db_failure_but_leaves_it_detectable(monkey
         usage_metadata={"input_tokens": 5, "output_tokens": 7, "total_tokens": 12},
     )
 
-    assert len(logged) == 1
-    event, kw = logged[0]
-    assert event == "log_llm_usage_dropped"
+    # Landed in the transient branch (log.warning), not the permission-
+    # denial one (log.error) -- and the Redis counter fired, which the
+    # permission-denial branch deliberately does not do (see sibling test).
+    assert len(warned) == 1
+    event, kw = warned[0]
+    assert event == "log_llm_usage.transient_failure"
     assert kw["tenant_id"] == tenant_id
-    assert kw["total_tokens"] == 12
     assert kw["request_type"] == "agent_chat"
+    assert errored == []
 
     assert await redis.get(dropped_key) == "1"
     assert await redis.get(tokens_key) == "12"
@@ -249,15 +267,18 @@ async def test_log_llm_usage_swallows_db_failure_but_leaves_it_detectable(monkey
 
 
 @pytest.mark.asyncio
-async def test_log_llm_usage_still_swallows_if_redis_counter_also_fails(monkeypatch):
-    """Belt-and-suspenders: if Redis is ALSO down when the DB write fails,
-    log_llm_usage() must still never raise - it's best-effort logging on
-    top of best-effort logging, all the way down."""
+async def test_log_llm_usage_still_swallows_transient_failure_if_redis_counter_also_fails(monkeypatch):
+    """Belt-and-suspenders: if Redis is ALSO down when a TRANSIENT DB write
+    failure happens, log_llm_usage() must still never raise - it's
+    best-effort logging on top of best-effort logging, all the way down.
+    (Not applicable to the permission-denial branch, which never touches
+    Redis at all - see the dedicated permission-denial test.)"""
     import models.all_models as models_module
+    from sqlalchemy.exc import OperationalError
 
     class _BoomLlmUsageEvent:
         def __init__(self, *a, **k):
-            raise RuntimeError("simulated DB failure")
+            raise OperationalError("INSERT INTO llm_usage_events ...", {}, Exception("connection lost"))
 
     monkeypatch.setattr(models_module, "LlmUsageEvent", _BoomLlmUsageEvent)
 
@@ -276,3 +297,63 @@ async def test_log_llm_usage_still_swallows_if_redis_counter_also_fails(monkeypa
         latency_ms=10, success=True,
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
+
+
+@pytest.mark.asyncio
+async def test_log_llm_usage_permission_denial_reraises_and_is_not_counted_as_a_drop(monkeypatch):
+    """Integration Phase 4 item 3: the other half of the composition this
+    merge is responsible for keeping intact. A permission/RLS denial
+    (InsufficientPrivilege, surfaced here as any exception OTHER than the
+    transient tuple above) is NOT a hiccup -- it means the usage meter
+    would otherwise silently go blank while every real request kept
+    succeeding, and since this table drives quota enforcement and billing
+    figures, that gap must be loud, not swallowed. This must (a) raise,
+    so the failure is impossible to miss, and (b) NOT increment the
+    dropped-event Redis counter -- that counter exists to answer "how many
+    routine transient blips happened," and a security-relevant permission
+    failure counted alongside them would under-represent exactly the
+    class of event most worth noticing."""
+    import models.all_models as models_module
+
+    class _BoomLlmUsageEvent:
+        def __init__(self, *a, **k):
+            raise PermissionError("simulated InsufficientPrivilege from an RLS denial")
+
+    monkeypatch.setattr(models_module, "LlmUsageEvent", _BoomLlmUsageEvent)
+
+    errored = []
+    monkeypatch.setattr(
+        llm_service_module.log, "error",
+        lambda event, **kw: errored.append((event, kw)),
+    )
+    warned = []
+    monkeypatch.setattr(
+        llm_service_module.log, "warning",
+        lambda event, **kw: warned.append((event, kw)),
+    )
+
+    tenant_id = f"gap1-permission-denial-test-{uuid.uuid4().hex[:8]}"
+    redis = llm_service_module._redis()
+    dropped_key = f"llm_usage_meter:dropped_events:{tenant_id}"
+    tokens_key = f"llm_usage_meter:dropped_tokens:{tenant_id}"
+    await redis.delete(dropped_key, tokens_key)
+
+    with pytest.raises(PermissionError):
+        await llm_service_module.log_llm_usage(
+            tenant_id=tenant_id, request_type="agent_chat",
+            provider="gemini", model="gemini-3.5-flash", used_fallback=False,
+            latency_ms=10, success=True,
+            usage_metadata={"input_tokens": 5, "output_tokens": 7, "total_tokens": 12},
+        )
+
+    assert len(errored) == 1
+    event, kw = errored[0]
+    assert event == "log_llm_usage.write_failed"
+    assert kw["tenant_id"] == tenant_id
+    assert kw["error_type"] == "PermissionError"
+    assert warned == []
+
+    # The dropped-event counter must NOT have fired for this -- a
+    # permission denial is not "routine drop noise."
+    assert await redis.get(dropped_key) is None
+    assert await redis.get(tokens_key) is None
