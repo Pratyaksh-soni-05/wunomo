@@ -75,6 +75,7 @@ from models.approval_model import ApprovalRequest
 from services.channel_routing import find_active_agent_in_tenant, resolve_mentioned_agent
 from services.llm_service import invoke_llm
 from services.tenant_context import async_tenant_context
+from services import pii_classifier, prompt_guard
 
 # One live-progress callback signature, shared by every node/helper below
 # that can emit a mid-run SSE-shaped event: (event_type, data) -> None.
@@ -949,7 +950,31 @@ async def _write_handoffs_for_completion(
     existing as a side record. Dependents were already SUPERVISOR_QUEUED
     (never blocked by a mere in-progress predecessor) -- "release" here
     means _find_ready_task_ids will now see them as ready, not a status
-    change on the dependent itself."""
+    change on the dependent itself.
+
+    Integration Phase 4 item 2: agent A's output_text used to be
+    concatenated into agent B's goal completely unwrapped, as trusted
+    text -- exactly the gap Phase 1 flagged. output_text can carry
+    anything the underlying tool/source produced (E1's own finding: a
+    poisoned column name reaching generate_sql() via nothing more than an
+    ordinary profiled schema), and until this fix nothing stood between
+    that and agent B's own prompt. Two passes now run before it goes
+    anywhere, same mechanisms Item #6/#10 already established, not
+    reinvented:
+      - pii_classifier.redact_free_text() masks PII-shaped substrings
+        (reusing VALUE_DETECTORS, not a second pattern set) -- its
+        findings populate Handoff.withheld for real, instead of the
+        permanent [] the field was hardcoded to before.
+      - prompt_guard.wrap("tool_result", ...) marks the (already PII-
+        redacted) text as untrusted data the same way any other tool
+        result is marked before it reaches a prompt -- agent B's own
+        system prompt already tells it text in a <tool_result> tag is
+        data, never an instruction, regardless of what it claims.
+    from_agent_name also goes through prompt_guard.sanitize_identifier()
+    -- the plain "[Handoff from X]" framing was itself the exact
+    bracket-authority shape Item #6's A4 finding showed the model had
+    been taught to trust; replaced with unbracketed prose plus the
+    recognised tag."""
     r = await db.execute(select(Task).where(
         Task.depends_on_task_id == completed_task.id, Task.status == TaskStatus.SUPERVISOR_QUEUED,
     ))
@@ -959,9 +984,14 @@ async def _write_handoffs_for_completion(
 
     from_step = (await db.execute(select(TaskStep).where(TaskStep.task_id == completed_task.id))).scalars().first()
     from_agent = await db.get(AgentInstance, completed_task.agent_id)
-    output_text = from_step.outcome_summary or ""
-    summary = output_text if len(output_text) <= 200 else output_text[:200].rstrip() + "…"
-    from_agent_name = from_agent.name if from_agent is not None else completed_task.agent_id
+    raw_output_text = from_step.outcome_summary or ""
+    output_text, pii_withheld = pii_classifier.redact_free_text(raw_output_text)
+    wrapped_output = prompt_guard.wrap("tool_result", output_text)
+    summary_source = prompt_guard.neutralize_markup(output_text)
+    summary = summary_source if len(summary_source) <= 200 else summary_source[:200].rstrip() + "…"
+    from_agent_name = prompt_guard.sanitize_identifier(
+        from_agent.name if from_agent is not None else completed_task.agent_id
+    )
 
     handoff_ids = []
     for dep in dependents:
@@ -969,12 +999,12 @@ async def _write_handoffs_for_completion(
             tenant_id=tenant_id, channel_id=channel_id, project_id=project_id,
             from_agent_id=completed_task.agent_id, to_agent_id=dep.agent_id,
             from_task_id=completed_task.id, to_task_id=dep.id,
-            payload_summary=summary, payload_ref=from_step.id, withheld=[],
+            payload_summary=summary, payload_ref=from_step.id, withheld=pii_withheld,
         )
         db.add(handoff)
         await db.flush()
         handoff_ids.append(handoff.id)
-        dep.goal = dep.goal + f"\n\n[Handoff from {from_agent_name}]\n{output_text}"
+        dep.goal = dep.goal + f"\n\nHandoff from {from_agent_name}:\n{wrapped_output}"
     await db.commit()
     return handoff_ids
 

@@ -222,6 +222,53 @@ VALUE_DETECTORS = (
 )
 
 
+# ── Free-text scanning (Integration Phase 4, item 2) ────────────────────────
+#
+# Everything above classifies a COLUMN from its name and a sample of whole
+# cell values -- each candidate is tested as a complete string against an
+# anchored (^...$) pattern, which is right for "is this cell an email" but
+# wrong for "does this paragraph of agent-generated prose CONTAIN an email
+# somewhere in it." A supervisor handoff (modules/orchestration/supervisor.py)
+# writes one agent's free-text task output into another agent's prompt, with
+# no column schema to classify by name at all -- only prose. Rather than a
+# second, separately-maintained set of PII patterns for that shape, this
+# reuses VALUE_DETECTORS' exact regexes/Luhn check/thresholds, applied
+# per-token instead of per-column-sample.
+#
+# Known, accepted limitation, stated rather than silently missed: phone
+# numbers and card numbers written with internal spaces ("555 123 4567",
+# "4111 1111 1111 1111") span more than one whitespace-delimited token, so a
+# per-token scan won't catch the spaced form -- only compact/hyphenated forms
+# ("555-123-4567"). SSN, email and IPv4 have no legitimate internal-space
+# form, so those three are caught regardless of how they're written. This is
+# a defense-in-depth layer on free text an agent generated, not the primary
+# PII boundary -- that remains Item #10's column-level enforcement, which
+# already ran before any of this text ever reached an LLM's context in the
+# first place.
+_TOKEN = re.compile(r"\S+")
+
+
+def redact_free_text(text: str) -> tuple[str, list[str]]:
+    """Mask PII-shaped substrings in free text. Returns (redacted_text,
+    labels_found) -- labels_found is exactly what a caller like a Handoff
+    row's `withheld` column should record."""
+    if not text:
+        return text, []
+    found: set[str] = set()
+
+    def _redact_token(m: "re.Match") -> str:
+        token = m.group(0)
+        stripped = token.strip(".,;:!?()[]{}\"'")
+        for label, detect in VALUE_DETECTORS:
+            if detect(stripped):
+                found.add(label)
+                return token.replace(stripped, MASK)
+        return token
+
+    redacted = _TOKEN.sub(_redact_token, text)
+    return redacted, sorted(found)
+
+
 # ── Name analysis ────────────────────────────────────────────────────────────
 
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
