@@ -12,6 +12,9 @@ app code (see Repo Layout below).
 **Read `docs/context/` before assuming this file has the full picture** — it doesn't anymore,
 by design. See "Deeper History" at the bottom.
 
+**Before starting any blueprint/platform stage, read `docs/context/STAGE_OWNERSHIP.md`.** If it
+lists a prerequisite that doesn't exist yet in the code, stop and report — don't improvise it.
+
 ---
 
 ## Stack
@@ -27,10 +30,17 @@ by design. See "Deeper History" at the bottom.
   Frontend visual work: see `design/CLAUDE_CODE_BRIEF_full_frontend.md`. Palette, button
   tiers, and motion rules are specified there — do not improvise colours or add animation
   libraries.
-- **Auth/tenancy:** JWT-based, multi-tenant **by convention, not enforcement** — every query
-  against tenant-owned data must manually filter `WHERE tenant_id = ...`; nothing in the
-  framework does this for you. Treat "did this query get tenant-scoped?" as a mandatory
-  review question on every new query.
+- **Auth/tenancy:** JWT-based, multi-tenant **enforced by Postgres Row-Level Security**, not just
+  convention — every tenant-scoped table has RLS `ENABLE`d + `FORCE`d with a `tenant_isolation`
+  policy (migration `b7d419e3f2a8`, extended by `aa4569de4785`), and the app connects as the
+  unprivileged `dataops_app` role (no `BYPASSRLS`) so the policy can't be sidestepped. The policy
+  reads `app.current_tenant_id`, set per request by `TenantContextMiddleware` (HTTP) or explicitly
+  via `tenant_context()`/`async_tenant_context()`/`with_tenant_context()` (`services/tenant_context.py`)
+  for Celery/background work — a session with no context established sees zero rows, fails closed,
+  never a cross-tenant leak. `tests/test_rls_coverage_guard.py` and
+  `tests/test_celery_tenant_context_guard.py` enforce this structurally: any new tenant_id table
+  without RLS, or any new Celery task that never establishes tenant context, fails these tests.
+  See `docs/context/GOTCHAS.md`'s five-instance pattern for why this exists.
 
 ## Repo layout
 
