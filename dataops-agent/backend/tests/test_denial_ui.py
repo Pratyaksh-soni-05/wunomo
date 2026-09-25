@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 import modules.orchestration.task_executor as executor_module
 import modules.reporting.notification_service as notification_service_module
-from database import AsyncSessionLocal
+from services.tenant_context import async_tenant_context, tenant_session
 from models.all_models import (
     AgentEmployeeType, AgentInstance, AgentInstanceStatus, AgentSource, DataSource, Incident,
     IncidentStatus, OperationMode, PersonalityMode, SourceType, Task, TaskShape, TaskStatus,
@@ -41,7 +41,7 @@ def _auth(token):
 
 
 async def _make_source(tenant_id: str, name="Source") -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(id=str(uuid.uuid4()), tenant_id=tenant_id, name=name, source_type=SourceType.POSTGRES, connection_config={})
         db.add(source)
         await db.commit()
@@ -49,7 +49,7 @@ async def _make_source(tenant_id: str, name="Source") -> str:
 
 
 async def _make_agent(tenant_id: str, name="Nova") -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         agent = AgentInstance(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name, employee_type=AgentEmployeeType.DATAOPS,
             personality=PersonalityMode.ENGINEER, operation_mode=OperationMode.ASSISTED,
@@ -76,7 +76,7 @@ def _spy_urlopen(monkeypatch, captured: list):
 
 
 async def _seed_task(tenant_id, user_id, agent_id, tool_name, tool_args, created_ids):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, agent_id=agent_id,
             goal="Sync the warehouse", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -85,7 +85,7 @@ async def _seed_task(tenant_id, user_id, agent_id, tool_name, tool_args, created
         db.add(task)
         await db.flush()
         step = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=0, description="sync it",
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=tenant_id, step_index=0, description="sync it",
             source=TaskStepSource.LLM_PLANNED, tool_name=tool_name, tool_args=tool_args,
             status=TaskStepStatus.PENDING,
         )
@@ -115,7 +115,8 @@ async def test_scope_denied_task_step_pause_reason_names_unresumable(client, cre
     agent_id = await _make_agent(tenant_id, "Nova")
     task_id = await _seed_task(tenant_id, user_id, agent_id, "sync_source", {"source_id": source_id}, created_task_ids)
 
-    outcome = await execute_next_step(task_id)
+    async with async_tenant_context(tenant_id):
+        outcome = await execute_next_step(task_id)
     assert outcome["outcome"] == "blocked_permission"
 
     resp = await client.get(f"/api/v1/tasks/{task_id}", headers=_auth(token))
@@ -135,7 +136,8 @@ async def test_scope_denied_task_serializes_grant_ids_for_a_real_link(client, cr
     agent_id = await _make_agent(tenant_id, "Nova")
     task_id = await _seed_task(tenant_id, user_id, agent_id, "sync_source", {"source_id": source_id}, created_task_ids)
 
-    await execute_next_step(task_id)
+    async with async_tenant_context(tenant_id):
+        await execute_next_step(task_id)
 
     resp = await client.get(f"/api/v1/tasks/{task_id}", headers=_auth(token))
     body = resp.json()
@@ -151,7 +153,8 @@ async def test_non_scope_pause_has_no_scope_denial_ids(client, created_task_ids)
     # get_system_health is NOT_SOURCE_SCOPED -- always allowed, real success.
     task_id = await _seed_task(tenant_id, user_id, agent_id, "get_system_health", {}, created_task_ids)
 
-    await execute_next_step(task_id)
+    async with async_tenant_context(tenant_id):
+        await execute_next_step(task_id)
 
     resp = await client.get(f"/api/v1/tasks/{task_id}", headers=_auth(token))
     assert resp.json()["scope_denial"] is None
@@ -179,7 +182,8 @@ async def test_scope_denial_notifies_with_the_fix_and_the_consequence(client, mo
         return orig_urlopen(req, timeout=timeout)
     monkeypatch.setattr(notification_service_module.urllib.request, "urlopen", spy_and_capture_payload)
 
-    await execute_next_step(task_id)
+    async with async_tenant_context(tenant_id):
+        await execute_next_step(task_id)
 
     assert len(captured_urls) == 1
     message_text = json.dumps(captured_payloads[0])
@@ -205,12 +209,13 @@ async def test_scope_denial_notification_deduped_across_tasks(client, monkeypatc
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    await execute_next_step(task_a)
-    await execute_next_step(task_b)
+    async with async_tenant_context(tenant_id):
+        await execute_next_step(task_a)
+        await execute_next_step(task_b)
 
     assert len(captured) == 1, "one real (agent, source) cause must produce exactly one alert, not one per task"
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Incident).where(
             Incident.tenant_id == tenant_id, Incident.status == IncidentStatus.OPEN, Incident.title.like("Scope gap:%"),
         ))
@@ -235,8 +240,9 @@ async def test_scope_denial_notification_not_deduped_across_different_causes(cli
     captured: list = []
     _spy_urlopen(monkeypatch, captured)
 
-    await execute_next_step(task_a)
-    await execute_next_step(task_b)
+    async with async_tenant_context(tenant_id):
+        await execute_next_step(task_a)
+        await execute_next_step(task_b)
 
     assert len(captured) == 2
 
@@ -250,7 +256,7 @@ async def test_notify_scope_denial_once_is_best_effort(client, monkeypatch):
     agent_id = await _make_agent(tenant_id, "Nova")
     source_id = await _make_source(tenant_id, "Warehouse")
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, agent_id=agent_id,
             goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -267,7 +273,8 @@ async def test_notify_scope_denial_once_is_best_effort(client, monkeypatch):
         "message": "denied", "agent_id": agent_id, "agent_name": "Nova",
         "source_id": source_id, "source_name": "Warehouse", "tool_name": "sync_source",
     }
-    await _notify_scope_denial_once(task, scope_denial)  # must not raise
+    async with async_tenant_context(tenant_id):
+        await _notify_scope_denial_once(task, scope_denial)  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +314,7 @@ async def test_quota_paused_reason_reflects_real_agent_budget_cause_not_hardcode
     token, tenant_id, user_id = await _register(client, "denialI")
     agent_id = await _make_agent(tenant_id, "Nova")
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, agent_id=agent_id,
             goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -316,7 +323,7 @@ async def test_quota_paused_reason_reflects_real_agent_budget_cause_not_hardcode
         db.add(task)
         await db.flush()
         step = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=0, description="check health",
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=tenant_id, step_index=0, description="check health",
             source=TaskStepSource.LLM_PLANNED, tool_name="get_system_health", tool_args={},
             status=TaskStepStatus.PENDING, attempt_count=1,
             error_message="Paused: this agent's monthly token budget (5000/5000 tokens) is exhausted.",

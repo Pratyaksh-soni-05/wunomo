@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy import select
 
 import modules.reporting.notification_service as notification_service_module
-from database import AsyncSessionLocal
+from services.tenant_context import async_tenant_context, tenant_session
 from models.all_models import (
     AgentEmployeeType, AgentInstance, AgentInstanceStatus, DataSource, OperationMode,
     PersonalityMode, ScheduledAgentTask, SourceType, Task, TaskShape, TaskStatus,
@@ -58,7 +58,7 @@ async def _register(client, prefix="schedagent"):
 
 
 async def _member(tenant_id, role, prefix="member"):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         user = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id,
             email=f"{prefix}-{uuid.uuid4().hex[:8]}@example.com",
@@ -71,7 +71,7 @@ async def _member(tenant_id, role, prefix="member"):
 
 
 async def _hire_agent(tenant_id, name="Scheduler Agent"):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         agent = AgentInstance(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name, employee_type=AgentEmployeeType.DATAOPS,
             personality=PersonalityMode.ENGINEER, operation_mode=OperationMode.ASSISTED,
@@ -83,7 +83,7 @@ async def _hire_agent(tenant_id, name="Scheduler Agent"):
 
 
 async def _create_source(tenant_id, name="Marketing Warehouse"):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name,
             source_type=SourceType.POSTGRES, connection_config={"host": "postgres"},
@@ -96,7 +96,7 @@ async def _create_source(tenant_id, name="Marketing Warehouse"):
 async def _create_schedule(
     tenant_id, agent_id, owner_user_id, tool_args, active=True, schedule_cron="0 3 * * *", **overrides,
 ):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         schedule = ScheduledAgentTask(
             id=str(uuid.uuid4()), tenant_id=tenant_id, agent_id=agent_id, created_by_user_id=owner_user_id,
             task_shape=TaskShape.SYNC_PROFILE_QUALITY, description="Nightly sync",
@@ -108,14 +108,14 @@ async def _create_schedule(
         return schedule.id
 
 
-async def _get_schedule(schedule_id):
-    async with AsyncSessionLocal() as db:
+async def _get_schedule(tenant_id, schedule_id):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ScheduledAgentTask).where(ScheduledAgentTask.id == schedule_id))
         return r.scalar_one()
 
 
-async def _set_user(user_id, **fields):
-    async with AsyncSessionLocal() as db:
+async def _set_user(tenant_id, user_id, **fields):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         for k, v in fields.items():
@@ -300,7 +300,7 @@ async def test_reactivate_fails_again_when_cause_still_true(client):
     assert r.status_code == 400
     assert "no longer exists" in r.json()["detail"]
 
-    schedule = await _get_schedule(schedule_id)
+    schedule = await _get_schedule(tenant_id, schedule_id)
     assert schedule.active is False  # unchanged -- reactivation did not silently succeed
 
 
@@ -317,11 +317,11 @@ async def test_reactivate_succeeds_once_cause_is_fixed(client):
         tenant_id, agent_id, analyst_id, {"source_id": source_id}, active=False,
         deactivation_reason="lost permission",
     )
-    await _set_user(analyst_id, role="viewer")  # confirm it would still fail
+    await _set_user(tenant_id, analyst_id, role="viewer")  # confirm it would still fail
     r = await client.post(f"/api/v1/agents/{agent_id}/schedules/{schedule_id}/reactivate", headers=_auth(token))
     assert r.status_code == 400
 
-    await _set_user(analyst_id, role="data_analyst")  # restore -- now it should pass
+    await _set_user(tenant_id, analyst_id, role="data_analyst")  # restore -- now it should pass
     r = await client.post(f"/api/v1/agents/{agent_id}/schedules/{schedule_id}/reactivate", headers=_auth(token))
     assert r.status_code == 200
     assert r.json()["active"] is True
@@ -351,7 +351,7 @@ async def test_delete_schedule_succeeds_and_preserves_existing_tasks(client):
     agent_id = await _hire_agent(tenant_id)
     schedule_id = await _create_schedule(tenant_id, agent_id, user_id, {})
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, agent_id=agent_id,
             originating_schedule_id=schedule_id, goal="Nightly sync", task_shape=TaskShape.SYNC_PROFILE_QUALITY,
@@ -365,7 +365,7 @@ async def test_delete_schedule_succeeds_and_preserves_existing_tasks(client):
     assert r.status_code == 200
     assert r.json()["deleted"] is True
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ScheduledAgentTask).where(ScheduledAgentTask.id == schedule_id))
         assert r.scalar_one_or_none() is None
         # The task itself survives, untouched, only losing the back-reference.
@@ -395,11 +395,12 @@ async def test_fire_creates_a_queued_task_with_a_single_scheduled_step(client):
     source_id = await _create_source(tenant_id)
     schedule_id = await _create_schedule(tenant_id, agent_id, user_id, {"source_id": source_id})
 
-    outcome = await fire_scheduled_task(schedule_id)
+    async with async_tenant_context(tenant_id):
+        outcome = await fire_scheduled_task(schedule_id, tenant_id)
     assert outcome["outcome"] == "fired"
     task_id = outcome["task_id"]
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         assert task.status == TaskStatus.QUEUED
@@ -415,7 +416,7 @@ async def test_fire_creates_a_queued_task_with_a_single_scheduled_step(client):
         assert step.tool_args == {"source_id": source_id}
         assert step.status == TaskStepStatus.PENDING
 
-    schedule = await _get_schedule(schedule_id)
+    schedule = await _get_schedule(tenant_id, schedule_id)
     assert schedule.last_fired_at is not None
 
 
@@ -429,13 +430,15 @@ async def test_fire_skips_without_creating_a_task_while_previous_run_is_non_term
     source_id = await _create_source(tenant_id)
     schedule_id = await _create_schedule(tenant_id, agent_id, user_id, {"source_id": source_id})
 
-    first = await fire_scheduled_task(schedule_id)
+    async with async_tenant_context(tenant_id):
+        first = await fire_scheduled_task(schedule_id, tenant_id)
     assert first["outcome"] == "fired"
 
-    second = await fire_scheduled_task(schedule_id)
+    async with async_tenant_context(tenant_id):
+        second = await fire_scheduled_task(schedule_id, tenant_id)
     assert second["outcome"] == "skipped_overlap"
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.originating_schedule_id == schedule_id))
         assert len(r.scalars().all()) == 1  # still just the one
 
@@ -447,14 +450,16 @@ async def test_fire_fires_again_once_previous_run_reaches_a_terminal_status(clie
     source_id = await _create_source(tenant_id)
     schedule_id = await _create_schedule(tenant_id, agent_id, user_id, {"source_id": source_id})
 
-    first = await fire_scheduled_task(schedule_id)
-    async with AsyncSessionLocal() as db:
+    async with async_tenant_context(tenant_id):
+        first = await fire_scheduled_task(schedule_id, tenant_id)
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == first["task_id"]))
         task = r.scalar_one()
         task.status = TaskStatus.COMPLETED
         await db.commit()
 
-    second = await fire_scheduled_task(schedule_id)
+    async with async_tenant_context(tenant_id):
+        second = await fire_scheduled_task(schedule_id, tenant_id)
     assert second["outcome"] == "fired"
     assert second["task_id"] != first["task_id"]
 
@@ -465,10 +470,11 @@ async def test_fire_is_a_noop_for_an_already_inactive_schedule(client):
     agent_id = await _hire_agent(tenant_id)
     schedule_id = await _create_schedule(tenant_id, agent_id, user_id, {}, active=False)
 
-    outcome = await fire_scheduled_task(schedule_id)
+    async with async_tenant_context(tenant_id):
+        outcome = await fire_scheduled_task(schedule_id, tenant_id)
     assert outcome["outcome"] == "not_found_or_inactive"
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.originating_schedule_id == schedule_id))
         assert r.first() is None
 
@@ -485,15 +491,16 @@ async def test_fire_deactivates_and_notifies_when_owner_is_deactivated(client, m
     analyst_token, analyst_id = await _member(tenant_id, "data_analyst", "fireownerdeadowner")
     source_id = await _create_source(tenant_id)
     schedule_id = await _create_schedule(tenant_id, agent_id, analyst_id, {"source_id": source_id})
-    await _set_user(analyst_id, is_active=False)
+    await _set_user(tenant_id, analyst_id, is_active=False)
 
     captured = []
     _spy_urlopen(monkeypatch, captured)
 
-    outcome = await fire_scheduled_task(schedule_id)
+    async with async_tenant_context(tenant_id):
+        outcome = await fire_scheduled_task(schedule_id, tenant_id)
     assert outcome == {"outcome": "deactivated", "cause": "owner_inactive"}
 
-    schedule = await _get_schedule(schedule_id)
+    schedule = await _get_schedule(tenant_id, schedule_id)
     assert schedule.active is False
     assert "no longer an active member" in schedule.deactivation_reason
     assert "Fix:" in schedule.deactivation_reason
@@ -504,7 +511,7 @@ async def test_fire_deactivates_and_notifies_when_owner_is_deactivated(client, m
     assert "owner_inactive" in payload_text
 
     # No task was created for a run that can't proceed.
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.originating_schedule_id == schedule_id))
         assert r.first() is None
 
@@ -516,15 +523,16 @@ async def test_fire_deactivates_and_notifies_when_owner_loses_permission(client,
     analyst_token, analyst_id = await _member(tenant_id, "data_analyst", "fireownerpermowner")
     source_id = await _create_source(tenant_id)
     schedule_id = await _create_schedule(tenant_id, agent_id, analyst_id, {"source_id": source_id})
-    await _set_user(analyst_id, role="viewer")  # viewer lacks sources.profile
+    await _set_user(tenant_id, analyst_id, role="viewer")  # viewer lacks sources.profile
 
     captured = []
     _spy_urlopen(monkeypatch, captured)
 
-    outcome = await fire_scheduled_task(schedule_id)
+    async with async_tenant_context(tenant_id):
+        outcome = await fire_scheduled_task(schedule_id, tenant_id)
     assert outcome == {"outcome": "deactivated", "cause": "owner_permission"}
 
-    schedule = await _get_schedule(schedule_id)
+    schedule = await _get_schedule(tenant_id, schedule_id)
     assert "no longer has permission" in schedule.deactivation_reason
     assert "sync_source" in schedule.deactivation_reason
     assert "restore their role" in schedule.deactivation_reason
@@ -544,7 +552,7 @@ async def test_fire_deactivates_and_notifies_when_agent_is_offboarded(client, mo
     # offboarding already deactivates active schedules for this agent (see
     # its own cascade test below); re-activate it here purely to exercise
     # fire_scheduled_task's OWN defensive re-check independently.
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ScheduledAgentTask).where(ScheduledAgentTask.id == schedule_id))
         schedule = r.scalar_one()
         schedule.active = True
@@ -554,10 +562,11 @@ async def test_fire_deactivates_and_notifies_when_agent_is_offboarded(client, mo
     captured = []
     _spy_urlopen(monkeypatch, captured)
 
-    outcome = await fire_scheduled_task(schedule_id)
+    async with async_tenant_context(tenant_id):
+        outcome = await fire_scheduled_task(schedule_id, tenant_id)
     assert outcome == {"outcome": "deactivated", "cause": "agent_offboarded"}
 
-    schedule = await _get_schedule(schedule_id)
+    schedule = await _get_schedule(tenant_id, schedule_id)
     assert "offboarded" in schedule.deactivation_reason
     assert "different agent" in schedule.deactivation_reason
 
@@ -572,7 +581,7 @@ async def test_fire_deactivates_and_notifies_when_source_is_deleted(client, monk
     source_id = await _create_source(tenant_id)
     schedule_id = await _create_schedule(tenant_id, agent_id, user_id, {"source_id": source_id})
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(DataSource).where(DataSource.id == source_id))
         await db.delete(r.scalar_one())
         await db.commit()
@@ -580,10 +589,11 @@ async def test_fire_deactivates_and_notifies_when_source_is_deleted(client, monk
     captured = []
     _spy_urlopen(monkeypatch, captured)
 
-    outcome = await fire_scheduled_task(schedule_id)
+    async with async_tenant_context(tenant_id):
+        outcome = await fire_scheduled_task(schedule_id, tenant_id)
     assert outcome == {"outcome": "deactivated", "cause": "source_missing"}
 
-    schedule = await _get_schedule(schedule_id)
+    schedule = await _get_schedule(tenant_id, schedule_id)
     assert "no longer exists" in schedule.deactivation_reason
     assert "source_id" in schedule.deactivation_reason
 
@@ -600,16 +610,17 @@ async def test_deactivation_notification_is_best_effort(client, monkeypatch):
     agent_id = await _hire_agent(tenant_id)
     analyst_token, analyst_id = await _member(tenant_id, "data_analyst", "firenotifyfailowner")
     schedule_id = await _create_schedule(tenant_id, agent_id, analyst_id, {})
-    await _set_user(analyst_id, is_active=False)
+    await _set_user(tenant_id, analyst_id, is_active=False)
 
     def broken_urlopen(req, timeout=10):
         raise ConnectionError("simulated notification outage")
     monkeypatch.setattr(notification_service_module.urllib.request, "urlopen", broken_urlopen)
 
-    outcome = await fire_scheduled_task(schedule_id)  # must not raise
+    async with async_tenant_context(tenant_id):
+        outcome = await fire_scheduled_task(schedule_id, tenant_id)  # must not raise
     assert outcome["outcome"] == "deactivated"
 
-    schedule = await _get_schedule(schedule_id)
+    schedule = await _get_schedule(tenant_id, schedule_id)
     assert schedule.active is False  # the real state change still happened
 
 
@@ -634,7 +645,7 @@ async def test_offboarding_deactivates_active_schedules_with_notification(client
     r = await client.post(f"/api/v1/agents/{agent_id}/offboard", headers=_auth(token))
     assert r.status_code == 200
 
-    schedule = await _get_schedule(schedule_id)
+    schedule = await _get_schedule(tenant_id, schedule_id)
     assert schedule.active is False
     assert "offboarded" in schedule.deactivation_reason
 
@@ -652,8 +663,8 @@ async def test_offboarding_does_not_touch_other_agents_schedules(client):
 
     await client.post(f"/api/v1/agents/{agent_id}/offboard", headers=_auth(token))
 
-    assert (await _get_schedule(schedule_id)).active is False
-    assert (await _get_schedule(other_schedule_id)).active is True
+    assert (await _get_schedule(tenant_id, schedule_id)).active is False
+    assert (await _get_schedule(tenant_id, other_schedule_id)).active is True
 
 
 @pytest.mark.asyncio
@@ -664,7 +675,7 @@ async def test_offboarding_still_blocked_by_non_terminal_task_regardless_of_acti
     token, tenant_id, user_id = await _register(client, "offboardstillblocked")
     agent_id = await _hire_agent(tenant_id)
     await _create_schedule(tenant_id, agent_id, user_id, {})
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, agent_id=agent_id,
             goal="still running", task_shape=TaskShape.SYNC_PROFILE_QUALITY,
@@ -694,7 +705,7 @@ async def test_check_scheduled_agent_tasks_fires_matching_cron_and_skips_others(
     fired = []
 
     class FakeDelay:
-        def delay(self, schedule_id):
+        def delay(self, schedule_id, tenant_id):
             fired.append(schedule_id)
     monkeypatch.setattr(tasks_module, "fire_scheduled_agent_task", FakeDelay())
 
@@ -724,7 +735,7 @@ async def test_check_scheduled_agent_tasks_invalid_cron_does_not_crash(client, m
     fired = []
 
     class FakeDelay:
-        def delay(self, schedule_id):
+        def delay(self, schedule_id, tenant_id):
             fired.append(schedule_id)
     monkeypatch.setattr(tasks_module, "fire_scheduled_agent_task", FakeDelay())
 

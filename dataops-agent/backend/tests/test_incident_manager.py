@@ -3,7 +3,6 @@ import pytest
 from unittest.mock import AsyncMock
 from langchain_core.messages import AIMessage
 
-from database import AsyncSessionLocal
 from models.all_models import Incident, IncidentStatus, IncidentSeverity, LlmUsageEvent
 from modules.observability.incident_manager import IncidentManager
 from services.llm_service import LLMService
@@ -193,7 +192,7 @@ async def test_triage_incident_tool_threads_task_id_and_user_id_to_a_real_usage_
     })
     assert "error" not in result
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(
             select(LlmUsageEvent).where(
                 LlmUsageEvent.tenant_id == tenant_id, LlmUsageEvent.request_type == "incident_triage",

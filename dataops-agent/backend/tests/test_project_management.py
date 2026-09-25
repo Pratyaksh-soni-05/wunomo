@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy import select
 
 import api.v1.chat as chat_module
-from database import AsyncSessionLocal
+from services.tenant_context import tenant_session
 from models.all_models import ProjectAgent, User
 from services.auth_service import hash_password, issue_token_for_user
 from tests.test_channels import _fake_run_agent
@@ -37,7 +37,7 @@ def _auth(token):
 
 
 async def _viewer(tenant_id, prefix="viewer"):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         user = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id,
             email=f"{prefix}-{uuid.uuid4().hex[:8]}@example.com",
@@ -185,7 +185,7 @@ async def test_delete_project_agents_survive_as_unassigned(client):
     nova_id = await _hire_agent(client, token, "Nova", project_id=project_id)
     atlas_id = await _hire_agent(client, token, "Atlas", project_id=project_id)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ProjectAgent).where(ProjectAgent.project_id == project_id))
         assert len(r.scalars().all()) == 2, "sanity check: both agents actually joined the project"
 
@@ -193,7 +193,7 @@ async def test_delete_project_agents_survive_as_unassigned(client):
     assert r.status_code == 200, r.text
     assert r.json() == {"id": project_id, "deleted": True}
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ProjectAgent).where(ProjectAgent.project_id == project_id))
         assert r.scalars().all() == [], "ProjectAgent rows must be cleared, not orphaned pointing at a dead project"
 

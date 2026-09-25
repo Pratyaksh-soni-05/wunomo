@@ -11,14 +11,13 @@ import agent.dataops_agent as dataops_agent
 from agent.dataops_agent import get_agent
 from services.settings_service import get_ai_model_override
 from services import llm_service as llm_service_module
-from database import AsyncSessionLocal
 from models.all_models import (
     AgentEmployeeType, AgentInstance, AgentInstanceStatus, LlmUsageEvent,
     OperationMode, PersonalityMode, Tenant,
 )
 from sqlalchemy import select
 from tests.test_agent_graph import FakeToolCallLLM, fake_echo_tool, _tool_call_then_final_responses
-from services.tenant_context import tenant_session
+from services.tenant_context import async_tenant_context, tenant_session
 from services import settings_service
 
 # These tests exercise cache KEYING, which needs two distinct override values.
@@ -185,7 +184,7 @@ async def test_get_ai_model_override_returns_valid_override(client):
 
 
 async def _create_agent_instance(tenant_id, **overrides):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         instance = AgentInstance(
             tenant_id=tenant_id, name=overrides.get("name", "Nova"),
             employee_type=overrides.get("employee_type", AgentEmployeeType.DATAOPS),
@@ -210,7 +209,7 @@ async def test_run_agent_with_agent_id_uses_the_agents_own_config_not_request_de
     must introduce the agent by its real name, not "AXIOM"."""
     dataops_agent._cache.clear()
     tenant_id = await _register_tenant(client, "agentauth")
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
         tenant = r.scalar_one()
         tenant.settings = {"ai_model_override": "gemini-3.5-flash"}  # must be overridden by the agent's own model
@@ -228,10 +227,11 @@ async def test_run_agent_with_agent_id_uses_the_agents_own_config_not_request_de
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_echo_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
 
-    final = await dataops_agent.run_agent(
-        user_message="please echo hi", tenant_id=tenant_id, user_id="u1", session_id="s1", caller_role="owner",
-        agent_id=instance.id,
-    )
+    async with async_tenant_context(tenant_id):
+        final = await dataops_agent.run_agent(
+            user_message="please echo hi", tenant_id=tenant_id, user_id="u1", session_id="s1", caller_role="owner",
+            agent_id=instance.id,
+        )
 
     assert captured["primary_model"] == "openai/gpt-oss-120b"
     system_messages = [m for m in final["messages"] if hasattr(m, "content") and "Nova" in str(m.content)]
@@ -269,12 +269,13 @@ async def test_run_agent_with_agent_id_logs_the_real_agent_id_on_the_usage_row(c
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {"fake_echo_tool": "view"})
     monkeypatch.setattr(dataops_agent, "requires_approval", lambda action, mode: False)
 
-    await dataops_agent.run_agent(
-        user_message="hi", tenant_id=tenant_id, user_id="u1", session_id="s1", caller_role="owner",
-        agent_id=instance.id,
-    )
+    async with async_tenant_context(tenant_id):
+        await dataops_agent.run_agent(
+            user_message="hi", tenant_id=tenant_id, user_id="u1", session_id="s1", caller_role="owner",
+            agent_id=instance.id,
+        )
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(LlmUsageEvent).where(LlmUsageEvent.tenant_id == tenant_id))
         events = r.scalars().all()
     assert len(events) == 1
@@ -315,14 +316,15 @@ async def test_dataops_and_analyst_resolve_different_prompts_and_tools_from_buil
 
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", fake_get_llm_for_agent)
 
-    await dataops_agent.run_agent(
-        user_message="hi", tenant_id=tenant_id, user_id="u1", session_id="s1", caller_role="owner",
-        agent_id=dataops_instance.id,
-    )
-    await dataops_agent.run_agent(
-        user_message="hi", tenant_id=tenant_id, user_id="u2", session_id="s2", caller_role="owner",
-        agent_id=analyst_instance.id,
-    )
+    async with async_tenant_context(tenant_id):
+        await dataops_agent.run_agent(
+            user_message="hi", tenant_id=tenant_id, user_id="u1", session_id="s1", caller_role="owner",
+            agent_id=dataops_instance.id,
+        )
+        await dataops_agent.run_agent(
+            user_message="hi", tenant_id=tenant_id, user_id="u2", session_id="s2", caller_role="owner",
+            agent_id=analyst_instance.id,
+        )
 
     dataops_result, analyst_result = captured
 
@@ -362,7 +364,7 @@ async def test_editing_an_agent_row_invalidates_its_cache_entry_by_construction(
         agent_id=instance.id, agent_name=instance.name, config_version=instance.updated_at.isoformat(),
     )
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentInstance).where(AgentInstance.id == instance.id))
         row = r.scalar_one()
         row.model = "openai/gpt-oss-120b"
