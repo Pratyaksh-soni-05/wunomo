@@ -243,19 +243,35 @@ async def health_tasks():
     selects against, so this can never disagree with what the tick
     itself considers runnable. Broken down by status so a growing QUEUED
     count (plans piling up unstarted) reads differently from a growing
-    PAUSED_QUOTA_EXCEEDED one (a quota problem, not a scheduler one)."""
+    PAUSED_QUOTA_EXCEEDED one (a quota problem, not a scheduler one).
+
+    Sixth confirmed instance of the "unscoped query against an
+    RLS-protected table returns nothing" bug shape (see GOTCHAS): this
+    used a bare AsyncSessionLocal() with no tenant context and no
+    per-tenant loop, on the same `tasks` table _select_tasks_to_advance()
+    (services/tasks.py) already had to be fixed for -- this endpoint has
+    been reporting total_runnable=0 / by_status={} always, regardless of
+    the real backlog. One explicitly-scoped pass per tenant instead,
+    counts summed across all of them."""
+    from collections import Counter
     from sqlalchemy import func, select
     from database import AsyncSessionLocal
     from models.all_models import RUNNABLE_TASK_STATUSES, Task
-    from services.tasks import ADVANCE_BATCH_SIZE
+    from services.tasks import ADVANCE_BATCH_SIZE, _list_active_tenant_ids
+    from services.tenant_context import async_tenant_context
 
-    async with AsyncSessionLocal() as db:
-        r = await db.execute(
-            select(Task.status, func.count())
-            .where(Task.status.in_(RUNNABLE_TASK_STATUSES))
-            .group_by(Task.status)
-        )
-        by_status = {status.value: count for status, count in r.all()}
+    by_status_counter = Counter()
+    for tenant_id in await _list_active_tenant_ids():
+        async with async_tenant_context(tenant_id):
+            async with AsyncSessionLocal() as db:
+                r = await db.execute(
+                    select(Task.status, func.count())
+                    .where(Task.status.in_(RUNNABLE_TASK_STATUSES))
+                    .group_by(Task.status)
+                )
+                for status, count in r.all():
+                    by_status_counter[status.value] += count
+    by_status = dict(by_status_counter)
 
     total = sum(by_status.values())
     return {
