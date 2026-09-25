@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from database import AsyncSessionLocal
+from services.tenant_context import tenant_session
 from models.all_models import ChatMessage, Task, TaskShape, TaskStatus
 
 
@@ -30,7 +30,7 @@ def _auth(token):
 
 
 async def _seed_task(tenant_id, user_id, goal, originating_session_id, created_at):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, goal=goal,
             task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE, status=TaskStatus.DRAFT_PLAN,
@@ -43,7 +43,7 @@ async def _seed_task(tenant_id, user_id, goal, originating_session_id, created_a
 
 
 async def _seed_message(tenant_id, user_id, session_id, role, content, created_at):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         db.add(ChatMessage(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, session_id=session_id,
             role=role, content=content, tool_calls=[], created_at=created_at,

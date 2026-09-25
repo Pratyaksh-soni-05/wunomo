@@ -10,7 +10,7 @@ from datetime import datetime
 
 import pytest
 
-from database import AsyncSessionLocal
+from services.tenant_context import tenant_session
 from models.all_models import LlmUsageEvent
 from services.quota_service import credits_for_event, get_task_cost
 
@@ -44,7 +44,7 @@ async def _create_mocked_task(client, token, monkeypatch, goal="test goal"):
 
 
 async def _log_usage(tenant_id, task_id, input_tokens, output_tokens, reasoning_tokens=0):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         db.add(LlmUsageEvent(
             id=str(uuid.uuid4()), tenant_id=tenant_id, task_id=task_id, request_type="test",
             provider="test", model="test", used_fallback=False,
@@ -61,7 +61,7 @@ async def test_get_task_cost_aggregates_real_usage_events(client):
     await _log_usage(tenant_id, task_id, input_tokens=100, output_tokens=50, reasoning_tokens=10)
     await _log_usage(tenant_id, task_id, input_tokens=200, output_tokens=30, reasoning_tokens=0)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         cost = await get_task_cost(db, tenant_id, task_id)
 
     assert cost["llm_calls"] == 2
@@ -75,7 +75,7 @@ async def test_get_task_cost_aggregates_real_usage_events(client):
 @pytest.mark.asyncio
 async def test_get_task_cost_is_zero_for_a_task_with_no_llm_usage(client):
     token, tenant_id, _ = await _register(client, "costzero")
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         cost = await get_task_cost(db, tenant_id, str(uuid.uuid4()))
     assert cost == {
         "llm_calls": 0, "input_tokens": 0, "output_tokens": 0,
@@ -92,7 +92,7 @@ async def test_get_task_cost_is_tenant_scoped(client):
     shared_task_id = str(uuid.uuid4())
     await _log_usage(tenant_a, shared_task_id, input_tokens=1000, output_tokens=1000)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_b) as db:
         cost_b = await get_task_cost(db, tenant_b, shared_task_id)
     assert cost_b["llm_calls"] == 0
     assert cost_b["credits"] == 0

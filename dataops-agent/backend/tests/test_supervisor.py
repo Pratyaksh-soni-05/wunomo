@@ -42,7 +42,6 @@ from sqlalchemy import select
 
 import agent.dataops_agent as dataops_agent
 import modules.orchestration.supervisor as supervisor
-from database import AsyncSessionLocal
 from models.all_models import (
     AgentEmployeeType, AgentInstance, AgentInstanceStatus, Channel, ChannelAgent, Handoff,
     OperationMode, PersonalityMode, Task, TaskShape, TaskStatus, TaskStep, TaskStepStatus,
@@ -51,6 +50,7 @@ from models.approval_model import ApprovalRequest
 from modules.orchestration.supervisor import (
     MAX_DAG_TASKS, DependencyPlanningError, infer_dependencies, parse_all_mentions, retry_task, run_supervisor,
 )
+from services.tenant_context import async_tenant_context, tenant_session
 
 
 async def _register(client, prefix="supervisor"):
@@ -64,7 +64,7 @@ async def _register(client, prefix="supervisor"):
 
 
 async def _make_agent(tenant_id: str, name: str, model: str) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         agent = AgentInstance(
             tenant_id=tenant_id, name=name, employee_type=AgentEmployeeType.DATAOPS,
             personality=PersonalityMode.ENGINEER, operation_mode=OperationMode.ASSISTED,
@@ -76,7 +76,7 @@ async def _make_agent(tenant_id: str, name: str, model: str) -> str:
 
 
 async def _make_channel_with_agents(tenant_id: str, agent_ids: list[str]) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         channel = Channel(tenant_id=tenant_id, name=f"general-{uuid.uuid4().hex[:6]}")
         db.add(channel)
         await db.flush()
@@ -138,13 +138,13 @@ def _patch_dependency_planner(monkeypatch, plan: list[dict], calls: list | None 
     monkeypatch.setattr(supervisor, "infer_dependencies", fake_infer_dependencies)
 
 
-async def _get_task(task_id: str) -> Task:
-    async with AsyncSessionLocal() as db:
+async def _get_task(tenant_id: str, task_id: str) -> Task:
+    async with tenant_session(tenant_id) as db:
         return await db.get(Task, task_id)
 
 
-async def _get_step(task_id: str) -> TaskStep:
-    async with AsyncSessionLocal() as db:
+async def _get_step(tenant_id: str, task_id: str) -> TaskStep:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(TaskStep).where(TaskStep.task_id == task_id))
         return r.scalars().first()
 
@@ -215,15 +215,15 @@ async def test_acceptance_two_agent_chain_success(client, monkeypatch):
     assert len(result["inferred_edge_notices"]) == 1
     assert "Ravi" in result["inferred_edge_notices"][0] and "Nova" in result["inferred_edge_notices"][0]
 
-    task_a = await _get_task(task_a_id)
-    task_b = await _get_task(task_b_id)
+    task_a = await _get_task(tenant_id, task_a_id)
+    task_b = await _get_task(tenant_id, task_b_id)
     assert task_a.task_shape == TaskShape.SUPERVISOR_INTENT
     assert task_b.depends_on_task_id == task_a.id
     assert task_a.status == TaskStatus.COMPLETED
     assert task_b.status == TaskStatus.COMPLETED
 
     # Exactly one Handoff row, linking A -> B.
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Handoff).where(
             Handoff.from_task_id == task_a.id, Handoff.to_task_id == task_b.id,
         ))
@@ -235,7 +235,7 @@ async def test_acceptance_two_agent_chain_success(client, monkeypatch):
 
     # B's real input (the message run_agent() was called with) must
     # contain A's actual output text, not just a Handoff row existing.
-    step_b = await _get_step(task_b_id)
+    step_b = await _get_step(tenant_id, task_b_id)
     assert "3 widgets, 5 gadgets, 2 gizmos" in task_b.goal
 
 
@@ -268,15 +268,15 @@ async def test_acceptance_upstream_failure_blocks_dependent_then_retry_releases_
 
     task_a_id = result["tasks"][0]["task_id"]
     task_b_id = result["tasks"][1]["task_id"]
-    task_a = await _get_task(task_a_id)
-    task_b = await _get_task(task_b_id)
+    task_a = await _get_task(tenant_id, task_a_id)
+    task_b = await _get_task(tenant_id, task_b_id)
 
     assert task_a.status == TaskStatus.FAILED
     assert task_b.status == TaskStatus.BLOCKED_ON_DEPENDENCY
     assert task_a_id in task_b.termination_reason  # names the upstream task, per the spec
 
     # No Handoff was ever written for a task that never completed.
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Handoff).where(Handoff.to_task_id == task_b_id))
         assert r.scalars().first() is None
 
@@ -286,19 +286,20 @@ async def test_acceptance_upstream_failure_blocks_dependent_then_retry_releases_
         "model-ravi-fail": FakeToolCallLLM([AIMessage(content="7 rows counted, confirmed.")]),
     })
 
-    retry_result = await retry_task(
-        task_a_id, tenant_id=tenant_id, channel_id=channel_id, project_id=None,
-        user_id=user_id, caller_role="owner",
-    )
+    async with async_tenant_context(tenant_id):
+        retry_result = await retry_task(
+            task_a_id, tenant_id=tenant_id, channel_id=channel_id, project_id=None,
+            user_id=user_id, caller_role="owner",
+        )
 
     assert task_b_id in retry_result["released_from_block"]
-    task_a = await _get_task(task_a_id)
-    task_b = await _get_task(task_b_id)
+    task_a = await _get_task(tenant_id, task_a_id)
+    task_b = await _get_task(tenant_id, task_b_id)
     assert task_a.status == TaskStatus.COMPLETED
     assert task_b.status == TaskStatus.COMPLETED
     assert "Retried summary: 7 rows total" in task_b.goal
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Handoff).where(
             Handoff.from_task_id == task_a_id, Handoff.to_task_id == task_b_id,
         ))
@@ -343,14 +344,14 @@ async def test_task_needing_approval_holds_dependent_without_blocking_it(client,
 
     task_a_id = result["tasks"][0]["task_id"]
     task_b_id = result["tasks"][1]["task_id"]
-    task_a = await _get_task(task_a_id)
-    task_b = await _get_task(task_b_id)
+    task_a = await _get_task(tenant_id, task_a_id)
+    task_b = await _get_task(tenant_id, task_b_id)
 
     assert task_a.status == TaskStatus.PAUSED_NEEDS_APPROVAL
     assert task_b.status == TaskStatus.SUPERVISOR_QUEUED  # holding, not blocked
     assert task_b.termination_reason is None
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.session_id == channel_id))
         approvals = r.scalars().all()
     assert len(approvals) == 1
@@ -362,7 +363,8 @@ async def test_task_needing_approval_holds_dependent_without_blocking_it(client,
     # all, and what the Needs You screen's tier-0/tier-1 dedup now relies
     # on (needsYou.ts: linkedApprovalIds keys off current_step.
     # approval_request_id).
-    found_task_id = await supervisor.find_supervisor_task_for_approval(approvals[0].id)
+    async with async_tenant_context(tenant_id):
+        found_task_id = await supervisor.find_supervisor_task_for_approval(approvals[0].id)
     assert found_task_id == task_a_id
 
 
@@ -398,8 +400,8 @@ async def _setup_paused_approval_chain(client, monkeypatch, prefix: str):
     )
     task_a_id = result["tasks"][0]["task_id"]
     task_b_id = result["tasks"][1]["task_id"]
-    step_a = await _get_step(task_a_id)
-    assert (await _get_task(task_a_id)).status == TaskStatus.PAUSED_NEEDS_APPROVAL
+    step_a = await _get_step(tenant_id, task_a_id)
+    assert (await _get_task(tenant_id, task_a_id)).status == TaskStatus.PAUSED_NEEDS_APPROVAL
     assert step_a.approval_request_id is not None
 
     return {
@@ -425,21 +427,22 @@ async def test_approving_a_paused_supervisor_task_releases_its_dependent(client,
     # so this test verifies resolve_task_approval()'s own state-transition
     # logic precisely, the same way this file already tests supervisor.py's
     # other internals directly rather than only through HTTP.
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(ctx["tenant_id"]) as db:
         approval = await db.get(ApprovalRequest, ctx["approval_id"])
         approval.execution_result = {"status": "triggered", "run_id": "run_123"}
         await db.commit()
 
-    resolve_result = await supervisor.resolve_task_approval(ctx["task_a_id"], ctx["approval_id"], approved=True)
+    async with async_tenant_context(ctx["tenant_id"]):
+        resolve_result = await supervisor.resolve_task_approval(ctx["task_a_id"], ctx["approval_id"], approved=True)
     assert resolve_result["outcome"] == "approved_and_completed"
 
-    task_a = await _get_task(ctx["task_a_id"])
-    task_b = await _get_task(ctx["task_b_id"])
+    task_a = await _get_task(ctx["tenant_id"], ctx["task_a_id"])
+    task_b = await _get_task(ctx["tenant_id"], ctx["task_b_id"])
     assert task_a.status == TaskStatus.COMPLETED
     assert task_b.status == TaskStatus.COMPLETED  # released AND run, not just released
-    assert "Ravi ran after Nova resolved" in (await _get_step(ctx["task_b_id"])).outcome_summary
+    assert "Ravi ran after Nova resolved" in (await _get_step(ctx["tenant_id"], ctx["task_b_id"])).outcome_summary
 
-    step_a = await _get_step(ctx["task_a_id"])
+    step_a = await _get_step(ctx["tenant_id"], ctx["task_a_id"])
     assert step_a.status == TaskStepStatus.SUCCEEDED
     assert "run_pipeline" in step_a.outcome_summary
     assert step_a.raw_result == {"status": "triggered", "run_id": "run_123"}
@@ -448,7 +451,7 @@ async def test_approving_a_paused_supervisor_task_releases_its_dependent(client,
     # this never happened before (chat.py's old persistence loop only ever
     # read back result["tasks"] from the ORIGINAL run_supervisor() call,
     # which had already returned long before a human clicked approve).
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(ctx["tenant_id"]) as db:
         from models.all_models import ChatMessage
         r = await db.execute(select(ChatMessage).where(
             ChatMessage.session_id == ctx["channel_id"], ChatMessage.agent_id == task_a.agent_id,
@@ -458,7 +461,7 @@ async def test_approving_a_paused_supervisor_task_releases_its_dependent(client,
     assert any("run_pipeline" in m.content for m in messages)
 
     # And a real Handoff, exactly like the normal completion path writes.
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(ctx["tenant_id"]) as db:
         r = await db.execute(select(Handoff).where(
             Handoff.from_task_id == ctx["task_a_id"], Handoff.to_task_id == ctx["task_b_id"],
         ))
@@ -473,12 +476,13 @@ async def test_rejecting_a_paused_supervisor_task_blocks_its_dependent(client, m
     otherwise defaults to), never sit SUPERVISOR_QUEUED forever."""
     ctx = await _setup_paused_approval_chain(client, monkeypatch, "approvereject")
 
-    resolve_result = await supervisor.resolve_task_approval(ctx["task_a_id"], ctx["approval_id"], approved=False)
+    async with async_tenant_context(ctx["tenant_id"]):
+        resolve_result = await supervisor.resolve_task_approval(ctx["task_a_id"], ctx["approval_id"], approved=False)
     assert resolve_result["outcome"] == "rejected"
     assert ctx["task_b_id"] in resolve_result["blocked_dependents"]
 
-    task_a = await _get_task(ctx["task_a_id"])
-    task_b = await _get_task(ctx["task_b_id"])
+    task_a = await _get_task(ctx["tenant_id"], ctx["task_a_id"])
+    task_b = await _get_task(ctx["tenant_id"], ctx["task_b_id"])
     assert task_a.status == TaskStatus.FAILED
     assert task_a.termination_reason == "Approval rejected."
     assert task_b.status == TaskStatus.BLOCKED_ON_DEPENDENCY
@@ -487,7 +491,7 @@ async def test_rejecting_a_paused_supervisor_task_blocks_its_dependent(client, m
     assert "failed" not in task_b.termination_reason  # must not reuse the generic-failure wording
 
     # No Handoff, no ChatMessage for the rejected task's non-answer.
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(ctx["tenant_id"]) as db:
         r = await db.execute(select(Handoff).where(Handoff.from_task_id == ctx["task_a_id"]))
         assert r.scalars().first() is None
 
@@ -518,7 +522,7 @@ async def test_circular_dependency_refuses_to_dispatch_with_zero_tasks_created(c
     assert result["needs_clarification"] is None
     assert result["tasks"] == []
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.tenant_id == tenant_id))
         assert r.scalars().first() is None
 
@@ -555,7 +559,7 @@ async def test_fan_in_message_refuses_with_zero_tasks_created(client, monkeypatc
     assert result["needs_clarification"] is None
     assert result["tasks"] == []
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.tenant_id == tenant_id))
         assert r.scalars().first() is None
 
@@ -585,7 +589,7 @@ async def test_agent_mentioned_but_not_on_channel_is_reported_without_failing_th
     assert result["unresolved_mentions"][0]["name"] == "Carlos"
     assert "isn't a member" in result["unresolved_mentions"][0]["reason"]
 
-    task_a = await _get_task(result["tasks"][0]["task_id"])
+    task_a = await _get_task(tenant_id, result["tasks"][0]["task_id"])
     assert task_a.status == TaskStatus.COMPLETED
 
 
@@ -611,7 +615,7 @@ async def test_dag_task_ceiling_refuses_an_oversized_fanout(client, monkeypatch)
     assert result["error_kind"] == "ceiling"
     assert result["tasks"] == []
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.tenant_id == tenant_id))
         assert r.scalars().first() is None
 
@@ -642,8 +646,8 @@ async def test_message_with_no_dependency_runs_both_tasks_in_parallel(client, mo
     assert result["error"] is None
     assert result["needs_clarification"] is None
     assert result["inferred_edge_notices"] == []
-    task_a = await _get_task(result["tasks"][0]["task_id"])
-    task_b = await _get_task(result["tasks"][1]["task_id"])
+    task_a = await _get_task(tenant_id, result["tasks"][0]["task_id"])
+    task_b = await _get_task(tenant_id, result["tasks"][1]["task_id"])
     assert task_a.depends_on_task_id is None
     assert task_b.depends_on_task_id is None
     assert task_a.status == TaskStatus.COMPLETED
@@ -699,8 +703,8 @@ async def test_llm_planner_catches_the_regression_case_the_old_regex_missed(clie
     assert result["error"] is None
     assert result["needs_clarification"] is None
     assert len(result["inferred_edge_notices"]) == 1  # now DOES surface, unlike the old regex
-    task_a = await _get_task(result["tasks"][0]["task_id"])
-    task_b = await _get_task(result["tasks"][1]["task_id"])
+    task_a = await _get_task(tenant_id, result["tasks"][0]["task_id"])
+    task_b = await _get_task(tenant_id, result["tasks"][1]["task_id"])
     assert task_b.depends_on_task_id == task_a.id
     assert task_a.status == TaskStatus.COMPLETED
     assert task_b.status == TaskStatus.COMPLETED
@@ -749,7 +753,7 @@ async def test_ambiguous_message_triggers_ask_instead_of_a_guess(client, monkeyp
     assert any("Wait for Nova" in o for o in ask["options"])
     assert any("independently" in o.lower() for o in ask["options"])
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.tenant_id == tenant_id))
         assert r.scalars().first() is None
 
@@ -799,10 +803,10 @@ async def test_planner_failure_degrades_to_asking_never_to_guessing(client, monk
     # planner failed for a DIFFERENT intent.
     assert len(result["tasks"]) == 1
     assert result["tasks"][0]["agent_name"] == "Nova"
-    nova_task = await _get_task(result["tasks"][0]["task_id"])
+    nova_task = await _get_task(tenant_id, result["tasks"][0]["task_id"])
     assert nova_task.status == TaskStatus.COMPLETED
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.tenant_id == tenant_id))
         all_tasks = r.scalars().all()
     assert len(all_tasks) == 1  # Ravi's task was withheld, never created
@@ -845,9 +849,9 @@ async def test_mixed_message_calls_the_planner_once_for_the_paraphrase_only(clie
     assert result["needs_clarification"] is None
     assert len(result["tasks"]) == 3
 
-    nova_task = await _get_task(result["tasks"][0]["task_id"])
-    ravi_task = await _get_task(result["tasks"][1]["task_id"])
-    priya_task = await _get_task(result["tasks"][2]["task_id"])
+    nova_task = await _get_task(tenant_id, result["tasks"][0]["task_id"])
+    ravi_task = await _get_task(tenant_id, result["tasks"][1]["task_id"])
+    priya_task = await _get_task(tenant_id, result["tasks"][2]["task_id"])
     assert ravi_task.depends_on_task_id == nova_task.id  # fast path
     assert priya_task.depends_on_task_id == ravi_task.id  # LLM
     assert all(t.status == TaskStatus.COMPLETED for t in (nova_task, ravi_task, priya_task))

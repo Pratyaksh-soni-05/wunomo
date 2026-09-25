@@ -13,7 +13,7 @@ import uuid
 
 import pytest
 
-from database import AsyncSessionLocal
+from services.tenant_context import tenant_session
 from models.all_models import (
     AgentEmployeeType, AgentInstance, AgentInstanceStatus, OperationMode, PersonalityMode, User,
 )
@@ -35,7 +35,7 @@ async def _register(client, prefix="taskagent"):
 
 
 async def _member(tenant_id, role, prefix="member"):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         user = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id,
             email=f"{prefix}-{uuid.uuid4().hex[:8]}@example.com",
@@ -48,7 +48,7 @@ async def _member(tenant_id, role, prefix="member"):
 
 
 async def _hire_agent(tenant_id, name, active=True):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         agent = AgentInstance(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name, employee_type=AgentEmployeeType.DATAOPS,
             personality=PersonalityMode.ENGINEER, operation_mode=OperationMode.ASSISTED,
@@ -62,7 +62,7 @@ async def _hire_agent(tenant_id, name, active=True):
 
 async def _create_source(tenant_id, name):
     from models.all_models import DataSource, SourceType
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name,
             source_type=SourceType.POSTGRES, connection_config={"host": "postgres"},
@@ -72,9 +72,9 @@ async def _create_source(tenant_id, name):
         return source.id
 
 
-async def _grant(agent_id, source_id):
+async def _grant(tenant_id, agent_id, source_id):
     from models.all_models import AgentSource
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         db.add(AgentSource(id=str(uuid.uuid4()), agent_id=agent_id, source_id=source_id))
         await db.commit()
 
@@ -109,7 +109,7 @@ async def test_explicit_agent_id_is_honored(client, monkeypatch):
     assert r.status_code == 200, r.text
     assert r.json()["id"]
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from sqlalchemy import select
         from models.all_models import Task
         result = await db.execute(select(Task).where(Task.id == r.json()["id"]))
@@ -123,7 +123,7 @@ async def test_omitted_agent_id_keeps_oldest_active_fallback(client, monkeypatch
     doesn't think about agent selection must keep behaving identically."""
     token, tenant_id, _ = await _register(client, "fallback")
     axiom_id = None
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from sqlalchemy import select
         from models.all_models import AgentInstance as AI
         result = await db.execute(select(AI).where(AI.tenant_id == tenant_id))
@@ -133,7 +133,7 @@ async def test_omitted_agent_id_keeps_oldest_active_fallback(client, monkeypatch
     r = await _create_mocked_task(client, token, monkeypatch)  # no agent_id at all
     assert r.status_code == 200, r.text
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         from sqlalchemy import select
         from models.all_models import Task
         result = await db.execute(select(Task).where(Task.id == r.json()["id"]))
@@ -208,7 +208,7 @@ async def test_selectable_includes_real_source_scope_not_just_a_count(client):
     token, tenant_id, _ = await _register(client, "selectablescope")
     nova_id = await _hire_agent(tenant_id, "Nova")
     source_id = await _create_source(tenant_id, "Marketing Data")
-    await _grant(nova_id, source_id)
+    await _grant(tenant_id, nova_id, source_id)
     await _hire_agent(tenant_id, "Atlas")  # unscoped -- must show empty sources, not omitted
 
     r = await client.get("/api/v1/agents/selectable", headers=_auth(token))

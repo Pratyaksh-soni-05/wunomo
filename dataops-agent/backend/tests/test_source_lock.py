@@ -24,6 +24,7 @@ from modules.orchestration.task_executor import execute_next_step
 from services.source_lock import (
     SourceLockHeld, acquire_source_lock, describe_holder, format_lock_denial,
 )
+from services.tenant_context import async_tenant_context, tenant_session
 
 
 async def _register(client, prefix="lock"):
@@ -41,13 +42,13 @@ def _auth(token):
 
 
 async def _real_agent_id(tenant_id: str) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentInstance).where(AgentInstance.tenant_id == tenant_id))
         return r.scalar_one().id
 
 
 async def _create_source(tenant_id: str) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=f"test-source-{uuid.uuid4().hex[:6]}",
             source_type=SourceType.CSV, connection_config={"file_path": "/tmp/does-not-matter.csv"},
@@ -99,7 +100,7 @@ async def test_describe_holder_resolves_a_real_agent_name(client):
     token, tenant_id, _ = await _register(client, "describeA")
     r = await client.post("/api/v1/agents/", headers=_auth(token), json={"name": "Nova"})
     agent_id = r.json()["id"]
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         label = await describe_holder(db, agent_id)
     assert label == "Nova"
 
@@ -175,7 +176,7 @@ async def test_sync_succeeds_again_once_the_lock_frees(client, monkeypatch):
 # ---------------------------------------------------------------------------
 
 async def _seed_task(tenant_id, user_id, agent_id, tool_name, tool_args):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, agent_id=agent_id,
             goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -184,7 +185,7 @@ async def _seed_task(tenant_id, user_id, agent_id, tool_name, tool_args):
         db.add(task)
         await db.flush()
         step = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=0,
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=tenant_id, step_index=0,
             description="sync the warehouse", source=TaskStepSource.LLM_PLANNED,
             tool_name=tool_name, tool_args=tool_args, status=TaskStepStatus.PENDING,
         )
@@ -193,8 +194,8 @@ async def _seed_task(tenant_id, user_id, agent_id, tool_name, tool_args):
         return task.id, step.id
 
 
-async def _fresh(task_id, step_id):
-    async with AsyncSessionLocal() as db:
+async def _fresh(tenant_id, task_id, step_id):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
@@ -223,20 +224,22 @@ async def test_task_step_pauses_on_lock_conflict_and_resumes_once_it_frees(clien
 
     monkeypatch.setattr(executor_module, "_call_tool", _lock_then_succeed)
 
-    outcome = await execute_next_step(task_id)
+    async with async_tenant_context(tenant_id):
+        outcome = await execute_next_step(task_id)
     assert outcome["outcome"] == "paused_source_locked"
     assert "in use by Nova" in outcome["reason"]
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert task.status == TaskStatus.PAUSED_SOURCE_LOCKED
     assert step.status == TaskStepStatus.PENDING
     assert step.attempt_count == 1
 
     # Resume: execute_next_step() itself flips PAUSED_SOURCE_LOCKED back to
     # RUNNING the same way it already does for PAUSED_QUOTA_EXCEEDED.
-    outcome2 = await execute_next_step(task_id)
+    async with async_tenant_context(tenant_id):
+        outcome2 = await execute_next_step(task_id)
     assert outcome2["outcome"] == "step_succeeded"
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert task.status == TaskStatus.RUNNING
     assert step.status == TaskStepStatus.SUCCEEDED
     assert step.attempt_count == 2  # continued the same attempt budget, not a fresh one
@@ -256,7 +259,7 @@ async def test_advance_endpoint_allows_resuming_a_source_locked_task(client, mon
     # is under test here, not sync_source's actual risk tier.
     task_id, step_id = await _seed_task(tenant_id, user_id, agent_id, "get_pipeline_run_history", {"pipeline_id": "bad-id"})
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         task.status = TaskStatus.PAUSED_SOURCE_LOCKED
