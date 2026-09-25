@@ -10,7 +10,7 @@ from sqlalchemy import select
 import agent.dataops_agent as dataops_agent
 from services.tenant_context import tenant_session
 from models.all_models import ChatMessage, LlmUsageEvent
-from services.quota_service import PLANS
+from services.quota_service import monthly_credit_cap
 
 
 @tool
@@ -254,8 +254,8 @@ async def test_chat_stream_quota_exceeded_returns_402_not_sse(client):
     never an SSE `error` event (which would require a 200 + an open
     stream first)."""
     token, tenant_id, _ = await _register(client, "quotastream")
-    limit = PLANS["starter"]["ai_credits_per_month"]
     async with tenant_session(tenant_id) as db:
+        limit = await monthly_credit_cap(db, tenant_id)
         db.add(LlmUsageEvent(
             id=str(uuid.uuid4()), tenant_id=tenant_id, request_type="test",
             provider="test", model="test", used_fallback=False,
