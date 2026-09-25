@@ -311,7 +311,13 @@ class AuditLog(Base):
     # blocks any UPDATE to this table, for every role, with no exception,
     # and that guarantee wins over backfill completeness here. See
     # migration dd460a06e6ce and docs/context/GOTCHAS.md.
-    agent_id = Column(String, nullable=True)
+    agent_id = Column(String, nullable=True, comment=(
+        "Nullable by design. Rows written before Wunomo Projects Phase 0 "
+        "(2026-09-02) keep this NULL permanently -- Item #9's append-only "
+        "trigger (a7c2e9f1b3d4) blocks any UPDATE to this table for every "
+        "role, so historical rows were deliberately never backfilled. See "
+        "migration dd460a06e6ce and docs/context/GOTCHAS.md."
+    ))
     actor = Column(String(255))
     action = Column(String(255), nullable=False)
     resource_type = Column(String(100))
