@@ -18,6 +18,7 @@ from models.all_models import (
 from modules.orchestration.task_planner import (
     PlanValidationError, _build_prompt, _in_scope_sources_for_prompt, validate_step_plan_scope,
 )
+from services.tenant_context import async_tenant_context, tenant_session
 
 
 async def _register(client, prefix="planscope"):
@@ -30,7 +31,7 @@ async def _register(client, prefix="planscope"):
 
 
 async def _make_source(tenant_id: str, name="Source") -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name,
             source_type=SourceType.POSTGRES, connection_config={},
@@ -41,7 +42,7 @@ async def _make_source(tenant_id: str, name="Source") -> str:
 
 
 async def _make_agent(tenant_id: str, name="Nova", scoped_source_ids=None) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         agent = AgentInstance(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name,
             employee_type=AgentEmployeeType.DATAOPS, personality=PersonalityMode.ENGINEER,
@@ -69,7 +70,7 @@ async def test_validate_step_plan_scope_allows_an_in_scope_reference(client):
     source_a = await _make_source(tenant_id, "Source A")
     agent_id = await _make_agent(tenant_id, scoped_source_ids=[source_a])
     steps = [{"tool_name": "sync_source", "tool_args": {"source_id": source_a}}]
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         await validate_step_plan_scope(db, agent_id, steps)  # must not raise
 
 
@@ -83,7 +84,7 @@ async def test_validate_step_plan_scope_rejects_an_out_of_scope_reference(client
         {"tool_name": "list_data_sources", "tool_args": {}},
         {"tool_name": "sync_source", "tool_args": {"source_id": source_b}},
     ]
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         with pytest.raises(PlanValidationError, match="Step 1"):
             await validate_step_plan_scope(db, agent_id, steps)
 
@@ -98,7 +99,7 @@ async def test_validate_step_plan_scope_is_a_noop_for_unresolved_placeholders(cl
     source_a = await _make_source(tenant_id, "Source A")
     agent_id = await _make_agent(tenant_id, scoped_source_ids=[source_a])
     steps = [{"tool_name": "sync_source", "tool_args": {"source_id": "sales_orders_source_id_placeholder"}}]
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         await validate_step_plan_scope(db, agent_id, steps)  # must not raise
 
 
@@ -114,7 +115,8 @@ async def test_in_scope_sources_for_prompt_lists_real_scoped_sources(client):
     source_b = await _make_source(tenant_id, "CRM")
     agent_id = await _make_agent(tenant_id, scoped_source_ids=[source_a, source_b])
 
-    result = await _in_scope_sources_for_prompt(agent_id)
+    async with async_tenant_context(tenant_id):
+        result = await _in_scope_sources_for_prompt(agent_id)
     names = {s["name"] for s in result}
     assert names == {"Warehouse", "CRM"}
 
@@ -123,7 +125,8 @@ async def test_in_scope_sources_for_prompt_lists_real_scoped_sources(client):
 async def test_in_scope_sources_for_prompt_empty_list_for_a_real_unscoped_agent(client):
     tenant_id = await _register(client, "planscopeE")
     agent_id = await _make_agent(tenant_id, scoped_source_ids=[])
-    result = await _in_scope_sources_for_prompt(agent_id)
+    async with async_tenant_context(tenant_id):
+        result = await _in_scope_sources_for_prompt(agent_id)
     assert result == []
 
 

@@ -12,7 +12,6 @@ import pytest
 from sqlalchemy import select
 
 import modules.orchestration.task_executor as executor_module
-from database import AsyncSessionLocal
 from modules.orchestration.task_executor import execute_next_step
 from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus, User
 from services.tenant_context import tenant_session
@@ -389,7 +388,7 @@ async def test_triage_incident_step_attributes_its_llm_call_to_the_real_task(cli
 
     tenant_id, user_id = await _register(client, "exectriage")
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         incident = Incident(
             id=str(uuid.uuid4()), tenant_id=tenant_id, title="test incident",
             description="something broke", severity=IncidentSeverity.HIGH,
@@ -399,7 +398,7 @@ async def test_triage_incident_step_attributes_its_llm_call_to_the_real_task(cli
         await db.commit()
         incident_id = incident.id
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             goal="investigate it", task_shape=TaskShape.INVESTIGATE_INCIDENT,
@@ -408,7 +407,7 @@ async def test_triage_incident_step_attributes_its_llm_call_to_the_real_task(cli
         db.add(task)
         await db.flush()
         step = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=0,
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=tenant_id, step_index=0,
             description="triage the incident", source=TaskStepSource.LLM_PLANNED,
             tool_name="triage_incident", tool_args={"incident_id": incident_id},
             status=TaskStepStatus.PENDING,
@@ -417,7 +416,7 @@ async def test_triage_incident_step_attributes_its_llm_call_to_the_real_task(cli
         await db.commit()
         task_id, step_id = task.id, step.id
 
-    blocked = await execute_next_step(task_id)
+    blocked = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert blocked["outcome"] == "blocked_needs_approval"  # medium-risk, real gate
 
     from unittest.mock import AsyncMock
@@ -429,10 +428,10 @@ async def test_triage_incident_step_attributes_its_llm_call_to_the_real_task(cli
     ))
     monkeypatch.setattr(llm_service_module, "get_primary_llm", lambda temperature=0.0: fake_primary)
 
-    result = await resume_task(task_id, resolved_by=str(uuid.uuid4()), notes="approved")
+    result = await _as_tenant(tenant_id, resume_task, task_id, resolved_by=str(uuid.uuid4()), notes="approved")
     assert result["outcome"] == "step_succeeded"
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(
             sa_select(LlmUsageEvent).where(
                 LlmUsageEvent.tenant_id == tenant_id, LlmUsageEvent.request_type == "incident_triage",

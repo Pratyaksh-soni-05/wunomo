@@ -10,10 +10,10 @@ from datetime import datetime
 import pytest
 from sqlalchemy import select
 
-from database import AsyncSessionLocal
 from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus
 from modules.orchestration.task_executor import execute_next_step
 from services.task_lock import TaskLockHeld, acquire_task_lock
+from services.tenant_context import async_tenant_context, tenant_session
 
 
 async def _register(client, prefix="tasklock"):
@@ -27,7 +27,7 @@ async def _register(client, prefix="tasklock"):
 
 
 async def _seed_task(tenant_id, user_id):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -36,7 +36,7 @@ async def _seed_task(tenant_id, user_id):
         db.add(task)
         await db.flush()
         step = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=0,
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=tenant_id, step_index=0,
             description="check health", source=TaskStepSource.LLM_PLANNED,
             tool_name="get_system_health", tool_args={}, status=TaskStepStatus.PENDING,
         )
@@ -102,7 +102,8 @@ async def test_concurrent_advance_calls_on_the_same_task_never_both_run_the_step
     import modules.orchestration.task_executor as executor_module
     monkeypatch.setattr(executor_module, "_call_tool", _slow_ok)
 
-    results = await asyncio.gather(execute_next_step(task_id), execute_next_step(task_id))
+    async with async_tenant_context(tenant_id):
+        results = await asyncio.gather(execute_next_step(task_id), execute_next_step(task_id))
 
     outcomes = {r.get("outcome") for r in results}
     assert "task_busy" in outcomes, results
@@ -123,13 +124,15 @@ async def test_lock_is_released_after_one_call_so_the_next_one_succeeds(client, 
         return {"status": "ok"}
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
 
-    r1 = await execute_next_step(task_id)
+    async with async_tenant_context(tenant_id):
+        r1 = await execute_next_step(task_id)
     assert r1["outcome"] == "step_succeeded"
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
     assert task.status != TaskStatus.CANCELLED  # sanity: task still real
 
-    r2 = await execute_next_step(task_id)
+    async with async_tenant_context(tenant_id):
+        r2 = await execute_next_step(task_id)
     assert r2["outcome"] == "task_completed"
