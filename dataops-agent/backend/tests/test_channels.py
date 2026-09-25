@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import select
 
 import api.v1.chat as chat_module
-from database import AsyncSessionLocal
+from services.tenant_context import tenant_session
 from models.all_models import ChatMessage, User
 
 
@@ -28,7 +28,7 @@ async def _register(client, prefix="chan"):
 
 async def _add_member(tenant_id: str, role: str = "owner"):
     from services.auth_service import hash_password, issue_token_for_user
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         user = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=f"member-{uuid.uuid4().hex[:8]}@example.com",
             hashed_password=hash_password("test1234"), full_name="Second User", role=role,
@@ -259,7 +259,7 @@ async def test_mention_routes_to_the_tagged_agent_and_nobody_else(client, monkey
     assert captured["user_message"] == "sync the warehouse"
     assert r.json()["response"] == "Nova here."
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r2 = await db.execute(select(ChatMessage).where(
             ChatMessage.session_id == channel_id, ChatMessage.role == "user",
         ))
@@ -575,7 +575,7 @@ async def test_channel_summary_is_scoped_per_agent_not_shared(client, monkeypatc
 
     fake_summarize.assert_called()
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ChatMessage).where(
             ChatMessage.session_id == channel_id, ChatMessage.role == "summary",
         ))

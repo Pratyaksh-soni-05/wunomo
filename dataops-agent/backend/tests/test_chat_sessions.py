@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import select
 
 import agent.dataops_agent as dataops_agent
-from database import AsyncSessionLocal
+from services.tenant_context import tenant_session
 from models.all_models import Channel, ChatMessage
 from langchain_core.tools import tool
 
@@ -149,7 +149,7 @@ async def test_chat_sessions_list_excludes_channel_backed_session_ids(client):
     sessions must still list normally alongside the exclusion."""
     token, tenant_id, user_id = await _register(client, "sessionexcl")
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         channel = Channel(id=str(uuid.uuid4()), tenant_id=tenant_id, name="General")
         db.add(channel)
         db.add(ChatMessage(
@@ -258,7 +258,7 @@ async def test_long_session_persists_a_rolling_summary_row(client, monkeypatch):
 
     fake_summarize.assert_called()
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         result = await db.execute(select(ChatMessage).where(
             ChatMessage.session_id == session_id, ChatMessage.role == "summary",
         ))
@@ -275,7 +275,7 @@ async def _add_member(tenant_id: str, role: str = "owner"):
     from services.auth_service import hash_password, issue_token_for_user
     from models.all_models import User
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         user = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=unique_email("member"),
             hashed_password=hash_password("test1234"), full_name="Second User", role=role,

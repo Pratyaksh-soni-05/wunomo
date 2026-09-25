@@ -17,9 +17,9 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from database import AsyncSessionLocal
 from models.all_models import AgentSource, DataSource, User
 from services.auth_service import hash_password, issue_token_for_user
+from services.tenant_context import tenant_session
 
 
 def _csv_bytes():
@@ -41,7 +41,7 @@ async def _register(client, prefix="chanupload"):
 
 
 async def _member(tenant_id, role, prefix="member"):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         user = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id,
             email=f"{prefix}-{uuid.uuid4().hex[:8]}@example.com",
@@ -70,8 +70,8 @@ async def _add_agent_to_channel(client, token, channel_id, agent_id):
     assert r.status_code == 200, r.text
 
 
-async def _is_granted(agent_id: str, source_id: str) -> bool:
-    async with AsyncSessionLocal() as db:
+async def _is_granted(tenant_id: str, agent_id: str, source_id: str) -> bool:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentSource).where(
             AgentSource.agent_id == agent_id, AgentSource.source_id == source_id,
         ))
@@ -101,9 +101,9 @@ async def test_upload_with_sole_agent_member_registers_grants_and_profiles(clien
     assert body["source_name"] == "sales.csv"
     assert body["profiled"] is True
 
-    assert await _is_granted(nova_id, body["source_id"])
+    assert await _is_granted(tenant_id, nova_id, body["source_id"])
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(DataSource).where(DataSource.id == body["source_id"]))
         source = r.scalar_one()
         assert source.tenant_id == tenant_id
@@ -128,8 +128,8 @@ async def test_upload_with_mention_resolves_the_mentioned_agent_and_grants_only_
     body = r.json()
     assert body["agent_id"] == nova_id
 
-    assert await _is_granted(nova_id, body["source_id"])
-    assert not await _is_granted(atlas_id, body["source_id"])  # never every member, only the resolved one
+    assert await _is_granted(tenant_id, nova_id, body["source_id"])
+    assert not await _is_granted(tenant_id, atlas_id, body["source_id"])  # never every member, only the resolved one
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +153,7 @@ async def test_upload_with_no_mention_and_multiple_agents_is_refused_not_guessed
     assert r.status_code == 409, r.text
     assert "please @mention who you're talking to" in r.json()["detail"].lower()
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(DataSource).where(DataSource.tenant_id == tenant_id))
         assert r.scalars().all() == [], "an ambiguous target must not create a source at all"
 
@@ -191,7 +191,7 @@ async def test_upload_rejects_pdf_with_422_same_as_the_existing_upload_path(clie
     assert r.status_code == 422, r.text
     assert "no working connector" in r.json()["detail"].lower()
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(DataSource).where(DataSource.tenant_id == tenant_id))
         assert r.scalars().all() == [], "the rejected PDF must not have been persisted as a source"
 

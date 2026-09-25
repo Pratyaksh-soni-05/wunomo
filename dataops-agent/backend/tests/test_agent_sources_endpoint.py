@@ -11,7 +11,7 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from database import AsyncSessionLocal
+from services.tenant_context import tenant_session
 from models.all_models import AgentInstance, AgentSource, DataSource, User
 from services.agent_scope import agent_scope_denial_reason
 
@@ -33,13 +33,13 @@ def _auth(token):
 async def _real_agent_id(tenant_id: str) -> str:
     """create_new_tenant_and_user() creates exactly one AXIOM row per
     new tenant (Phase 1 commit 2) -- this is it."""
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentInstance).where(AgentInstance.tenant_id == tenant_id))
         return r.scalar_one().id
 
 
 async def _make_source(tenant_id: str, name="Source") -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name,
             source_type="postgres", connection_config={},
@@ -83,7 +83,7 @@ async def test_granting_twice_is_a_noop_not_a_duplicate_row(client):
         r = await client.post(f"/api/v1/agents/{agent_id}/sources/{source_id}", headers=_auth(token))
         assert r.status_code == 200
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentSource).where(
             AgentSource.agent_id == agent_id, AgentSource.source_id == source_id,
         ))
@@ -130,7 +130,7 @@ async def test_denial_message_points_at_the_grant_endpoint(client):
     agent_id = await _real_agent_id(tenant_id)
     source_id = await _make_source(tenant_id, "Marketing Analytics")
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         reason = await agent_scope_denial_reason(db, agent_id, "sync_source", {"source_id": source_id})
     assert reason is not None
     assert f"/api/v1/agents/{agent_id}/sources/{source_id}" in reason["message"]
@@ -228,7 +228,7 @@ async def test_deleting_a_granted_source_revokes_the_grant_instead_of_crashing(c
     r = await client.delete(f"/api/v1/sources/{source_id}", headers=_auth(token))
     assert r.status_code == 200, r.text
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentSource).where(AgentSource.source_id == source_id))
         assert r.scalars().all() == [], "the grant row must be cleared, not left dangling at a dead source"
         r = await db.execute(select(DataSource).where(DataSource.id == source_id))

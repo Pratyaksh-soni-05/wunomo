@@ -19,19 +19,25 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from database import AsyncSessionLocal
 from models.all_models import (
     AgentInstance, AgentInstanceStatus, Channel, ChannelAgent, Task, TaskShape, TaskStatus,
 )
 from modules.orchestration.task_executor import _caller_still_authorized
 from services.channel_routing import channel_agent_members, resolve_mentioned_agent
+from services.tenant_context import tenant_session
 
 
 @pytest_asyncio.fixture
 async def created_ids():
-    ids = {"tasks": [], "channels": [], "channel_agents": []}
+    # tenant_id is filled in by whichever _seed_task/_seed_channel_membership
+    # call first uses this fixture -- every test that uses it registers
+    # exactly one tenant, so one tracked id is enough for teardown to scope
+    # its own RLS-aware session correctly.
+    ids = {"tasks": [], "channels": [], "channel_agents": [], "tenant_id": None}
     yield ids
-    async with AsyncSessionLocal() as db:
+    if ids["tenant_id"] is None:
+        return
+    async with tenant_session(ids["tenant_id"]) as db:
         if ids["channel_agents"]:
             await db.execute(ChannelAgent.__table__.delete().where(ChannelAgent.id.in_(ids["channel_agents"])))
         if ids["tasks"]:
@@ -56,13 +62,14 @@ async def _register(client, prefix="offboard"):
 
 
 async def _real_agent_id(tenant_id: str) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentInstance).where(AgentInstance.tenant_id == tenant_id))
         return r.scalar_one().id
 
 
 async def _seed_task(tenant_id, user_id, agent_id, status, created_ids):
-    async with AsyncSessionLocal() as db:
+    created_ids["tenant_id"] = tenant_id
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, agent_id=agent_id,
             goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -75,7 +82,8 @@ async def _seed_task(tenant_id, user_id, agent_id, status, created_ids):
 
 
 async def _seed_channel_membership(tenant_id, agent_id, created_ids):
-    async with AsyncSessionLocal() as db:
+    created_ids["tenant_id"] = tenant_id
+    async with tenant_session(tenant_id) as db:
         channel = Channel(id=str(uuid.uuid4()), tenant_id=tenant_id, name="test-channel")
         db.add(channel)
         await db.flush()
@@ -100,7 +108,7 @@ async def test_offboard_succeeds_with_no_tasks(client):
     assert resp.status_code == 200
     assert resp.json()["status"] == "offboarded"
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentInstance.status).where(AgentInstance.id == agent_id))
         assert r.scalar_one() == AgentInstanceStatus.OFFBOARDED
 
@@ -118,7 +126,7 @@ async def test_offboard_blocked_by_running_task_and_names_it(client, created_ids
     assert task_id in detail["message"]
     assert "running" in detail["message"]
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentInstance.status).where(AgentInstance.id == agent_id))
         assert r.scalar_one() == AgentInstanceStatus.ACTIVE
 
@@ -172,7 +180,7 @@ async def test_offboard_removes_channel_membership(client, created_ids):
     resp = await client.post(f"/api/v1/agents/{agent_id}/offboard", headers=_auth(token))
     assert resp.status_code == 200
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ChannelAgent).where(ChannelAgent.channel_id == channel_id))
         assert r.scalar_one_or_none() is None
 
@@ -183,12 +191,12 @@ async def test_offboarded_agent_not_resolvable_by_mention(client, created_ids):
     agent_id = await _real_agent_id(tenant_id)
     channel_id = await _seed_channel_membership(tenant_id, agent_id, created_ids)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         agent_name = (await db.execute(
             select(AgentInstance.name).where(AgentInstance.id == agent_id)
         )).scalar_one()
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         before = await resolve_mentioned_agent(db, channel_id, agent_name)
         assert before is not None
 
@@ -197,13 +205,13 @@ async def test_offboarded_agent_not_resolvable_by_mention(client, created_ids):
     # Offboard deletes the channel_agents row (proven above), which alone
     # would already make resolution fail -- re-add membership here to
     # isolate the status filter itself, not just membership removal.
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         membership_id = str(uuid.uuid4())
         db.add(ChannelAgent(id=membership_id, channel_id=channel_id, agent_id=agent_id))
         await db.commit()
     created_ids["channel_agents"].append(membership_id)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         after = await resolve_mentioned_agent(db, channel_id, agent_name)
         assert after is None
         members = await channel_agent_members(db, channel_id)
@@ -220,12 +228,12 @@ async def test_caller_still_authorized_rejects_offboarded_agent(client, created_
     agent_id = await _real_agent_id(tenant_id)
     task_id = await _seed_task(tenant_id, user_id, agent_id, TaskStatus.RUNNING, created_ids)
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         agent = (await db.execute(select(AgentInstance).where(AgentInstance.id == agent_id))).scalar_one()
         agent.status = AgentInstanceStatus.OFFBOARDED
         await db.commit()
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one()
         authorized, reason, scope_denial = await _caller_still_authorized(db, task, "sync_source", {})
         assert authorized is False

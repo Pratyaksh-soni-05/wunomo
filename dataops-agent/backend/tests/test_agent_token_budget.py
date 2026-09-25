@@ -14,13 +14,13 @@ from sqlalchemy import select
 
 import modules.orchestration.task_executor as executor_module
 from api.v1.auth import enforce_agent_budget
-from database import AsyncSessionLocal
 from models.all_models import (
     AgentInstance, LlmUsageEvent, Task, TaskShape, TaskStatus, TaskStep,
     TaskStepSource, TaskStepStatus,
 )
 from modules.orchestration.task_executor import execute_next_step
 from services.quota_service import get_agent_quota_status
+from services.tenant_context import async_tenant_context, tenant_session
 
 
 async def _register(client, prefix="budget"):
@@ -41,7 +41,7 @@ async def _seed_agent_token_usage(agent_id: str, tenant_id: str, tokens: int) ->
     """Raw input+output tokens summing to exactly `tokens` -- the
     agent-level budget is unweighted (unlike the tenant "credits"
     formula), so a single input_tokens=tokens row is exact."""
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         db.add(LlmUsageEvent(
             id=str(uuid.uuid4()), tenant_id=tenant_id, agent_id=agent_id, request_type="test",
             provider="test", model="test", used_fallback=False,
@@ -52,7 +52,7 @@ async def _seed_agent_token_usage(agent_id: str, tenant_id: str, tokens: int) ->
 
 
 async def _real_agent_id(tenant_id: str) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentInstance).where(AgentInstance.tenant_id == tenant_id))
         return r.scalar_one().id
 
@@ -65,9 +65,10 @@ async def _real_agent_id(tenant_id: str) -> str:
 async def test_agent_with_no_budget_is_always_ok(client):
     token, tenant_id, _ = await _register(client, "budgetA")
     agent_id = await _real_agent_id(tenant_id)
-    result = await get_agent_quota_status(agent_id)
-    assert result == {"resource": "agent_tokens", "used": 0, "limit": None, "percent": 0.0, "status": "ok"}
-    await enforce_agent_budget(agent_id)  # must not raise
+    async with async_tenant_context(tenant_id):
+        result = await get_agent_quota_status(agent_id)
+        assert result == {"resource": "agent_tokens", "used": 0, "limit": None, "percent": 0.0, "status": "ok"}
+        await enforce_agent_budget(agent_id)  # must not raise
 
 
 @pytest.mark.asyncio
@@ -79,13 +80,14 @@ async def test_agent_budget_exceeded_is_reported_and_blocks(client):
     agent_id = r.json()["id"]
 
     await _seed_agent_token_usage(agent_id, tenant_id, 1500)
-    result = await get_agent_quota_status(agent_id)
-    assert result["status"] == "exceeded"
-    assert result["used"] == 1500
-    assert result["limit"] == 1000
+    async with async_tenant_context(tenant_id):
+        result = await get_agent_quota_status(agent_id)
+        assert result["status"] == "exceeded"
+        assert result["used"] == 1500
+        assert result["limit"] == 1000
 
-    with pytest.raises(HTTPException) as exc_info:
-        await enforce_agent_budget(agent_id)
+        with pytest.raises(HTTPException) as exc_info:
+            await enforce_agent_budget(agent_id)
     assert exc_info.value.status_code == 402
     assert exc_info.value.detail["error"] == "agent_budget_exceeded"
 
@@ -99,7 +101,8 @@ async def test_agent_budget_under_limit_does_not_block(client):
     agent_id = r.json()["id"]
 
     await _seed_agent_token_usage(agent_id, tenant_id, 100)
-    await enforce_agent_budget(agent_id)  # must not raise
+    async with async_tenant_context(tenant_id):
+        await enforce_agent_budget(agent_id)  # must not raise
 
 
 @pytest.mark.asyncio
@@ -113,7 +116,7 @@ async def test_real_chat_request_denied_when_the_agents_budget_is_exceeded(clien
     LLM call happens for the turn."""
     token, tenant_id, _ = await _register(client, "budgetD")
     agent_id = await _real_agent_id(tenant_id)
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentInstance).where(AgentInstance.id == agent_id))
         agent = r.scalar_one()
         agent.monthly_token_budget = 1000
@@ -130,7 +133,7 @@ async def test_real_chat_request_denied_when_the_agents_budget_is_exceeded(clien
 # ---------------------------------------------------------------------------
 
 async def _seed_task(tenant_id, user_id, agent_id, tool_args):
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id, agent_id=agent_id,
             goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -139,7 +142,7 @@ async def _seed_task(tenant_id, user_id, agent_id, tool_args):
         db.add(task)
         await db.flush()
         step = TaskStep(
-            id=str(uuid.uuid4()), task_id=task.id, step_index=0,
+            id=str(uuid.uuid4()), task_id=task.id, tenant_id=tenant_id, step_index=0,
             description="check history", source=TaskStepSource.LLM_PLANNED,
             tool_name="get_pipeline_run_history", tool_args=tool_args,
             status=TaskStepStatus.PENDING,
@@ -149,8 +152,8 @@ async def _seed_task(tenant_id, user_id, agent_id, tool_args):
         return task.id, step.id
 
 
-async def _fresh(task_id, step_id):
-    async with AsyncSessionLocal() as db:
+async def _fresh(tenant_id, task_id, step_id):
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         r = await db.execute(select(TaskStep).where(TaskStep.id == step_id))
@@ -182,12 +185,13 @@ async def test_task_pauses_when_the_agent_budget_is_exceeded_not_the_tenant_quot
     monkeypatch.setattr(executor_module, "_call_tool", _domain_error)
     monkeypatch.setattr(executor_module, "_adapt_step_args", _fail_if_adapted)
 
-    outcome = await execute_next_step(task_id)
+    async with async_tenant_context(tenant_id):
+        outcome = await execute_next_step(task_id)
     assert outcome["outcome"] == "paused_quota_exceeded"
     assert "monthly token budget" in outcome["reason"]
     assert "1000" in outcome["reason"]
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert task.status == TaskStatus.PAUSED_QUOTA_EXCEEDED
     assert step.status == TaskStepStatus.PENDING
 
@@ -208,5 +212,6 @@ async def test_task_proceeds_when_both_gates_are_under_limit(client, monkeypatch
 
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
 
-    outcome = await execute_next_step(task_id)
+    async with async_tenant_context(tenant_id):
+        outcome = await execute_next_step(task_id)
     assert outcome["outcome"] == "step_succeeded"

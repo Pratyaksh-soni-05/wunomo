@@ -24,7 +24,7 @@ from sqlalchemy import select
 
 import agent.dataops_agent as dataops_agent
 from agent.dataops_agent import agent_scope_denied_tool_calls, role_denied_tool_calls
-from database import AsyncSessionLocal
+from services.tenant_context import async_tenant_context, tenant_session
 from models.all_models import (
     AgentEmployeeType, AgentInstance, AgentInstanceStatus, AgentSource,
     DataSource, OperationMode, PersonalityMode, SourceType, User,
@@ -46,7 +46,7 @@ async def _register(client, prefix="scopegate"):
 
 
 async def _make_source(tenant_id: str, name="Source") -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name,
             source_type=SourceType.POSTGRES, connection_config={},
@@ -57,7 +57,7 @@ async def _make_source(tenant_id: str, name="Source") -> str:
 
 
 async def _make_agent(tenant_id: str, name="Nova", scoped_source_ids=None) -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         agent = AgentInstance(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name,
             employee_type=AgentEmployeeType.DATAOPS, personality=PersonalityMode.ENGINEER,
@@ -72,8 +72,8 @@ async def _make_agent(tenant_id: str, name="Nova", scoped_source_ids=None) -> st
         return agent.id
 
 
-async def _set_role(user_id: str, role: str) -> None:
-    async with AsyncSessionLocal() as db:
+async def _set_role(tenant_id: str, user_id: str, role: str) -> None:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = role
@@ -91,7 +91,7 @@ async def test_agent_touches_source_true_and_false(client):
     source_b = await _make_source(tenant_id, "Source B")
     agent_id = await _make_agent(tenant_id, scoped_source_ids=[source_a])
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         assert await agent_touches_source(db, agent_id, source_a) is True
         assert await agent_touches_source(db, agent_id, source_b) is False
 
@@ -104,7 +104,7 @@ async def test_agent_with_zero_scope_rows_is_denied_everything(client):
     source_a = await _make_source(tenant_id, "Source A")
     agent_id = await _make_agent(tenant_id, scoped_source_ids=[])  # no scope at all
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         reason = await agent_scope_denial_reason(db, agent_id, "sync_source", {"source_id": source_a})
     assert reason is not None
     assert "isn't scoped" in reason["message"]
@@ -121,7 +121,7 @@ async def test_denial_dict_carries_structured_fields_not_just_a_string(client):
     source_a = await _make_source(tenant_id, "Warehouse")
     agent_id = await _make_agent(tenant_id, scoped_source_ids=[])
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         denial = await agent_scope_denial_reason(db, agent_id, "sync_source", {"source_id": source_a})
     assert set(denial.keys()) == {"message", "agent_id", "agent_name", "source_id", "source_name", "tool_name"}
     assert denial["agent_id"] == agent_id
@@ -136,7 +136,8 @@ async def test_agent_id_none_is_a_transitional_noop(client):
     """No agent context at all (agent_id=None) must never deny -- role
     alone keeps governing in that case, unchanged from before this gate
     existed."""
-    async with AsyncSessionLocal() as db:
+    _, tenant_id, _ = await _register(client)
+    async with tenant_session(tenant_id) as db:
         reason = await agent_scope_denial_reason(db, None, "sync_source", {"source_id": "anything"})
     assert reason is None
 
@@ -145,7 +146,7 @@ async def test_agent_id_none_is_a_transitional_noop(client):
 async def test_not_source_scoped_tool_is_never_denied(client):
     _, tenant_id, _ = await _register(client)
     agent_id = await _make_agent(tenant_id, scoped_source_ids=[])
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         reason = await agent_scope_denial_reason(db, agent_id, "list_data_sources", {})
     assert reason is None
 
@@ -162,7 +163,7 @@ async def test_pipeline_and_incident_resolution_reach_the_owning_source(client):
     source_b = await _make_source(tenant_id, "Source B")
     agent_id = await _make_agent(tenant_id, scoped_source_ids=[source_a])
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         pipeline_on_a = Pipeline(id=str(uuid.uuid4()), tenant_id=tenant_id, name="P-A", source_id=source_a)
         pipeline_on_b = Pipeline(id=str(uuid.uuid4()), tenant_id=tenant_id, name="P-B", source_id=source_b)
         db.add_all([pipeline_on_a, pipeline_on_b])
@@ -172,7 +173,7 @@ async def test_pipeline_and_incident_resolution_reach_the_owning_source(client):
         await db.commit()
         pipeline_on_a_id, pipeline_on_b_id, incident_on_b_id = pipeline_on_a.id, pipeline_on_b.id, incident_on_b.id
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         assert await agent_scope_denial_reason(db, agent_id, "run_pipeline", {"pipeline_id": pipeline_on_a_id}) is None
         denial = await agent_scope_denial_reason(db, agent_id, "run_pipeline", {"pipeline_id": pipeline_on_b_id})
         assert denial is not None and "Source B" in denial["message"]
@@ -198,7 +199,8 @@ async def test_scope_denied_tool_calls_mutates_in_place_and_returns_denied(clien
         {"name": "sync_source", "args": {"source_id": source_a}, "id": "c1"},  # in scope
         {"name": "sync_source", "args": {"source_id": source_b}, "id": "c2"},  # out of scope
     ]
-    denied = await agent_scope_denied_tool_calls(agent_id, calls)
+    async with async_tenant_context(tenant_id):
+        denied = await agent_scope_denied_tool_calls(agent_id, calls)
     assert [c["id"] for c in denied] == ["c2"]
     assert [c["id"] for c in calls] == ["c1"], "denied call must be removed from the list in place"
     assert "isn't scoped" in denied[0]["reason"]
@@ -219,7 +221,7 @@ async def test_scope_denied_tool_calls_with_none_agent_id_denies_nothing(client)
 @pytest.mark.asyncio
 async def test_a_owner_with_narrow_scope_agent_denied_by_scope_not_role(client):
     _, tenant_id, user_id = await _register(client)
-    await _set_role(user_id, "owner")
+    await _set_role(tenant_id, user_id, "owner")
     source_a = await _make_source(tenant_id, "Source A")
     source_b = await _make_source(tenant_id, "Source B")
     agent_id = await _make_agent(tenant_id, name="Nova", scoped_source_ids=[source_a])
@@ -231,7 +233,8 @@ async def test_a_owner_with_narrow_scope_agent_denied_by_scope_not_role(client):
     assert role_denied == [], "an Owner must never be denied by the role gate itself"
 
     # Scope gate: must deny, and the reason must name the agent/source, not role.
-    scope_denied = await agent_scope_denied_tool_calls(agent_id, list(calls))
+    async with async_tenant_context(tenant_id):
+        scope_denied = await agent_scope_denied_tool_calls(agent_id, list(calls))
     assert len(scope_denied) == 1
     assert "Nova" in scope_denied[0]["reason"]
     assert "Source B" in scope_denied[0]["reason"]
@@ -245,7 +248,7 @@ async def test_a_owner_with_narrow_scope_agent_denied_by_scope_not_role(client):
 @pytest.mark.asyncio
 async def test_b_viewer_with_broad_scope_agent_still_denied_by_role(client):
     _, tenant_id, user_id = await _register(client)
-    await _set_role(user_id, "viewer")
+    await _set_role(tenant_id, user_id, "viewer")
     source_a = await _make_source(tenant_id, "Source A")
     source_b = await _make_source(tenant_id, "Source B")
     # Broad scope: this agent can reach EVERY source in the tenant.
@@ -254,7 +257,8 @@ async def test_b_viewer_with_broad_scope_agent_still_denied_by_role(client):
     calls = [{"name": "sync_source", "args": {"source_id": source_a}, "id": "c1"}]
 
     # Scope gate alone: fully in scope, must NOT deny.
-    scope_denied = await agent_scope_denied_tool_calls(agent_id, list(calls))
+    async with async_tenant_context(tenant_id):
+        scope_denied = await agent_scope_denied_tool_calls(agent_id, list(calls))
     assert scope_denied == [], "a fully in-scope call must never be denied by the scope gate itself"
 
     # Role gate: Viewer lacks sources.profile -- must deny regardless of scope.
@@ -286,7 +290,7 @@ def _auth(token):
 @pytest.mark.asyncio
 async def test_a_scope_denial_surfaces_through_real_chat(client, monkeypatch):
     token, tenant_id, user_id = await _register(client, "scopechatA")
-    await _set_role(user_id, "owner")
+    await _set_role(tenant_id, user_id, "owner")
     source_a = await _make_source(tenant_id, "Warehouse")
     source_b = await _make_source(tenant_id, "CRM Export")
 
@@ -294,7 +298,7 @@ async def test_a_scope_denial_surfaces_through_real_chat(client, monkeypatch):
     # is what chat.py actually resolves and passes as agent_id -- rename
     # it to Nova and narrow ITS scope, so the real chat path exercises the
     # exact agent chat.py will pick (oldest ACTIVE agent for the tenant).
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentInstance).where(AgentInstance.tenant_id == tenant_id).order_by(AgentInstance.created_at.asc()))
         real_agent = r.scalars().first()
         real_agent.name = "Nova"
@@ -323,10 +327,10 @@ async def test_a_scope_denial_surfaces_through_real_chat(client, monkeypatch):
 @pytest.mark.asyncio
 async def test_b_role_denial_still_fires_through_real_chat_for_a_broad_scope_agent(client, monkeypatch):
     token, tenant_id, user_id = await _register(client, "scopechatB")
-    await _set_role(user_id, "viewer")
+    await _set_role(tenant_id, user_id, "viewer")
     source_a = await _make_source(tenant_id, "Warehouse")
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(AgentInstance).where(AgentInstance.tenant_id == tenant_id).order_by(AgentInstance.created_at.asc()))
         real_agent = r.scalars().first()
         db.add(AgentSource(id=str(uuid.uuid4()), agent_id=real_agent.id, source_id=source_a))

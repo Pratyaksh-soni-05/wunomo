@@ -12,7 +12,7 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from database import AsyncSessionLocal
+from services.tenant_context import tenant_session
 from models.all_models import DataSource, SourceType
 
 
@@ -31,7 +31,7 @@ def _auth(token):
 
 
 async def _make_source(tenant_id: str, name="Source") -> str:
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         source = DataSource(
             id=str(uuid.uuid4()), tenant_id=tenant_id, name=name,
             source_type=SourceType.POSTGRES, connection_config={},
@@ -76,12 +76,12 @@ async def test_viewer_cannot_create_a_project(client):
     from models.all_models import User
 
     token, tenant_id, user_id = await _register(client, "projC")
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = "viewer"
         await db.commit()
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         viewer_token = issue_token_for_user(r.scalar_one(), "password")
 
@@ -181,12 +181,12 @@ async def test_viewer_cannot_hire(client):
     from models.all_models import User
 
     token, tenant_id, user_id = await _register(client, "hireF")
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         user = r.scalar_one()
         user.role = "viewer"
         await db.commit()
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(User).where(User.id == user_id))
         viewer_token = issue_token_for_user(r.scalar_one(), "password")
 

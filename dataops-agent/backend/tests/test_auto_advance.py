@@ -23,20 +23,22 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from database import AsyncSessionLocal
 from models.all_models import Task, TaskShape, TaskStatus, TaskStep, TaskStepSource, TaskStepStatus
 from services.tasks import ADVANCE_BATCH_SIZE, _select_tasks_to_advance
+from services.tenant_context import tenant_session
 
 
 @pytest_asyncio.fixture
 async def created_task_ids():
-    ids = []
+    # tenant_id filled in by _seed_task, the same "one tenant per test"
+    # assumption test_agent_offboard.py's own created_ids fixture uses.
+    ids = {"tasks": [], "tenant_id": None}
     yield ids
-    if not ids:
+    if not ids["tasks"]:
         return
-    async with AsyncSessionLocal() as db:
-        await db.execute(TaskStep.__table__.delete().where(TaskStep.task_id.in_(ids)))
-        await db.execute(Task.__table__.delete().where(Task.id.in_(ids)))
+    async with tenant_session(ids["tenant_id"]) as db:
+        await db.execute(TaskStep.__table__.delete().where(TaskStep.task_id.in_(ids["tasks"])))
+        await db.execute(Task.__table__.delete().where(Task.id.in_(ids["tasks"])))
         await db.commit()
 
 
@@ -51,7 +53,8 @@ async def _register(client, prefix="autoadvance"):
 
 
 async def _seed_task(tenant_id, user_id, status, created_task_ids, updated_at=None, **overrides):
-    async with AsyncSessionLocal() as db:
+    created_task_ids["tenant_id"] = tenant_id
+    async with tenant_session(tenant_id) as db:
         task = Task(
             id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user_id,
             goal="test", task_shape=TaskShape.DIAGNOSE_PIPELINE_FAILURE,
@@ -67,7 +70,7 @@ async def _seed_task(tenant_id, user_id, status, created_task_ids, updated_at=No
                 Task.__table__.update().where(Task.id == task.id).values(updated_at=updated_at)
             )
             await db.commit()
-        created_task_ids.append(task.id)
+        created_task_ids["tasks"].append(task.id)
         return task.id
 
 
@@ -99,7 +102,8 @@ async def test_selects_queued_and_running_and_quota_paused_tasks(client, created
         paused_at=datetime.utcnow(), updated_at=_GUARANTEED_OLDEST,
     )
 
-    selected, _total = await _select_tasks_to_advance()
+    selected_pairs, _total = await _select_tasks_to_advance()
+    selected = [t for t, _ in selected_pairs]
     assert {queued, running, quota_paused, source_locked} <= set(selected)
 
 
@@ -113,7 +117,8 @@ async def test_excludes_tasks_waiting_on_a_human_or_already_terminal(client, cre
     failed = await _seed_task(tenant_id, user_id, TaskStatus.FAILED, created_task_ids)
     draft = await _seed_task(tenant_id, user_id, TaskStatus.DRAFT_PLAN, created_task_ids)
 
-    selected, _total = await _select_tasks_to_advance()
+    selected_pairs, _total = await _select_tasks_to_advance()
+    selected = [t for t, _ in selected_pairs]
     selected = set(selected)
     assert needs_approval not in selected, "a task waiting on a human must never be auto-selected"
     assert completed not in selected
@@ -140,7 +145,8 @@ async def test_selection_is_oldest_updated_first(client, created_task_ids):
         tenant_id, user_id, TaskStatus.RUNNING, created_task_ids, updated_at=_GUARANTEED_OLDEST + timedelta(hours=1),
     )
 
-    selected, _total = await _select_tasks_to_advance()
+    selected_pairs, _total = await _select_tasks_to_advance()
+    selected = [t for t, _ in selected_pairs]
     ours_in_order = [t for t in selected if t in (newest, oldest, middle)]
     assert ours_in_order == [oldest, middle, newest]
 
@@ -155,7 +161,8 @@ async def test_selection_never_exceeds_the_batch_cap(client, created_task_ids):
     for _ in range(ADVANCE_BATCH_SIZE + 5):
         await _seed_task(tenant_id, user_id, TaskStatus.RUNNING, created_task_ids)
 
-    selected, _total = await _select_tasks_to_advance()
+    selected_pairs, _total = await _select_tasks_to_advance()
+    selected = [t for t, _ in selected_pairs]
     assert len(selected) <= ADVANCE_BATCH_SIZE
 
 
@@ -167,13 +174,14 @@ async def test_total_runnable_count_reflects_the_real_backlog_not_just_the_cappe
     growing one -- which is impossible if the only number available is
     already clamped to ADVANCE_BATCH_SIZE."""
     tenant_id, user_id = await _register(client, "selecttotal")
-    before_selected, before_total = await _select_tasks_to_advance()
+    before_selected_pairs, before_total = await _select_tasks_to_advance()
 
     n_new = ADVANCE_BATCH_SIZE + 3
     for _ in range(n_new):
         await _seed_task(tenant_id, user_id, TaskStatus.RUNNING, created_task_ids, updated_at=_GUARANTEED_OLDEST)
 
-    after_selected, after_total = await _select_tasks_to_advance()
+    after_selected_pairs, after_total = await _select_tasks_to_advance()
+    after_selected = [t for t, _ in after_selected_pairs]
     assert after_total == before_total + n_new
     # The count grew by more than a batch, but the selection itself
     # still never exceeds the cap -- the two numbers can and do diverge.

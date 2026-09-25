@@ -8,7 +8,7 @@ from langchain_core.tools import tool
 from sqlalchemy import select
 
 import agent.dataops_agent as dataops_agent
-from database import AsyncSessionLocal
+from services.tenant_context import tenant_session
 from models.all_models import ChatMessage, LlmUsageEvent
 from services.quota_service import PLANS
 
@@ -134,7 +134,7 @@ async def test_chat_stream_happy_path_emits_expected_events_and_persists_like_bu
     assert start["session_id"] == done["session_id"]
     assert start["agent_id"] == done["agent_id"]
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ChatMessage).where(
             ChatMessage.tenant_id == tenant_id, ChatMessage.user_id == user_id,
         ).order_by(ChatMessage.created_at.asc()))
@@ -200,7 +200,7 @@ async def test_chat_stream_approval_required_event_matches_a_real_persisted_appr
     event = approval_events[0]
     approval_id = event["approval_request_id"]
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ApprovalRequest).where(ApprovalRequest.id == approval_id))
         approval = r.scalar_one()
     assert approval.tenant_id == tenant_id
@@ -255,7 +255,7 @@ async def test_chat_stream_quota_exceeded_returns_402_not_sse(client):
     stream first)."""
     token, tenant_id, _ = await _register(client, "quotastream")
     limit = PLANS["starter"]["ai_credits_per_month"]
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         db.add(LlmUsageEvent(
             id=str(uuid.uuid4()), tenant_id=tenant_id, request_type="test",
             provider="test", model="test", used_fallback=False,
@@ -316,7 +316,7 @@ async def test_chat_stream_mid_disconnect_still_persists_a_complete_row(client, 
     # moment to actually finish writing before asserting against the DB.
     assistant_row = None
     for _ in range(50):
-        async with AsyncSessionLocal() as db:
+        async with tenant_session(tenant_id) as db:
             r = await db.execute(select(ChatMessage).where(
                 ChatMessage.tenant_id == tenant_id, ChatMessage.user_id == user_id,
                 ChatMessage.role == "assistant",
@@ -333,7 +333,7 @@ async def test_chat_stream_mid_disconnect_still_persists_a_complete_row(client, 
     assert assistant_row.tool_calls[0]["result"] == "found: gadgets"
     assert assistant_row.tool_calls[0]["status"] == "completed"
 
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(ChatMessage).where(
             ChatMessage.tenant_id == tenant_id, ChatMessage.user_id == user_id, ChatMessage.role == "user",
         ))
