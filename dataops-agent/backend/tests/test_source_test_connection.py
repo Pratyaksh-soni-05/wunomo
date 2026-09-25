@@ -32,13 +32,26 @@ from config import settings
 
 TEST_TARGET_DB = "test_connection_target"
 
+# The real dataops_user password for this environment, read from the same
+# ADMIN_DATABASE_URL every other admin-role connection in this codebase
+# uses -- never a second, hardcoded copy that can drift from it (the "changeme"
+# literal these tests used before was config.py's Settings class DEFAULT,
+# not this environment's actual configured password).
+DATAOPS_USER_PASSWORD = settings.ADMIN_DATABASE_URL.split("://", 1)[1].split(":", 2)[1].split("@")[0]
+
 
 @pytest_asyncio.fixture(scope="module", autouse=True)
 async def _ensure_test_target_db():
     """Session-cheap, not torn down -- an empty extra database on the dev
     postgres container is harmless test scaffolding, unlike the row-based
-    test-data accumulation already tracked elsewhere (item 74)."""
-    dsn = settings.DATABASE_URL.replace("+asyncpg", "").replace("+psycopg2", "")
+    test-data accumulation already tracked elsewhere (item 74).
+
+    Uses ADMIN_DATABASE_URL (dataops_user), not DATABASE_URL (dataops_app):
+    CREATE DATABASE needs the CREATEDB attribute, which only the maintenance
+    role has -- the app role has none, by design (see conftest.py's own
+    tenant-teardown fixture and services/audit_anchor.py for the same
+    admin-role convention used elsewhere for privileged operations)."""
+    dsn = settings.ADMIN_DATABASE_URL.replace("+asyncpg", "").replace("+psycopg2", "")
     conn = await asyncpg.connect(dsn.rsplit("/", 1)[0] + "/postgres")
     try:
         exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", TEST_TARGET_DB)
@@ -118,7 +131,7 @@ async def test_real_postgres_success(client):
         "source_type": "postgres",
         "connection_config": {
             "host": "postgres", "port": 5432, "database": TEST_TARGET_DB,
-            "user": "dataops_user", "password": "changeme",
+            "user": "dataops_user", "password": DATAOPS_USER_PASSWORD,
         },
     })
     assert resp.status_code == 200
@@ -155,7 +168,7 @@ async def test_points_at_app_database_is_refused_before_connecting(client):
         "source_type": "postgres",
         "connection_config": {
             "host": "postgres", "port": 5432, "database": "dataops",
-            "user": "dataops_user", "password": "changeme",
+            "user": "dataops_user", "password": DATAOPS_USER_PASSWORD,
         },
     })
     body = resp.json()
@@ -171,7 +184,7 @@ async def test_real_postgres_unknown_database_is_named(client):
         "source_type": "postgres",
         "connection_config": {
             "host": "postgres", "port": 5432, "database": "definitely_not_a_real_db_xyz",
-            "user": "dataops_user", "password": "changeme",
+            "user": "dataops_user", "password": DATAOPS_USER_PASSWORD,
         },
     })
     body = resp.json()
