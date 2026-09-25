@@ -70,7 +70,7 @@ async def test_run_agent_stream_emits_tool_start_and_tool_end(monkeypatch):
     assert "hi" in tool_ends[0]["result_summary"]
 
     assert len(finals) == 1
-    result = dataops_agent._finalize_agent_result(finals[0]["state"], "s1")
+    result = dataops_agent._finalize_agent_result(finals[0]["state"], "s1", "t1", "u1")
     assert result["response"] == "Done."
 
 
@@ -143,7 +143,7 @@ async def test_run_agent_stream_final_state_matches_run_agent_result(monkeypatch
     ):
         if ev["type"] == "final_state":
             final_state = ev["state"]
-    streamed = dataops_agent._finalize_agent_result(final_state, "s1")
+    streamed = dataops_agent._finalize_agent_result(final_state, "s1", "t1", "u1")
 
     assert streamed["response"] == buffered["response"]
     assert streamed["pending_approvals"] == buffered["pending_approvals"]
@@ -177,7 +177,19 @@ async def test_run_agent_stream_emits_real_token_deltas(monkeypatch):
         def bind_tools(self, tools, **kwargs):
             return self
 
-    fake_llm = _StreamingFakeChatModel(messages=iter([AIMessage(content="hello there friend")]))
+    # Longer than _STREAM_HOLDBACK_CHARS (64, Integration Phase 4 item 4's
+    # sliding-window redaction buffer) on purpose: a message shorter than
+    # the holdback never crosses the release threshold before the stream
+    # ends, so it would arrive as a single token event at the final flush
+    # regardless of how many deltas the fake model emitted internally --
+    # proving nothing about incremental relay. This message is long enough
+    # that real intermediate releases happen before the end.
+    full_message = (
+        "hello there friend, this reply is deliberately long enough that "
+        "the streaming redaction buffer releases more than one chunk "
+        "before the turn completes"
+    )
+    fake_llm = _StreamingFakeChatModel(messages=iter([AIMessage(content=full_message)]))
     monkeypatch.setattr(dataops_agent, "get_llm_for_agent", lambda temperature=0.0, primary_model=None: fake_llm)
     monkeypatch.setattr(dataops_agent, "ALL_TOOLS", [])
     monkeypatch.setattr(dataops_agent, "TOOL_CAPABILITIES", {})
@@ -194,6 +206,6 @@ async def test_run_agent_stream_emits_real_token_deltas(monkeypatch):
             final_state = ev["state"]
 
     assert len(tokens) > 1, f"expected multiple incremental token deltas, got {tokens}"
-    assert "".join(tokens) == "hello there friend"
-    result = dataops_agent._finalize_agent_result(final_state, "s1")
-    assert result["response"] == "hello there friend"
+    assert "".join(tokens) == full_message
+    result = dataops_agent._finalize_agent_result(final_state, "s1", "t1", "u1")
+    assert result["response"] == full_message
