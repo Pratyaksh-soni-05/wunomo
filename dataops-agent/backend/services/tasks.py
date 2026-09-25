@@ -311,9 +311,10 @@ def advance_active_tasks(self):
     half of that already-shipped feature, not new scope.
 
     Deliberately does NOT do any task's real advancing work itself --
-    only selects up to ADVANCE_BATCH_SIZE runnable task_ids (oldest-
-    updated-first) and dispatches one advance_one_task.delay(task_id)
-    per id, the same way check_scheduled_pipelines above dispatches
+    only selects up to ADVANCE_BATCH_SIZE runnable (task_id, tenant_id)
+    pairs (oldest-updated-first within each tenant) and dispatches one
+    advance_one_task.delay(task_id, tenant_id) per pair, the same way
+    check_scheduled_pipelines above dispatches
     execute_scheduled_pipeline_run.delay(...) rather than running a
     pipeline inline. This is a correction, not the original design: an
     earlier version of this function called execute_next_step() inline
@@ -336,13 +337,13 @@ def advance_active_tasks(self):
         return await _select_tasks_to_advance()
 
     try:
-        task_ids, total_runnable = asyncio.run(_run())
+        task_tenant_pairs, total_runnable = asyncio.run(_run())
     except Exception as exc:
         log.error("advance_active_tasks_failed", error=str(exc))
         raise self.retry(exc=exc)
 
-    for task_id in task_ids:
-        advance_one_task.delay(task_id)
+    for task_id, tenant_id in task_tenant_pairs:
+        advance_one_task.delay(task_id, tenant_id)
     # Backlog visibility (added after the fact, per instruction): a
     # 25/tick cap against a real backlog otherwise has no way to show
     # whether it's draining or growing between observations -- comparing
@@ -351,44 +352,71 @@ def advance_active_tasks(self):
     # the identical RUNNABLE_TASK_STATUSES this query does.
     log.info(
         "advance_active_tasks_dispatched",
-        dispatched=len(task_ids), total_runnable=total_runnable, batch_size=ADVANCE_BATCH_SIZE,
+        dispatched=len(task_tenant_pairs), total_runnable=total_runnable, batch_size=ADVANCE_BATCH_SIZE,
     )
 
 
-async def _select_tasks_to_advance() -> tuple[list[str], int]:
-    """Returns (task_ids to dispatch this tick, total runnable count).
-    Selects up to ADVANCE_BATCH_SIZE runnable task_ids, oldest-updated-
-    first -- ix_tasks_status_updated_at (status, updated_at) keeps this
-    an index scan, not a full scan, as the tasks table keeps growing
-    (item 74). The total count is a second, cheap COUNT(*) against the
-    same index, purely for backlog visibility (see advance_active_tasks'
-    own log line and GET /health/tasks) -- it does no task-advancing
-    work itself; the actual execute_next_step() call happens in
-    advance_one_task below, on whichever worker eventually dequeues it."""
+async def _select_tasks_to_advance() -> tuple[list[tuple[str, str]], int]:
+    """Returns ([(task_id, tenant_id), ...] to dispatch this tick, total
+    runnable count across every tenant).
+
+    Same shape as _check_scheduled_agent_tasks()/_check_scheduled_pipelines()
+    above: `tasks` is RLS-protected, so the single unscoped query this used
+    to run (`select(Task.id).where(Task.status.in_(RUNNABLE_TASK_STATUSES))`,
+    no tenant loop) always saw zero rows under current_tenant_id='' --
+    confirmed live before this fix: a real QUEUED task for a real tenant,
+    _select_tasks_to_advance() still returned ([], 0). The auto-advance beat
+    tick (advance_active_tasks) has therefore been dispatching nothing, ever,
+    for any tenant, since RLS took effect -- silently, with no error anywhere.
+    One explicitly-scoped pass per tenant instead, same as the other sweepers.
+
+    ADVANCE_BATCH_SIZE now caps the GLOBAL dispatch across all tenants in one
+    tick (accumulated across the per-tenant loop, oldest-updated-first within
+    each tenant's own slice) rather than per tenant -- preserves the original
+    per-tick ceiling this constant was sized for (item 74), now that a tick
+    covers every tenant instead of one unscoped query."""
     from sqlalchemy import func, select
     from database import AsyncSessionLocal
     from models.all_models import RUNNABLE_TASK_STATUSES, Task
+    from services.tenant_context import async_tenant_context
 
-    async with AsyncSessionLocal() as db:
-        total_runnable = await db.scalar(
-            select(func.count()).select_from(Task).where(Task.status.in_(RUNNABLE_TASK_STATUSES))
-        )
-        r = await db.execute(
-            select(Task.id)
-            .where(Task.status.in_(RUNNABLE_TASK_STATUSES))
-            .order_by(Task.updated_at.asc())
-            .limit(ADVANCE_BATCH_SIZE)
-        )
-        return [row[0] for row in r.all()], total_runnable
+    pairs: list[tuple[str, str]] = []
+    total_runnable = 0
+    for tenant_id in await _list_active_tenant_ids():
+        async with async_tenant_context(tenant_id):
+            async with AsyncSessionLocal() as db:
+                total_runnable += await db.scalar(
+                    select(func.count()).select_from(Task).where(Task.status.in_(RUNNABLE_TASK_STATUSES))
+                )
+                remaining = ADVANCE_BATCH_SIZE - len(pairs)
+                if remaining <= 0:
+                    continue
+                r = await db.execute(
+                    select(Task.id)
+                    .where(Task.status.in_(RUNNABLE_TASK_STATUSES))
+                    .order_by(Task.updated_at.asc())
+                    .limit(remaining)
+                )
+                pairs.extend((row[0], tenant_id) for row in r.all())
+    return pairs, total_runnable
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def advance_one_task(self, task_id: str):
+def advance_one_task(self, task_id: str, tenant_id: str):
     """The real per-task work, dispatched by advance_active_tasks above
     -- never called inline in the beat/scheduling process. Spreads the
     actual execute_next_step() work (tool calls, possible LLM-adapt
     calls) across the worker pool's own concurrency instead of
     serializing every runnable task inside one beat tick.
+
+    tenant_id (Integration Phase 4 fix): the scanner above already knows
+    it (it just read the row under that tenant's own scope) -- passed
+    through rather than rediscovered, same as fire_scheduled_agent_task.
+    execute_next_step()/_execute_next_step_locked() take only task_id and
+    rely entirely on the ambient tenant context a real HTTP request gets
+    from TenantContextMiddleware -- called from here, with no context
+    established, RLS hid the row from every caller, always, which is
+    exactly what made the beat tick dispatch nothing in the first place.
 
     not_runnable and task_busy are expected, silent outcomes -- a
     tenant with 20 tasks paused for approval would otherwise produce 20
@@ -398,6 +426,7 @@ def advance_one_task(self, task_id: str):
     check_scheduled_pipelines' own aggregate-logging convention."""
     import asyncio
     from database import engine
+    from services.tenant_context import tenant_context
     from modules.orchestration.task_executor import execute_next_step
 
     async def _run():
@@ -405,7 +434,8 @@ def advance_one_task(self, task_id: str):
         return await execute_next_step(task_id)
 
     try:
-        outcome = asyncio.run(_run())
+        with tenant_context(tenant_id):
+            outcome = asyncio.run(_run())
     except Exception as exc:
         log.error("advance_one_task_failed", task_id=task_id, error=str(exc))
         raise self.retry(exc=exc)

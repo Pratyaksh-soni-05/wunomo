@@ -124,12 +124,12 @@ async def test_task_approved_more_than_4_hours_after_it_started_does_not_die_on_
         "tool_name": "sync_source", "tool_args": {"source_id": "src-1"}, "status": TaskStepStatus.PENDING,
     }], status=TaskStatus.QUEUED, started_at=datetime.utcnow())
 
-    blocked = await execute_next_step(task_id)
+    blocked = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert blocked["outcome"] == "blocked_needs_approval"
 
     # Backdate paused_at by 5 hours -- more than MAX_TASK_WALL_CLOCK_HOURS
     # (4) -- to simulate an approval that sat untouched for real.
-    async with AsyncSessionLocal() as db:
+    async with tenant_session(tenant_id) as db:
         r = await db.execute(select(Task).where(Task.id == task_id))
         task = r.scalar_one()
         task.paused_at = datetime.utcnow() - timedelta(hours=5)
@@ -139,10 +139,10 @@ async def test_task_approved_more_than_4_hours_after_it_started_does_not_die_on_
         return {"status": "synced", "rows": 5}
     monkeypatch.setattr(executor_module, "_call_tool", _ok)
 
-    result = await resume_task(task_id, resolved_by=str(uuid.uuid4()), notes="approved late")
+    result = await _as_tenant(tenant_id, resume_task, task_id, resolved_by=str(uuid.uuid4()), notes="approved late")
     assert result["outcome"] == "step_succeeded", result
 
-    task, step = await _fresh(task_id, step_id)
+    task, step = await _fresh(tenant_id, task_id, step_id)
     assert task.status == TaskStatus.RUNNING
     assert step.status == TaskStepStatus.SUCCEEDED
     # ~5 hours of paused time got credited, not lost -- generous bounds

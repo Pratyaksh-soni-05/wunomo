@@ -305,7 +305,7 @@ async def test_tier1_resolves_a_real_paraphrase_via_token_overlap(client, monkey
 
     monkeypatch.setattr(executor_module, "_call_tool", _capture)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_succeeded"
     assert seen_args == [{"pipeline_id": "pl-sales"}]
 
@@ -335,10 +335,10 @@ async def test_tier1_refuses_a_tied_pool_instead_of_guessing(client):
         step_description="Perform root cause analysis on the identified stale sales data incident.",
     )
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "blocked_needs_approval"  # triage_incident is medium-risk
 
-    step = await _fresh_step(step_id)
+    step = await _fresh_step(tenant_id, step_id)
     # Tier 1 refused (tied pool, 1.0x margin) — the unresolved placeholder
     # reaches the approval card exactly as-is, never a guessed id.
     assert step.tool_args["incident_id"] == "sales_orders_stale_incident"
@@ -372,9 +372,9 @@ async def test_tier1_refuses_when_the_discovered_pool_is_empty(client, monkeypat
     monkeypatch.setattr(executor_module, "_call_tool", _always_not_found)
     monkeypatch.setattr(executor_module, "_adapt_step_args", _cant_improve)
 
-    outcome = await execute_next_step(task_id)
+    outcome = await _as_tenant(tenant_id, execute_next_step, task_id)
     assert outcome["outcome"] == "step_failed"
 
-    step = await _fresh_step(step_id)
+    step = await _fresh_step(tenant_id, step_id)
     assert step.status == TaskStepStatus.FAILED
     assert "no match" in step.error_message
