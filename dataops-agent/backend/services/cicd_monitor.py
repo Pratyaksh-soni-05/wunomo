@@ -5,10 +5,7 @@ import structlog
 from celery import shared_task
 from datetime import datetime, timezone
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
 
-from config import settings
 from models.cicd import PipelineDeployment, DeploymentStatus, CICDIncident
 
 log = structlog.get_logger()
@@ -30,25 +27,37 @@ def check_post_deploy_health():
 
 
 async def _check_all_monitored():
-    # Fresh engine per invocation (this runs in a long-lived Celery worker
-    # process, invoked repeatedly by Beat) — must dispose it when done so we
-    # don't leak a new connection pool every 60 seconds.
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    try:
-        Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-        async with Session() as db:
-            result = await db.execute(
-                select(PipelineDeployment).where(
-                    PipelineDeployment.monitoring_active == True,
-                    PipelineDeployment.status == DeploymentStatus.active,
+    """Integration Phase 4 (fifth confirmed instance of this bug shape --
+    see GOTCHAS): this used to open its own fresh engine/session with no
+    tenant context at all and query `pipeline_deployments` (RLS-protected,
+    migration b7d419e3f2a8) completely unscoped -- under real RLS that
+    always returned zero rows, for every tenant, on every 60s tick.
+    check_post_deploy_health is the CI/CD auto-rollback safety net; this
+    meant it had never actually detected a failing deployment since RLS
+    took effect. Same shape and same fix as the other four instances: one
+    explicitly-scoped pass per tenant via AsyncSessionLocal (the same
+    session factory every other correct Celery path uses -- not a second,
+    fresh create_async_engine), never a blanket unscoped query."""
+    from database import AsyncSessionLocal
+    from services.tenant_context import async_tenant_context
+    from services.tasks import _list_active_tenant_ids
+
+    tenant_ids = await _list_active_tenant_ids()
+    total_checked = 0
+    for tenant_id in tenant_ids:
+        async with async_tenant_context(tenant_id):
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(PipelineDeployment).where(
+                        PipelineDeployment.monitoring_active == True,
+                        PipelineDeployment.status == DeploymentStatus.active,
+                    )
                 )
-            )
-            monitored = result.scalars().all()
-            log.info("cicd.post_deploy_check", count=len(monitored))
-            for deployment in monitored:
-                await _check_one(db, deployment)
-    finally:
-        await engine.dispose()
+                monitored = result.scalars().all()
+                for deployment in monitored:
+                    await _check_one(db, deployment)
+                total_checked += len(monitored)
+    log.info("cicd.post_deploy_check", count=total_checked, tenants_checked=len(tenant_ids))
 
 
 async def _check_one(db, deployment: PipelineDeployment):
