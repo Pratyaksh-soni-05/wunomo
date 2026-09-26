@@ -1,0 +1,81 @@
+name: Guard Tests
+
+# Deliberately narrow: only the two standing guard tests
+# (tests/test_rls_coverage_guard.py, tests/test_celery_tenant_context_guard.py),
+# not the full ~22-minute suite, on every push/PR. This gives a fast,
+# visible red/green check on the two properties five/six independent
+# production bugs this integration found have already cost real work to
+# discover by hand -- see docs/context/STAGE_OWNERSHIP.md and GOTCHAS.md.
+#
+# Without a paid GitHub plan's branch protection this does not BLOCK a
+# merge, but a red check on a PR is real signal even unenforced.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  guard-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dataops-agent/backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dataops_user
+          POSTGRES_PASSWORD: ci_only_admin_password
+          POSTGRES_DB: dataops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      APP_ENV: test
+      APP_SECRET_KEY: ci-only-secret-not-used-for-anything-real
+      JWT_SECRET: ci-only-jwt-secret-not-used-for-anything-real
+      # The RLS migration provisions dataops_app (NOSUPERUSER, NOBYPASSRLS)
+      # with this password; DATABASE_URL/SYNC_DATABASE_URL below must match
+      # it exactly, same convention as .env.example.
+      APP_DB_PASSWORD: ci_only_app_password
+      DATABASE_URL: postgresql+asyncpg://dataops_app:ci_only_app_password@localhost:5432/dataops
+      SYNC_DATABASE_URL: postgresql+psycopg2://dataops_app:ci_only_app_password@localhost:5432/dataops
+      # dataops_user here is the Postgres service container's own superuser
+      # (POSTGRES_USER/POSTGRES_PASSWORD above), reached only by the
+      # migration/maintenance role -- never by the guard tests' own
+      # application-role assertions.
+      ADMIN_DATABASE_URL: postgresql+psycopg2://dataops_user:ci_only_admin_password@localhost:5432/dataops
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply migrations (provisions dataops_app + enables RLS)
+        run: alembic upgrade head
+
+      - name: Run the two standing guard tests
+        run: python -m pytest tests/test_rls_coverage_guard.py tests/test_celery_tenant_context_guard.py -v

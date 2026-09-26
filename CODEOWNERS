@@ -1,0 +1,35 @@
+# Security-core file ownership.
+#
+# Paths are repo-root-relative (GitHub CODEOWNERS matching rule) -- the
+# real application lives under dataops-agent/, so every entry below is
+# prefixed with that, even though this codebase's own docs/context/ files
+# refer to these same paths without the prefix (relative to dataops-agent/
+# itself). Any change touching one of these files should get a review
+# from the listed owner before merging, same standard as every other
+# security-core file this integration pass treated as load-bearing.
+#
+# This list matches docs/context/STAGE_OWNERSHIP.md's and GOTCHAS.md's own
+# "security-core" list, plus the two standing guard tests added during the
+# Wunomo Platform integration merge (2026-09) -- a change to either guard
+# test is exactly as sensitive as a change to what it enforces.
+
+dataops-agent/backend/services/encryption_service.py       @Daksh1509
+dataops-agent/backend/services/tenant_context.py           @Daksh1509
+dataops-agent/backend/api/v1/tenant_middleware.py           @Daksh1509
+dataops-agent/backend/services/rate_limit.py                @Daksh1509
+dataops-agent/backend/api/v1/rate_limit_middleware.py        @Daksh1509
+dataops-agent/backend/services/token_revocation.py          @Daksh1509
+dataops-agent/backend/services/prompt_guard.py               @Daksh1509
+dataops-agent/backend/services/audit_chain.py                @Daksh1509
+dataops-agent/backend/services/audit_anchor.py                @Daksh1509
+dataops-agent/backend/services/pii_classifier.py              @Daksh1509
+dataops-agent/backend/services/mfa_service.py                  @Daksh1509
+dataops-agent/backend/services/sso_service.py                  @Daksh1509
+dataops-agent/backend/services/rbac.py                          @Daksh1509
+dataops-agent/backend/modules/transformation/sql_guard.py        @Daksh1509
+dataops-agent/backend/modules/transformation/python_guard.py     @Daksh1509
+dataops-agent/backend/modules/transformation/python_sandbox.py    @Daksh1509
+dataops-agent/backend/agent/approval_executor.py                  @Daksh1509
+dataops-agent/backend/agent/personality.py                        @Daksh1509
+dataops-agent/backend/tests/test_rls_coverage_guard.py             @Daksh1509
+dataops-agent/backend/tests/test_celery_tenant_context_guard.py    @Daksh1509
