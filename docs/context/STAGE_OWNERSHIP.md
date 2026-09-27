@@ -153,3 +153,48 @@ these:
   acceptable pattern going forward, specifically because it's fail-closed
   at import time (crashes rather than silently under-gating) and derived
   from existing RBAC tiers — not a fresh hand-list.
+
+## Post-merge infrastructure findings (2026-09-27)
+
+- **Connection-pool exhaustion — a genuine infrastructure capacity finding,
+  distinct from the five-instance tenant-context pattern above.** Celery's
+  prefork model multiplies per-process pool sizing by worker count:
+  backend, celery_worker (--concurrency=4, four independent OS processes),
+  and celery_beat each independently import database.py and build their
+  own SQLAlchemy engine/pool. At pool_size=10/max_overflow=20 that was a
+  30-connection ceiling per process — five processes deep for a worst-case
+  150-180 against Postgres's default max_connections=100. Fixed via
+  database.py's non-test branch (pool_size/max_overflow reduced to 5/5,
+  ceiling 10/process) plus docker-compose.yml's postgres service
+  (max_connections raised to 200). Worth knowing before spinning up any
+  additional service/worker in a future stage — the same multiplication
+  applies to any new process that imports database.py.
+
+- **Two CI workflows now in place.** guard-tests.yml runs the two standing
+  guard tests on every push/PR (~15s). full-suite.yml runs the complete
+  suite post-merge (push to master), nightly, and via workflow_dispatch —
+  deliberately not per-PR, given the cost. full-suite.yml runs inside a
+  job-level `container:` block (python:3.11-slim, matching backend/
+  Dockerfile's own base image) specifically so it shares the same Docker
+  network as its service containers and hostnames like "postgres"/"redis"
+  resolve exactly as they do locally under docker-compose — the bare
+  ubuntu-latest runner alone only has localhost port-forwarding to
+  service containers, which broke any test asserting against the real
+  docker-compose service name (Hard Rule 4's own convention). **Any new
+  test requiring a real external credential** (an LLM API key, a webhook
+  URL, SMTP) needs one of two treatments in full-suite.yml, matching the
+  distinction the suite already makes elsewhere: a CI-only dummy value
+  added to the workflow's env block, if the test only needs client
+  construction/config-shape to succeed and never a real call (the
+  established pattern for CREDENTIAL_ENCRYPTION_KEY, GEMINI_API_KEY,
+  GROQ_API_KEY, SLACK_WEBHOOK_URL, SMTP_*) — or an explicit live_llm-style
+  pytest marker excluding it from CI entirely, if it genuinely needs a
+  working credential and real network access.
+
+- **Confirmed finding: the two previously-known local test flakes did not
+  reproduce in any of three fresh, real CI runs** —
+  test_check_scheduled_agent_tasks_invalid_cron_does_not_crash and
+  test_total_runnable_count_reflects_the_real_backlog_not_just_the_capped_batch.
+  Both are attributable to accumulated local dev-DB state, not a real code
+  defect — consistent with the same tenant-accumulation/no-teardown
+  problem documented in GOTCHAS.md, not a new concern.
