@@ -5,11 +5,20 @@ from sqlalchemy.pool import NullPool
 from config import settings
 
 
-# NullPool in test env prevents asyncpg connections leaking across event loop boundaries
+# NullPool in test env prevents asyncpg connections leaking across event loop boundaries.
+#
+# pool_size/max_overflow (2026-09): backend + celery_worker (--concurrency=4) + celery_beat
+# each import this module independently and build their own engine/pool, so the real
+# per-Postgres ceiling is this number times 5 processes, not once. At 10/20 that was a
+# 30-per-process ceiling -- 150 across all 5 against a default max_connections=100, which is
+# what produced Pratyaksh's TooManyConnectionsError under a live docker-compose full run
+# (backend + celery_worker x4 + celery_beat + test client concurrent). 5/5 gives a 10-per-
+# process ceiling -- 50 total, comfortably under even the un-raised 100 -- with headroom to
+# spare against the max_connections=200 now set in docker-compose.yml. See GOTCHAS.md.
 _pool_kwargs = (
     {"poolclass": NullPool}
     if settings.APP_ENV == "test"
-    else {"pool_size": 10, "max_overflow": 20, "pool_pre_ping": True}
+    else {"pool_size": 5, "max_overflow": 5, "pool_pre_ping": True}
 )
 
 engine = create_async_engine(
