@@ -27,6 +27,16 @@ name: Full Suite
 # flags, not arguments to the containerized postgres process, so a
 # `-c max_connections=...` there would not do what it looks like it does.
 # The default image max_connections=100 is left as-is deliberately.
+#
+# The job runs inside a container (python:3.11-slim, matching backend/
+# Dockerfile's own base image), not directly on the bare runner -- needed
+# so service containers are reachable by their service name ("postgres",
+# "redis") rather than only "localhost". test_source_test_connection.py
+# deliberately hardcodes host="postgres" (Hard Rule 4's own real docker-
+# compose service name), which only resolves this way; the first two real
+# runs (36313716746, 36314597444) both hit this, uniformly returning
+# "connection_failed" for every real-postgres-target assertion, until this
+# was added.
 
 on:
   push:
@@ -40,6 +50,8 @@ on:
 jobs:
   full-suite:
     runs-on: ubuntu-latest
+    container:
+      image: python:3.11-slim
     defaults:
       run:
         working-directory: dataops-agent/backend
@@ -51,8 +63,6 @@ jobs:
           POSTGRES_USER: dataops_user
           POSTGRES_PASSWORD: ci_only_admin_password
           POSTGRES_DB: dataops
-        ports:
-          - 5432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 5s
@@ -60,8 +70,6 @@ jobs:
           --health-retries 10
       redis:
         image: redis:7-alpine
-        ports:
-          - 6379:6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s
@@ -78,26 +86,51 @@ jobs:
       # secret in any sense that matters, discarded with the job, but it must
       # actually be valid or every one of those tests fails identically.
       CREDENTIAL_ENCRYPTION_KEY: kbi5ccItexX6sOg2TozHjRiYL3MQdSlrUw4Ex2Tlj20=
+      # These two are set locally in .env, so guard-tests.yml's narrow scope
+      # never needed them, but any test constructing a real LLM client (even
+      # just to test caching/routing/attribution, never actually generating)
+      # does at client-construction time -- groq.Groq()/ChatGoogleGenerativeAI()
+      # both validate a key is merely PRESENT before any network call, so a
+      # dummy, non-functional value satisfies construction without touching
+      # real, quota-limited credentials or making this job spend any quota.
+      GEMINI_API_KEY: ci-only-dummy-not-a-real-key
+      GROQ_API_KEY: gsk_ci_only_dummy_not_a_real_key
+      # Same story for test_scheduled_agent_tasks.py's notification tests --
+      # locally-set, CI-only-dummy here. send_alert()/send_slack() early-exit
+      # ("no_webhook_configured"/"no_email_configured") without these, which
+      # left those tests' captured-payload spies empty rather than failing on
+      # the payload content itself.
+      SLACK_WEBHOOK_URL: https://hooks.slack.example/ci-only-dummy
+      SMTP_HOST: ci-only-dummy-smtp.example
+      SMTP_PORT: "587"
+      SMTP_USER: ci-only-dummy
+      SMTP_PASSWORD: ci-only-dummy-not-a-real-password
+      SMTP_FROM: ci-dummy@example.com
       # Same convention as guard-tests.yml / .env.example: dataops_app is the
       # RLS-bound, non-superuser application role; DATABASE_URL/SYNC_DATABASE_URL
-      # must use it, never dataops_user.
+      # must use it, never dataops_user. Hostnames are the service names, not
+      # localhost -- this job runs inside its own container (see `container:`
+      # above), on the same Docker network Actions puts the service containers
+      # on, exactly like docker-compose's own bridge network locally.
       APP_DB_PASSWORD: ci_only_app_password
-      DATABASE_URL: postgresql+asyncpg://dataops_app:ci_only_app_password@localhost:5432/dataops
-      SYNC_DATABASE_URL: postgresql+psycopg2://dataops_app:ci_only_app_password@localhost:5432/dataops
-      ADMIN_DATABASE_URL: postgresql+psycopg2://dataops_user:ci_only_admin_password@localhost:5432/dataops
-      REDIS_URL: redis://localhost:6379/0
-      CELERY_BROKER_URL: redis://localhost:6379/1
-      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+      DATABASE_URL: postgresql+asyncpg://dataops_app:ci_only_app_password@postgres:5432/dataops
+      SYNC_DATABASE_URL: postgresql+psycopg2://dataops_app:ci_only_app_password@postgres:5432/dataops
+      ADMIN_DATABASE_URL: postgresql+psycopg2://dataops_user:ci_only_admin_password@postgres:5432/dataops
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      # No actions/setup-python here -- the job container already is
+      # python:3.11-slim, matching backend/Dockerfile's own base image
+      # exactly rather than approximately.
+      - name: Install system dependencies (matches backend/Dockerfile)
+        run: apt-get update && apt-get install -y --no-install-recommends build-essential libpq-dev curl
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install Python dependencies
+        run: pip install --no-cache-dir -r requirements.txt
 
       - name: Apply migrations (provisions dataops_app + enables RLS)
         run: alembic upgrade head
