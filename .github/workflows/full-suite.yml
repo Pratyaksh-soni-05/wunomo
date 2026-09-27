@@ -1,0 +1,100 @@
+name: Full Suite
+
+# The complete test suite, deliberately separate from guard-tests.yml (which
+# stays the fast, always-on per-push/PR check). This one is expensive --
+# close to guard-tests.yml's ~15s vs. this file's own ~15-25 minutes -- so it
+# runs only on push to master (post-merge, not per-PR) and on a nightly
+# schedule, plus workflow_dispatch for on-demand manual runs.
+#
+# Service containers are fresh/empty on every run (GitHub Actions' own
+# default -- no persistent volume across jobs), which structurally rules out
+# the tenant-accumulation/no-teardown problem documented in GOTCHAS.md (the
+# one that inflated a LOCAL, long-lived, ever-growing dev DB's full-suite
+# time from a genuine ~41min baseline to 2:38:43 by way of ~10,685
+# accumulated tenant rows). That was never a connection-pool problem, and
+# is a different failure mode from the one below -- this workflow can't
+# reproduce either, since every run starts at zero rows AND zero prior
+# connections.
+#
+# The docker-compose.yml connection-pool fix made alongside this workflow
+# (2026-09, for the ACTUAL exhaustion Pratyaksh hit locally: backend +
+# celery_worker x4 processes + celery_beat each independently pooling via
+# database.py, previously 10/20 -> a 150-possible-against-100 overcommit)
+# is NOT mirrored here. This job never runs live celery_worker/celery_beat
+# containers alongside pytest -- CI's APP_ENV=test uses NullPool, a
+# separate mechanism (see database.py) -- so it was never exposed to that
+# failure mode, and GitHub Actions' service `options:` are docker-create
+# flags, not arguments to the containerized postgres process, so a
+# `-c max_connections=...` there would not do what it looks like it does.
+# The default image max_connections=100 is left as-is deliberately.
+
+on:
+  push:
+    branches: [ master ]
+  schedule:
+    # 06:17 UTC nightly -- off the hour, avoiding the shared top-of-hour
+    # scheduling crunch GitHub Actions documents for cron triggers.
+    - cron: "17 6 * * *"
+  workflow_dispatch: { }
+
+jobs:
+  full-suite:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dataops-agent/backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dataops_user
+          POSTGRES_PASSWORD: ci_only_admin_password
+          POSTGRES_DB: dataops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      APP_ENV: test
+      APP_SECRET_KEY: ci-only-secret-not-used-for-anything-real
+      JWT_SECRET: ci-only-jwt-secret-not-used-for-anything-real
+      # Same convention as guard-tests.yml / .env.example: dataops_app is the
+      # RLS-bound, non-superuser application role; DATABASE_URL/SYNC_DATABASE_URL
+      # must use it, never dataops_user.
+      APP_DB_PASSWORD: ci_only_app_password
+      DATABASE_URL: postgresql+asyncpg://dataops_app:ci_only_app_password@localhost:5432/dataops
+      SYNC_DATABASE_URL: postgresql+psycopg2://dataops_app:ci_only_app_password@localhost:5432/dataops
+      ADMIN_DATABASE_URL: postgresql+psycopg2://dataops_user:ci_only_admin_password@localhost:5432/dataops
+      REDIS_URL: redis://localhost:6379/0
+      CELERY_BROKER_URL: redis://localhost:6379/1
+      CELERY_RESULT_BACKEND: redis://localhost:6379/2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Apply migrations (provisions dataops_app + enables RLS)
+        run: alembic upgrade head
+
+      - name: Run the full test suite
+        run: python -m pytest tests/ -v --tb=short
