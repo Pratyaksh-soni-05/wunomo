@@ -72,6 +72,12 @@ jobs:
       APP_ENV: test
       APP_SECRET_KEY: ci-only-secret-not-used-for-anything-real
       JWT_SECRET: ci-only-jwt-secret-not-used-for-anything-real
+      # Needed the moment the suite goes beyond the two guard tests: any
+      # DataSource/credential-touching test hits encryption_service, which
+      # requires a real, valid (32 url-safe base64 byte) Fernet key -- not a
+      # secret in any sense that matters, discarded with the job, but it must
+      # actually be valid or every one of those tests fails identically.
+      CREDENTIAL_ENCRYPTION_KEY: kbi5ccItexX6sOg2TozHjRiYL3MQdSlrUw4Ex2Tlj20=
       # Same convention as guard-tests.yml / .env.example: dataops_app is the
       # RLS-bound, non-superuser application role; DATABASE_URL/SYNC_DATABASE_URL
       # must use it, never dataops_user.
