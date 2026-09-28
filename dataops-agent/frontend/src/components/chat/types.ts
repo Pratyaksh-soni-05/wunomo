@@ -28,4 +28,15 @@ export interface LocalChatMessage extends ChatMessageItem {
   // ChatMessage rows carry no such column) -- purely a during-the-stream
   // routing key, same lifecycle as taskCard above.
   task_id?: string;
+  // Per-message "is this bubble still live" flag -- replaces the old
+  // "the streaming message is whichever one is last in the array"
+  // assumption, which broke the instant a second concurrent bubble was
+  // appended after the first (the first permanently stopped being "last",
+  // so it permanently stopped showing as streaming even while its own
+  // tokens kept arriving). Set true at creation (the generic single-agent
+  // placeholder, or a supervisor task bubble on its first "queued"/
+  // "running" event) and false at that same message's own terminal event
+  // (onDone for the single-agent placeholder, the terminal supervisor_task
+  // status for a task bubble) -- never derived from array position.
+  streaming?: boolean;
 }

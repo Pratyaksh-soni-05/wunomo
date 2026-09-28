@@ -455,7 +455,13 @@ export function MessageThread({
               timestamp={m.timestamp}
               content={m.content}
               toolCalls={m.tool_calls}
-              streaming={isStreamingPlaceholder && i === messages.length - 1}
+              // Per-message, not "whichever bubble is last in the array"
+              // -- with two+ concurrent supervisor tasks there is no
+              // single "current" streaming message, and the array-
+              // position check permanently stopped showing an earlier
+              // bubble as streaming the moment a later one was appended
+              // after it, even while its own tokens kept arriving.
+              streaming={sending && !!m.streaming}
               approvals={m.approvals}
               onGoToApprovals={onGoToApprovals}
               currentUserRole={currentUserRole}

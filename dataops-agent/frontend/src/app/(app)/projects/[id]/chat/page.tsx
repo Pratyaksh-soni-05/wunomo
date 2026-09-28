@@ -266,7 +266,9 @@ export default function ProjectChatTab() {
     const lengthBeforeSend = messages.length;
 
     const userMsg: LocalChatMessage = { role: "user", content: text, tool_calls: [], timestamp: new Date().toISOString() };
-    const placeholderMsg: LocalChatMessage = { role: "assistant", content: "", tool_calls: [], timestamp: new Date().toISOString() };
+    const placeholderMsg: LocalChatMessage = {
+      role: "assistant", content: "", tool_calls: [], timestamp: new Date().toISOString(), streaming: true,
+    };
     setMessages((prev) => [...prev, userMsg, placeholderMsg]);
     setDraft("");
     setSendError(null);
@@ -294,26 +296,37 @@ export default function ProjectChatTab() {
     // tool_end/terminal event carrying the same task_id. Parallel tasks
     // stream concurrently with genuinely interleaved events, so lookup is
     // always by id, never "the last message".
-    let convertedGenericPlaceholder = false;
+    // Set the moment the first supervisor_task event of this turn arrives
+    // -- onDone (below) must never mutate "the last message" once this is
+    // true, since the last message by then is a real per-task bubble, not
+    // the generic placeholder onDone was written to update. A plain
+    // closure variable is fine for this one (isStale() reads chatGenerationRef
+    // the same way) -- it's never read or written from inside a setState
+    // updater, unlike the mistake this replaces just below.
+    let isSupervisorTurn = false;
     const ensureTaskMessage = (taskId: string, agentId: string) => {
       if (isStale()) return;
+      isSupervisorTurn = true;
       setMessages((prev) => {
         if (prev.some((m) => m.task_id === taskId)) return prev;
         // The first supervisor_task event of this turn -- the generic
         // single-agent placeholder pushed at send() turned out to be
         // premature (this is a multi-agent turn); drop it rather than
         // leave an orphaned empty bubble alongside the real per-task
-        // ones. Filtered anywhere in the array, not just "if it's last"
-        // -- two "queued" acks can arrive close enough together that a
-        // naive last-message check misses the generic placeholder once
-        // the first per-task bubble has already been appended after it.
-        const base = !convertedGenericPlaceholder
-          ? prev.filter((m) => !(m.role === "assistant" && m.content === "" && !m.task_id && !m.isSystemNotice))
-          : prev;
-        convertedGenericPlaceholder = true;
+        // ones. Re-derived from `prev` on every call (never a "have we
+        // already done this" flag closed over outside setState) -- React
+        // 18 Strict Mode double-invokes a setState updater in development
+        // to catch exactly this shape of impurity, and a flag mutated
+        // inside the updater desyncs across the two invocations: the
+        // first run filters and flips the flag, the discarded-and-replayed
+        // second run then sees the flag already set and skips filtering,
+        // so the placeholder never actually leaves `prev`. Filtering
+        // unconditionally is idempotent instead -- a no-op once the
+        // placeholder is already gone, on every replay.
+        const base = prev.filter((m) => !(m.role === "assistant" && m.content === "" && !m.task_id && !m.isSystemNotice));
         return [...base, {
           role: "assistant", content: "", tool_calls: [], timestamp: new Date().toISOString(),
-          agent_id: agentId, task_id: taskId,
+          agent_id: agentId, task_id: taskId, streaming: true,
         }];
       });
     };
@@ -424,7 +437,7 @@ export default function ProjectChatTab() {
               ? "This task failed."
               : null;
             updateTaskMessage(data.task_id, (msg) => ({
-              ...msg, agent_id: data.agent_id, content: data.response ?? fallbackText ?? msg.content,
+              ...msg, agent_id: data.agent_id, content: data.response ?? fallbackText ?? msg.content, streaming: false,
             }));
           },
           onSystemLine: ({ text }) => {
@@ -478,7 +491,18 @@ export default function ProjectChatTab() {
             // (a real, disclosed gap -- see this build's own report), but
             // must not keep doing so for the tail end between `done` and
             // the history refetch below finishing.
-            updatePlaceholder((msg) => ({ ...msg, agent_id: doneData.agent_id }));
+            //
+            // Supervisor turns skip this entirely: by the time `done`
+            // fires every dispatched task has already reached its own
+            // terminal supervisor_task event (run_supervisor() doesn't
+            // return, and this event doesn't fire, until every wave has
+            // drained), and doneData.agent_id is always null on this path
+            // (no single agent "is" the responder) -- applying it here
+            // would overwrite whichever task bubble happens to be last in
+            // the array with a null agent_id, discarding its real avatar.
+            if (!isSupervisorTurn) {
+              updatePlaceholder((msg) => ({ ...msg, agent_id: doneData.agent_id, streaming: false }));
+            }
           },
         },
       );
