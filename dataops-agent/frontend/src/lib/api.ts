@@ -585,6 +585,17 @@ export interface ChatStreamSupervisorTask {
   // ChatMessage id, so a live-pushed render can be reconciled with the
   // same row the next history refetch returns, not just re-added.
   message_id: string | null;
+  // Present only on a "paused_needs_approval" emission (§7.3.E) -- the
+  // real ApprovalRequest just created for this task's first blocked call,
+  // and the same describe_unblocked_dependents() sentence
+  // PolicyEngine._serialize() computes for the polled GET /approvals/{id}
+  // ("Approving this also unblocks Ravi's task"), relayed live instead of
+  // requiring a second round-trip just to render the card the moment it
+  // appears. null on every other status.
+  approval_request_id?: string | null;
+  risk_level?: string | null;
+  reason?: string | null;
+  unblocks?: string | null;
 }
 
 // Shape I (§7.3.I) content that arrives live before it's persisted (an
