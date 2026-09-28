@@ -112,9 +112,11 @@ export function MessageThread({
   // styling ToolCallBlock already uses for a blocked call, since the SSE
   // event carries only an approval id, not enough detail (risk_level,
   // reason, which tool) to attach to one specific ToolCallBlock the way a
-  // fully-resolved history message can. Absent/undefined on the buffered
-  // path (sendChatMessage) — this prop only exists so a caller wired to
-  // sendChatMessageStream() can surface it.
+  // fully-resolved history message can. Wired up by
+  // projects/[id]/chat/page.tsx; app/(app)/chat/page.tsx doesn't pass it
+  // (an approval still reaches its message once persisted, just without
+  // this live pre-completion banner) -- always optional, never assumed
+  // present by this component.
   liveNotice?: string | null;
   personalityMode: string;
   operationMode: string;

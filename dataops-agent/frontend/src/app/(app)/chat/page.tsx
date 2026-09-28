@@ -7,10 +7,10 @@ import { useToast } from "@/components/ui";
 import { SessionList, MessageThread, ContextPanel, type LocalChatMessage } from "@/components/chat";
 import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
 import {
-  getToken, decodeUserFromToken, getChatSessions, getChatHistory, sendChatMessage, getSources,
+  getToken, decodeUserFromToken, getChatSessions, getChatHistory, sendChatMessageStream, getSources,
   deleteChatSession, listChannels, createChannel, getChannel, addChannelAgent, removeChannelAgent,
   addChannelUser, removeChannelUser, listSelectableAgents, getTeamMembers, uploadToChannel,
-  ApiError, type ChatContext, type TaskItem,
+  ApiError, type ChatContext, type ChatToolCall, type TaskItem,
 } from "@/lib/api";
 
 export default function ChatPage() {
@@ -252,46 +252,203 @@ export default function ChatPage() {
     }
   };
 
+  // Streaming (POST /api/v1/chat/stream) -- this page stayed on the
+  // buffered sendChatMessage() until the per-task_id concurrent-rendering
+  // path (projects/[id]/chat/page.tsx) was live-verified with two real
+  // agents streaming at once; see that page's own history for the fix
+  // this port already carries (streaming keyed per-message, never by
+  // array position; ensureTaskMessage's setState updater kept pure against
+  // React 18 Strict Mode's double-invoke). Ported logic, not a rewrite --
+  // this page's own extras (1:1 AXIOM Direct sessions, New Chat, session
+  // deletion, ?session= deep-link) are untouched, none of them live inside
+  // send() itself.
   const send = async () => {
     const text = draft.trim();
     if (!text || sending) return;
 
     const myGeneration = chatGenerationRef.current;
     const sessionAtSendTime = activeSessionId;
+    const isStale = () => chatGenerationRef.current !== myGeneration;
+
+    // Captured before anything is appended -- a hard failure below trims
+    // back to exactly this length regardless of how many messages this
+    // attempt added (a supervisor turn can add several per-task
+    // placeholders plus system lines/handoffs, not just one).
+    const lengthBeforeSend = messages.length;
 
     const userMsg: LocalChatMessage = { role: "user", content: text, tool_calls: [], timestamp: new Date().toISOString() };
-    setMessages((prev) => [...prev, userMsg]);
+    const placeholderMsg: LocalChatMessage = {
+      role: "assistant", content: "", tool_calls: [], timestamp: new Date().toISOString(), streaming: true,
+    };
+    setMessages((prev) => [...prev, userMsg, placeholderMsg]);
     setDraft("");
     setSendError(null);
     setSending(true);
 
-    try {
-      const res = await sendChatMessage(token, {
-        message: text,
-        session_id: sessionAtSendTime ?? undefined,
-        personality_mode: personalityMode,
-        operation_mode: operationMode,
-        context: attachedContext ?? undefined,
+    // Single-agent path only -- a supervisor turn routes by task_id via
+    // updateTaskMessage below instead, since more than one message can be
+    // live at once.
+    const updatePlaceholder = (fn: (msg: LocalChatMessage) => LocalChatMessage) => {
+      if (isStale()) return;
+      setMessages((prev) => {
+        if (prev.length === 0 || prev[prev.length - 1].role !== "assistant") return prev;
+        return [...prev.slice(0, -1), fn(prev[prev.length - 1])];
       });
-      // A "New Chat" click since this request went out invalidates its
-      // response - applying it now would silently reattach the old
-      // session_id (or a stale message) onto whatever thread the user has
-      // moved on to.
-      if (chatGenerationRef.current !== myGeneration) return;
-      const assistantMsg: LocalChatMessage = {
-        role: "assistant", content: res.response, tool_calls: res.tool_calls,
-        timestamp: res.timestamp, approvals: res.pending_approvals,
-        // provider: null is exclusively how a channel routing failure
-        // (unknown mention, not-a-member, ambiguous/no mention) comes
-        // back -- a real reply always carries a real provider string.
-        isSystemNotice: res.provider === null,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
-      setProvider(res.provider);
-      if (!sessionAtSendTime) setActiveSessionId(res.session_id);
+    };
+
+    // Supervisor path: one streaming bubble per task_id, created the
+    // moment its "queued" ack arrives and updated in place by every later
+    // token/tool_start/tool_end/terminal event carrying the same task_id.
+    // Parallel tasks stream concurrently with genuinely interleaved
+    // events, so lookup is always by id, never "the last message".
+    let isSupervisorTurn = false;
+    const ensureTaskMessage = (taskId: string, agentId: string) => {
+      if (isStale()) return;
+      isSupervisorTurn = true;
+      setMessages((prev) => {
+        if (prev.some((m) => m.task_id === taskId)) return prev;
+        // The generic single-agent placeholder pushed above turned out to
+        // be premature (this is a multi-agent turn) -- drop it rather than
+        // leave an orphaned empty bubble alongside the real per-task ones.
+        // Re-derived from `prev` on every call, never a "have we already
+        // done this" flag closed over outside setState -- see this pass's
+        // own commit for why that shape breaks under Strict Mode.
+        const base = prev.filter((m) => !(m.role === "assistant" && m.content === "" && !m.task_id && !m.isSystemNotice));
+        return [...base, {
+          role: "assistant", content: "", tool_calls: [], timestamp: new Date().toISOString(),
+          agent_id: agentId, task_id: taskId, streaming: true,
+        }];
+      });
+    };
+    const updateTaskMessage = (taskId: string, fn: (msg: LocalChatMessage) => LocalChatMessage) => {
+      if (isStale()) return;
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.task_id === taskId);
+        if (idx === -1) return prev;
+        const next = [...prev];
+        next[idx] = fn(next[idx]);
+        return next;
+      });
+    };
+
+    let doneSessionId: string | null = null;
+    try {
+      await sendChatMessageStream(
+        token,
+        {
+          message: text,
+          session_id: sessionAtSendTime ?? undefined,
+          personality_mode: personalityMode,
+          operation_mode: operationMode,
+          context: attachedContext ?? undefined,
+        },
+        {
+          onStart: ({ agent_id }) => updatePlaceholder((msg) => ({ ...msg, agent_id })),
+          onToken: ({ delta, task_id }) => {
+            if (task_id) { updateTaskMessage(task_id, (msg) => ({ ...msg, content: msg.content + delta })); return; }
+            updatePlaceholder((msg) => ({ ...msg, content: msg.content + delta }));
+          },
+          onToolStart: ({ name, args_summary, task_id }) => {
+            const appendTool = (msg: LocalChatMessage): LocalChatMessage => ({
+              ...msg,
+              tool_calls: [
+                ...msg.tool_calls,
+                { tool: name, args: {}, args_summary, result: null, status: "running" } as ChatToolCall,
+              ],
+            });
+            if (task_id) { updateTaskMessage(task_id, appendTool); return; }
+            updatePlaceholder(appendTool);
+          },
+          onToolEnd: ({ name, result_summary, ok, task_id }) => {
+            const resolveTool = (msg: LocalChatMessage): LocalChatMessage => {
+              const lastRunningIdx = msg.tool_calls.map((c, i) => ({ c, i }))
+                .reverse().find(({ c }) => c.tool === name && c.status === "running")?.i;
+              if (lastRunningIdx === undefined) return msg;
+              const tool_calls = [...msg.tool_calls];
+              tool_calls[lastRunningIdx] = { ...tool_calls[lastRunningIdx], status: ok ? "completed" : "failed", result_summary };
+              return { ...msg, tool_calls };
+            };
+            if (task_id) { updateTaskMessage(task_id, resolveTool); return; }
+            updatePlaceholder(resolveTool);
+          },
+          onError: ({ message, kind }) => {
+            if (isStale()) return;
+            if (kind) {
+              console.warn(`[supervisor] refusal (${kind}) has no shape-H UI built for it yet:`, message);
+            }
+            setSendError(message);
+          },
+          onSupervisorTask: (data) => {
+            if (isStale()) return;
+            if (data.status === "queued" || data.status === "running") {
+              ensureTaskMessage(data.task_id, data.agent_id);
+              return;
+            }
+            ensureTaskMessage(data.task_id, data.agent_id);
+            const fallbackText = data.status === "paused_needs_approval"
+              ? "Paused, waiting for approval."
+              : data.status === "failed"
+              ? "This task failed."
+              : null;
+            updateTaskMessage(data.task_id, (msg) => ({
+              ...msg, agent_id: data.agent_id, content: data.response ?? fallbackText ?? msg.content, streaming: false,
+            }));
+          },
+          onSystemLine: ({ text: lineText }) => {
+            if (isStale()) return;
+            setMessages((prev) => [...prev, {
+              role: "assistant", content: lineText, tool_calls: [],
+              timestamp: new Date().toISOString(), isSystemNotice: true,
+            }]);
+          },
+          onHandoff: ({ from_agent_name, to_agent_name, payload_summary, withheld }) => {
+            if (isStale()) return;
+            const text = `${from_agent_name} handed over to ${to_agent_name}. ${payload_summary}`
+              + (withheld.length > 0 ? ` (${to_agent_name} did not receive: ${withheld.join(", ")}.)` : "");
+            setMessages((prev) => [...prev, {
+              role: "assistant", content: text, tool_calls: [],
+              timestamp: new Date().toISOString(), isSystemNotice: true,
+            }]);
+          },
+          onNeedsClarification: (data) => {
+            console.warn("[supervisor] needs_clarification has no shape-G UI built for it yet:", data);
+          },
+          onDone: (doneData) => {
+            if (isStale()) return;
+            setProvider(doneData.provider);
+            doneSessionId = doneData.session_id;
+            // Supervisor turns skip this: doneData.agent_id is always null
+            // on that path, and applying it here would overwrite whichever
+            // task bubble happens to be last in the array.
+            if (!isSupervisorTurn) {
+              updatePlaceholder((msg) => ({ ...msg, agent_id: doneData.agent_id, streaming: false }));
+            }
+          },
+        },
+      );
+
+      if (isStale()) return;
+      if (!sessionAtSendTime && doneSessionId) setActiveSessionId(doneSessionId);
+      const historySessionId = doneSessionId ?? sessionAtSendTime;
+      // Replace the locally-accumulated placeholder(s) with the real
+      // persisted turn (full args/results, real approval risk_level/
+      // reason) -- the same full-fidelity data GET .../history always has.
+      if (historySessionId) {
+        try {
+          const history = await getChatHistory(token, historySessionId);
+          if (!isStale()) setMessages(history.messages);
+        } catch {
+          // Keep the locally-accumulated placeholder rather than losing
+          // the turn the user just watched complete.
+        }
+      }
       qc.invalidateQueries({ queryKey: ["chat-sessions"] });
     } catch (err) {
-      if (chatGenerationRef.current !== myGeneration) return;
+      if (isStale()) return;
+      // Remove everything this attempt optimistically added on a hard
+      // failure -- matching the old buffered path, which never added
+      // anything when sendChatMessage() itself threw.
+      setMessages((prev) => prev.slice(0, lengthBeforeSend));
       // Wunomo Projects Phase 2 frontend, slice 9: every ApiError used to
       // collapse to the same "try rephrasing" text regardless of status --
       // actively wrong for a 402, since rephrasing can't fix an exhausted
@@ -327,7 +484,7 @@ export default function ChatPage() {
       setSendError(message);
       toast.push(message, "danger");
     } finally {
-      if (chatGenerationRef.current === myGeneration) setSending(false);
+      if (!isStale()) setSending(false);
     }
   };
 
