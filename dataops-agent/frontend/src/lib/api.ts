@@ -520,10 +520,12 @@ export function getChatHistory(token: string, sessionId: string): Promise<{ sess
 //
 // Kept entirely separate from sendChatMessage()/request() above: the
 // buffered endpoint stays untouched and this is additive, not a
-// replacement. Currently wired into the project chat page only (see
-// app/(app)/projects/[id]/chat/page.tsx) — the direct AXIOM chat page
-// (app/(app)/chat/page.tsx) stays on sendChatMessage() until this path is
-// proven.
+// replacement. Wired into both chat surfaces: the project chat page
+// (app/(app)/projects/[id]/chat/page.tsx) and, since this path was
+// live-verified with two real concurrent supervisor tasks, the direct
+// AXIOM chat page (app/(app)/chat/page.tsx) too. Neither chat page calls
+// sendChatMessage() anymore -- it's kept defined below, unused, rather
+// than deleted in the same pass that stopped calling it.
 
 // The very first event on every stream, before any token -- the
 // responding agent is already resolved server-side before the run even
