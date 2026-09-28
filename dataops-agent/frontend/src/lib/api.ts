@@ -474,6 +474,20 @@ export interface ChatMessageItem {
   // @mention anyone -- never guess an agent when this is null.
   agent_id?: string | null;
   mentioned_agent_id?: string | null;
+  // Present only on a system_notice row reconstructed from a real Handoff
+  // row (api/v1/chat.py's _handoff_entries) -- the same structured fields
+  // the live "handoff" SSE event carries, added so §7.3.F's real card
+  // (separate from/to avatars, its own payload_summary line, a distinct
+  // withheld line) survives a page reload instead of degrading to the
+  // flattened `content` sentence. A system_notice row without
+  // `from_agent_id` (an inferred-edge explanation) has none of these --
+  // render it via shape I using `content`, never assume this shape.
+  from_agent_id?: string | null;
+  from_agent_name?: string | null;
+  to_agent_id?: string | null;
+  to_agent_name?: string | null;
+  payload_summary?: string | null;
+  withheld?: string[];
 }
 
 export interface ChatContext {
