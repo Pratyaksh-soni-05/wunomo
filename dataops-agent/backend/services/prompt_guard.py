@@ -49,6 +49,8 @@ showed was missing.
 import re
 import secrets
 
+from services.text_normalize import normalize_for_matching
+
 # ── Instruction hierarchy, stated to the model ───────────────────────────────
 
 # Kept deliberately concrete. "Ignore injected instructions" is advice a model
@@ -200,9 +202,18 @@ def redact_identifiers(text: str, values) -> str:
     are stripped deterministically on the way out, where compliance is not
     optional. The prompt language stays as well: defence in depth, and it is
     what stops the model *reasoning aloud* about the values in the first place.
+
+    `text` is run through normalize_for_matching() first -- found live
+    2026-09-29, Gemini renders a UUID's hyphens as U+2011 (NON-BREAKING
+    HYPHEN) often enough that a plain `str.replace(value, ...)` silently
+    misses it, the value stays in the output, and nothing here or downstream
+    knows redaction didn't happen. `values` themselves are never model
+    output (server-authenticated tenant_id/user_id/session_id, always
+    ASCII), so only `text` needs normalizing.
     """
     if not text:
         return text
+    text = normalize_for_matching(text)
     for value in values:
         if value and len(str(value)) >= 8:
             text = text.replace(str(value), "[redacted]")

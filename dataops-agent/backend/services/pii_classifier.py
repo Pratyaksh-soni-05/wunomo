@@ -73,6 +73,8 @@ from typing import Iterable, Optional
 
 import structlog
 
+from services.text_normalize import normalize_for_matching
+
 log = structlog.get_logger()
 
 LEVELS = ("none", "pii", "phi")
@@ -251,9 +253,19 @@ _TOKEN = re.compile(r"\S+")
 def redact_free_text(text: str) -> tuple[str, list[str]]:
     """Mask PII-shaped substrings in free text. Returns (redacted_text,
     labels_found) -- labels_found is exactly what a caller like a Handoff
-    row's `withheld` column should record."""
+    row's `withheld` column should record.
+
+    `text` is run through normalize_for_matching() first -- found live
+    2026-09-29, a model rendering an SSN/card's separators with a
+    Unicode dash lookalike (e.g. U+2011 NON-BREAKING HYPHEN) instead of
+    ASCII hyphen-minus made _SSN/_CARD's literal `-` character classes
+    silently fail to match, so the value passed through this,
+    Integration Phase 4 item 2's own defense against exactly this
+    shape of leak, unredacted.
+    """
     if not text:
         return text, []
+    text = normalize_for_matching(text)
     found: set[str] = set()
 
     def _redact_token(m: "re.Match") -> str:
