@@ -2,40 +2,40 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/components/ui";
-import { SessionList, MessageThread, LiveWorkPanel, type LocalChatMessage } from "@/components/chat";
-import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
+import { MessageThread, LiveWorkPanel, type LocalChatMessage } from "@/components/chat";
+import { useProjectChatContext } from "@/components/chat/ProjectChatContext";
 import { HireAgentModal } from "@/components/agents/HireAgentModal";
 import { NoAgentsEmptyState } from "@/components/workbench/WorkbenchEmptyStates";
 import {
   getToken, decodeUserFromToken, getChatHistory, sendChatMessageStream,
-  listChannels, createChannel, getChannel, addChannelAgent, removeChannelAgent,
-  addChannelUser, removeChannelUser, getProjectAgents, getTeamMembers, uploadToChannel,
-  getActiveTasks, approveRequest, rejectRequest,
-  ApiError, type ChatContext, type ChatToolCall, type HiredAgent, type TaskItem,
+  uploadToChannel, addChannelAgent, approveRequest, rejectRequest,
+  ApiError, type ChatContext, type ChatToolCall, type HiredAgent,
 } from "@/lib/api";
 
 /**
- * The project's real Chat tab (slice 7, 2026-09-15) -- replaces the
- * slice-5 signpost stub. Reuses /chat's own MessageThread unchanged (it
- * takes everything as props, doesn't care what scopes its channel list)
- * and a narrower SessionList (showDirect=false -- AXIOM Direct has no
- * project concept anywhere in the schema, see SessionList's own comment).
- * LiveWorkPanel (renamed from ProjectContextPanel, §7.6) replaces
- * ContextPanel -- a separate component, not that one made configurable,
- * since /chat's own AXIOM Direct sessions and non-project channels have
- * nothing to show a Live work/Team/Data roster for.
+ * The project's real Chat tab (slice 7, 2026-09-15; blueprint chrome pass,
+ * feature/blueprint-workspace-chrome; header-merge follow-up). Reuses
+ * /chat's own MessageThread (hideHeader=true -- the project container's
+ * own header, layout.tsx, now carries §7.2's ProjectHeader as its single
+ * header row, merged with the breadcrumb/tab bar rather than a second
+ * standalone bar). LiveWorkPanel (renamed from ProjectContextPanel, §7.6)
+ * replaces ContextPanel -- a separate component, not that one made
+ * configurable, since /chat's own AXIOM Direct sessions and non-project
+ * channels have nothing to show a Live work/Team/Data roster for.
  *
- * Deliberately NOT a copy of /chat/page.tsx's full logic: no 1:1
- * sessions, no "+ New Chat", no session deletion, no ?session= deep-link
- * handling -- none of that applies to a project's channels-only view, so
- * it's a smaller page, not a parallel one carrying dead branches.
+ * Channel selection, the agent roster, and personality/operation mode all
+ * live in the project container layout now (ProjectChatContext) -- this
+ * page consumes them rather than owning its own copies, so the header (in
+ * layout.tsx) and this page's own message-sending logic can never disagree
+ * about which channel is active. What stays here is genuinely chat-content-
+ * specific: the message list itself, the composer draft, and the whole
+ * streaming turn.
  */
 export default function ProjectChatTab() {
   const token = getToken() as string;
   const decoded = decodeUserFromToken(token);
-  const currentUserId = decoded?.sub ?? null;
   const currentUserRole = decoded?.role ?? null;
   const params = useParams();
   const projectId = params.id as string;
@@ -43,23 +43,24 @@ export default function ProjectChatTab() {
   const router = useRouter();
   const qc = useQueryClient();
 
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const {
+    activeSessionId, activeChannel,
+    channelAgents, channelUsers, agentRoster, agentRosterLoading, selectableAgents, availablePeople,
+    currentUserId, addAgentToActiveChannel, removeAgentFromActiveChannel,
+    addPersonToActiveChannel, removePersonFromActiveChannel,
+    personalityMode, operationMode,
+    liveWorkOpen,
+  } = useProjectChatContext();
+
   const [messages, setMessages] = useState<LocalChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [provider, setProvider] = useState<string | null>(null);
-  const [personalityMode, setPersonalityMode] = useState("engineer");
-  const [operationMode, setOperationMode] = useState("assisted");
   const [attachedContext, setAttachedContext] = useState<ChatContext | null>(null);
-  const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [liveNotice, setLiveNotice] = useState<string | null>(null);
-  // §7.1 Responsive: below 1180px the live work panel is a hidden-by-
-  // default overlay/bottom-sheet, toggled from the header -- see
-  // MessageThread's liveWorkToggle prop and LiveWorkPanel's mobileOpen.
-  const [liveWorkOpen, setLiveWorkOpen] = useState(false);
   // §7.5 mention picker's "Not hired yet — tag to hire" row -- there is no
   // real one-click/no-modal hire flow anywhere in this codebase (hiring
   // always requires a name, via HireAgentModal); tagging an unhired type
@@ -72,93 +73,39 @@ export default function ProjectChatTab() {
   const [busyApprovalAction, setBusyApprovalAction] = useState<"approving" | "rejecting" | null>(null);
 
   const chatGenerationRef = useRef(0);
-  const autoSelectedRef = useRef(false);
 
-  const projectAgentsQuery = useQuery({ queryKey: ["project-agents", projectId], queryFn: () => getProjectAgents(token, projectId) });
-  const projectAgents = projectAgentsQuery.data?.agents ?? [];
-
-  // Free filter, same reasoning as every other "project's own slice of a
-  // tenant-wide list" surface in this rebuild (Home's ProjectCardStats,
-  // the Tasks tab, Workbench's Pipelines/Incidents/Transforms) --
-  // ChannelItem.project_id already exists on the model, no new endpoint
-  // needed.
-  const channelsQuery = useQuery({ queryKey: ["channels"], queryFn: () => listChannels(token) });
-  const projectChannels = (channelsQuery.data?.channels ?? []).filter((c) => c.project_id === projectId);
-  const teamQuery = useQuery({ queryKey: ["team-members"], queryFn: () => getTeamMembers(token) });
-  // Same query key LiveWorkPanel itself uses ("active-tasks") -- react-
-  // query dedupes this into one real request, not two -- so the header
-  // toggle's count badge can never disagree with what the panel shows
-  // once opened.
-  const activeTasksQuery = useQuery({ queryKey: ["active-tasks"], queryFn: () => getActiveTasks(token), enabled: !!token });
-  const sessionActiveTaskCount = activeSessionId
-    ? (activeTasksQuery.data ?? []).filter((t) => t.originating_session_id === activeSessionId).length
-    : 0;
-
-  const activeChannel = projectChannels.find((c) => c.id === activeSessionId) ?? null;
-  const channelDetailQuery = useQuery({
-    queryKey: ["channel-detail", activeSessionId],
-    queryFn: () => getChannel(token, activeSessionId as string),
-    enabled: !!activeChannel,
-  });
-
-  const selectSession = async (id: string) => {
+  // Replaces the old selectSession() function -- activeSessionId now lives
+  // in the container layout (ProjectChatContext), set from the header's
+  // "⋯" menu, the auto-select-first-channel effect, or channel creation.
+  // Whatever set it, this is the one place that reacts: fetch history,
+  // populate messages, same staleness guard send() already uses so a rapid
+  // switch can't have an in-flight fetch for the PREVIOUS channel land
+  // after this one's and show the wrong thread (a real, disclosed bug in
+  // the previous two-owner version, now structurally impossible -- there's
+  // only one effect that ever changes `messages` in response to a channel
+  // switch, not two independent call sites racing).
+  useEffect(() => {
     chatGenerationRef.current += 1;
-    setActiveSessionId(id);
+    const myGeneration = chatGenerationRef.current;
     setSendError(null);
     setUploadError(null);
     setSending(false);
-    try {
-      const history = await getChatHistory(token, id);
-      setMessages(history.messages);
-    } catch {
-      toast.push("Failed to load conversation history.", "danger");
-    }
-  };
-
-  // Land on the project's most recently active channel rather than a
-  // blank composer with nothing selected -- the channel model supports
-  // several per project (Q2), so "one open" needs a real default, not a
-  // forced single-channel constraint. Guarded by a ref, not a `messages`/
-  // `activeSessionId` check, so switching away from the auto-selected
-  // channel (or deleting its history) doesn't silently re-trigger it.
-  useEffect(() => {
-    if (autoSelectedRef.current || activeSessionId) return;
-    if (projectChannels.length > 0) {
-      autoSelectedRef.current = true;
-      selectSession(projectChannels[0].id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectChannels.length]);
-
-  const createChannelWithAgents = async (name: string, agentIds: string[]) => {
-    try {
-      const channel = await createChannel(token, { name, project_id: projectId });
-      for (const agentId of agentIds) {
-        await addChannelAgent(token, channel.id, agentId);
-      }
-      qc.invalidateQueries({ queryKey: ["channels"] });
-      chatGenerationRef.current += 1;
-      autoSelectedRef.current = true;
-      setActiveSessionId(channel.id);
+    if (!activeSessionId) {
       setMessages([]);
-      setSendError(null);
-      toast.push(`Channel "${channel.name}" created.`, "success");
-    } catch {
-      toast.push("Failed to create channel.", "danger");
+      return;
     }
-  };
-
-  const addAgentToActiveChannel = async (agentId: string) => {
-    if (!activeSessionId) return;
-    try {
-      const result = await addChannelAgent(token, activeSessionId, agentId);
-      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
-      qc.invalidateQueries({ queryKey: ["channels"] });
-      toast.push(`${result.agent_name} added to the channel.`, "success");
-    } catch {
-      toast.push("Failed to add agent.", "danger");
-    }
-  };
+    (async () => {
+      try {
+        const history = await getChatHistory(token, activeSessionId);
+        if (chatGenerationRef.current === myGeneration) setMessages(history.messages);
+      } catch {
+        if (chatGenerationRef.current === myGeneration) {
+          toast.push("Failed to load conversation history.", "danger");
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId]);
 
   // §7.5's "tag an unhired type to hire it" -- HireAgentModal handles the
   // real naming step (there's no zero-input hire anywhere in this app);
@@ -173,6 +120,7 @@ export default function ProjectChatTab() {
       await addChannelAgent(token, activeSessionId, agent.id);
       qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
       qc.invalidateQueries({ queryKey: ["channels"] });
+      qc.invalidateQueries({ queryKey: ["project-agents", projectId] });
       setMessages((prev) => [...prev, {
         role: "assistant", content: `${agent.name} joined #${activeChannel?.name ?? "this channel"}.`,
         tool_calls: [], timestamp: new Date().toISOString(), isSystemNotice: true,
@@ -182,49 +130,6 @@ export default function ProjectChatTab() {
         `Hired "${agent.name}", but couldn't add them to this channel automatically — add them from Members.`,
         "danger",
       );
-    }
-  };
-
-  const removeAgentFromActiveChannel = async (agentId: string, agentName: string) => {
-    if (!activeSessionId) return;
-    try {
-      await removeChannelAgent(token, activeSessionId, agentId);
-      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
-      qc.invalidateQueries({ queryKey: ["channels"] });
-      toast.push(`${agentName} removed from the channel.`, "default");
-    } catch {
-      toast.push("Failed to remove agent.", "danger");
-    }
-  };
-
-  const addPersonToActiveChannel = async (userId: string) => {
-    if (!activeSessionId) return;
-    try {
-      await addChannelUser(token, activeSessionId, userId);
-      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
-      toast.push("Added to the channel.", "success");
-    } catch {
-      toast.push("Failed to add person.", "danger");
-    }
-  };
-
-  const removePersonFromActiveChannel = async (userId: string) => {
-    if (!activeSessionId) return;
-    try {
-      await removeChannelUser(token, activeSessionId, userId);
-      if (userId === currentUserId) {
-        chatGenerationRef.current += 1;
-        setActiveSessionId(null);
-        setMessages([]);
-        qc.invalidateQueries({ queryKey: ["channels"] });
-        toast.push("You left the channel.", "default");
-      } else {
-        qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
-        toast.push("Removed from the channel.", "default");
-      }
-    } catch (err) {
-      const message = err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Failed to remove person.";
-      toast.push(message, "danger");
     }
   };
 
@@ -343,33 +248,12 @@ export default function ProjectChatTab() {
     // tool_end/terminal event carrying the same task_id. Parallel tasks
     // stream concurrently with genuinely interleaved events, so lookup is
     // always by id, never "the last message".
-    // Set the moment the first supervisor_task event of this turn arrives
-    // -- onDone (below) must never mutate "the last message" once this is
-    // true, since the last message by then is a real per-task bubble, not
-    // the generic placeholder onDone was written to update. A plain
-    // closure variable is fine for this one (isStale() reads chatGenerationRef
-    // the same way) -- it's never read or written from inside a setState
-    // updater, unlike the mistake this replaces just below.
     let isSupervisorTurn = false;
     const ensureTaskMessage = (taskId: string, agentId: string) => {
       if (isStale()) return;
       isSupervisorTurn = true;
       setMessages((prev) => {
         if (prev.some((m) => m.task_id === taskId)) return prev;
-        // The first supervisor_task event of this turn -- the generic
-        // single-agent placeholder pushed at send() turned out to be
-        // premature (this is a multi-agent turn); drop it rather than
-        // leave an orphaned empty bubble alongside the real per-task
-        // ones. Re-derived from `prev` on every call (never a "have we
-        // already done this" flag closed over outside setState) -- React
-        // 18 Strict Mode double-invokes a setState updater in development
-        // to catch exactly this shape of impurity, and a flag mutated
-        // inside the updater desyncs across the two invocations: the
-        // first run filters and flips the flag, the discarded-and-replayed
-        // second run then sees the flag already set and skips filtering,
-        // so the placeholder never actually leaves `prev`. Filtering
-        // unconditionally is idempotent instead -- a no-op once the
-        // placeholder is already gone, on every replay.
         const base = prev.filter((m) => !(m.role === "assistant" && m.content === "" && !m.task_id && !m.isSystemNotice));
         return [...base, {
           role: "assistant", content: "", tool_calls: [], timestamp: new Date().toISOString(),
@@ -400,10 +284,6 @@ export default function ProjectChatTab() {
           context: attachedContext ?? undefined,
         },
         {
-          // The responding agent is now known before the first token
-          // (start is always the first event) -- the placeholder carries
-          // the correct avatar for the whole turn, not just from `done`
-          // onward.
           onStart: ({ agent_id }) => updatePlaceholder((msg) => ({ ...msg, agent_id })),
           onToken: ({ delta, task_id }) => {
             if (task_id) { updateTaskMessage(task_id, (msg) => ({ ...msg, content: msg.content + delta })); return; }
@@ -442,20 +322,10 @@ export default function ProjectChatTab() {
           onError: ({ message, kind }) => {
             if (isStale()) return;
             if (kind) {
-              // Shape H (§7.3.H, the refusal card + "restore raw text to
-              // the composer") isn't built yet -- logged so the data is
-              // visible while this wiring is new, rather than silently
-              // dropped or faked. The generic error banner below is what
-              // the user actually sees for now; see this pass's own report.
               console.warn(`[supervisor] refusal (${kind}) has no shape-H UI built for it yet:`, message);
             }
             setSendError(message);
           },
-          // supervisor_task now fires up to three times per task --
-          // "queued" (the moment dispatch happens, before any work has
-          // started: §7.3.B's acknowledgement), "running", then exactly
-          // one terminal status. token/tool_start/tool_end above stream
-          // this same message live in between, routed by task_id.
           onSupervisorTask: (data) => {
             if (isStale()) return;
             if (data.status === "queued") {
@@ -463,20 +333,9 @@ export default function ProjectChatTab() {
               return;
             }
             if (data.status === "running") {
-              // Not every task_id reaches "queued" first from THIS
-              // client's point of view (a page that (re)connects after
-              // dispatch already happened never saw it) -- ensure here
-              // too rather than assuming ordering.
               ensureTaskMessage(data.task_id, data.agent_id);
               return;
             }
-            // Terminal: completed/failed/paused_needs_approval/blocked.
-            // `response`, when present, is the complete authoritative
-            // text (byte-identical to what's persisted) -- assigned
-            // outright rather than trusting only accumulated token
-            // deltas, since a model turn with no live token stream at all
-            // (still possible; not every provider path streams) would
-            // otherwise leave this bubble permanently empty.
             ensureTaskMessage(data.task_id, data.agent_id);
             const fallbackText = data.status === "paused_needs_approval"
               ? "Paused, waiting for approval."
@@ -486,10 +345,6 @@ export default function ProjectChatTab() {
             updateTaskMessage(data.task_id, (msg) => ({
               ...msg, agent_id: data.agent_id, content: data.response ?? fallbackText ?? msg.content, streaming: false,
               taskFailed: data.status === "failed",
-              // §7.3.E -- present only on this exact status (see
-              // ChatStreamSupervisorTask's own comment); cleared on any
-              // other terminal status so a message never carries a stale
-              // approvalCard from an earlier pause once it resolves.
               approvalCard: data.status === "paused_needs_approval"
                 ? {
                     approval_request_id: data.approval_request_id ?? "",
@@ -499,15 +354,15 @@ export default function ProjectChatTab() {
                   }
                 : undefined,
             }));
+            // §7.2's header status badge (and the live-work toggle's own
+            // count) both read ["active-tasks"] -- that query polls
+            // independently, so without this a task pausing for approval
+            // left the header showing "working" for up to 20 real seconds
+            // after the approval card itself had already appeared live.
+            qc.invalidateQueries({ queryKey: ["active-tasks"] });
           },
           onSystemLine: ({ text }) => {
             if (isStale()) return;
-            // Some system lines persist (an inferred-edge explanation)
-            // and reappear via the history refetch below unchanged;
-            // others never do (an unresolved @mention -- the multi-agent
-            // equivalent of the single-mention path's own never-
-            // persisted routing failure). Pushed here regardless, so
-            // it's visible for this turn either way.
             setMessages((prev) => [...prev, {
               role: "assistant", content: text, tool_calls: [],
               timestamp: new Date().toISOString(), isSystemNotice: true,
@@ -515,11 +370,6 @@ export default function ProjectChatTab() {
           },
           onHandoff: ({ from_agent_id, from_agent_name, to_agent_id, to_agent_name, payload_summary, withheld }) => {
             if (isStale()) return;
-            // Shape F, rendered by MessageThread's dispatcher off
-            // `from_agent_id`'s presence -- the same structured fields
-            // GET .../history now also returns (_handoff_entries, see
-            // this pass's own report), so the card survives a reload
-            // identically instead of degrading to flattened text.
             setMessages((prev) => [...prev, {
               role: "system_notice", content: "", tool_calls: [],
               timestamp: new Date().toISOString(),
@@ -528,35 +378,12 @@ export default function ProjectChatTab() {
             }]);
           },
           onNeedsClarification: (data) => {
-            // Shape G (§7.3.G, the clarification card) isn't built yet --
-            // logged so the data is flowing and visible before that
-            // component exists, per this pass's explicit instruction, not
-            // rendered as a fake ask UI. A clarification-only turn (zero
-            // tasks dispatched) currently shows nothing else in the
-            // thread besides this console warning -- see this pass's own
-            // report.
             console.warn("[supervisor] needs_clarification has no shape-G UI built for it yet:", data);
           },
           onDone: (doneData) => {
             if (isStale()) return;
             setProvider(doneData.provider);
             doneSessionId = doneData.session_id;
-            // Real per-message identity (§7.4) only reaches the client on
-            // `done` -- nothing streamed before it (token/tool_start/
-            // tool_end) carries agent_id. The placeholder shows the
-            // generic AXIOM avatar for the duration of the stream itself
-            // (a real, disclosed gap -- see this build's own report), but
-            // must not keep doing so for the tail end between `done` and
-            // the history refetch below finishing.
-            //
-            // Supervisor turns skip this entirely: by the time `done`
-            // fires every dispatched task has already reached its own
-            // terminal supervisor_task event (run_supervisor() doesn't
-            // return, and this event doesn't fire, until every wave has
-            // drained), and doneData.agent_id is always null on this path
-            // (no single agent "is" the responder) -- applying it here
-            // would overwrite whichever task bubble happens to be last in
-            // the array with a null agent_id, discarding its real avatar.
             if (!isSupervisorTurn) {
               updatePlaceholder((msg) => ({ ...msg, agent_id: doneData.agent_id, streaming: false }));
             }
@@ -565,36 +392,11 @@ export default function ProjectChatTab() {
       );
 
       if (isStale()) return;
-      // `done` always carries the real, server-generated session_id
-      // (Stage 1 follow-up -- previously omitted, so a brand-new session
-      // had no way to learn its id from the stream at all). Adopt it the
-      // same way the buffered path's `if (!sessionAtSendTime)
-      // setActiveSessionId(res.session_id)` already does.
-      if (!sessionAtSendTime && doneSessionId) setActiveSessionId(doneSessionId);
       const historySessionId = doneSessionId ?? sessionAtSendTime;
-      // Replace the locally-accumulated placeholder with the real
-      // persisted turn (full args/results, real approval risk_level/
-      // reason, correctly-resolved denial statuses) -- the same
-      // full-fidelity data GET .../history always has, rather than
-      // trying to perfectly rebuild _extract_tool_trace's exact shape
-      // client-side from six minimal live SSE events.
       if (historySessionId) {
         try {
           const history = await getChatHistory(token, historySessionId);
           if (!isStale()) {
-            // `done` fires once the whole turn's waves have drained, and a
-            // task pausing for approval IS a drained wave from
-            // run_supervisor()'s point of view -- but a paused task has no
-            // ChatMessage row at all yet (_persist_task_completion_message
-            // only ever writes one on real completion), so history has
-            // nothing to reconstruct shape E's card from. Wholesale-
-            // replacing `messages` with `history.messages` here silently
-            // erased a still-pending approval card the instant `done`
-            // fired, seconds before a human could act on it -- confirmed
-            // live (see this pass's own report). Any locally-held task
-            // bubble still carrying approvalCard is preserved by appending
-            // it back on, since nothing in the fresh history can represent
-            // it yet.
             setMessages((prev) => {
               const stillPaused = prev.filter((m) => !!m.approvalCard);
               return [...history.messages, ...stillPaused];
@@ -608,13 +410,6 @@ export default function ProjectChatTab() {
       qc.invalidateQueries({ queryKey: ["chat-sessions"] });
     } catch (err) {
       if (isStale()) return;
-      // Remove everything this attempt optimistically added on a hard
-      // failure (e.g. the 402s below) -- matching the buffered path,
-      // which never added them in the first place when sendChatMessage()
-      // itself threw. Trimmed back to the length captured before this
-      // attempt touched `messages` at all, not a hardcoded "last 2": a
-      // supervisor turn can add several per-task placeholders plus system
-      // lines/handoffs before failing.
       setMessages((prev) => prev.slice(0, lengthBeforeSend));
       if (err instanceof ApiError && err.status === 402 && err.detail && typeof err.detail === "object") {
         const detail = err.detail as { error?: string; agent_id?: string; used?: number; limit?: number };
@@ -648,29 +443,14 @@ export default function ProjectChatTab() {
     }
   };
 
-  if (!projectAgentsQuery.isLoading && projectAgents.length === 0) {
+  if (!agentRosterLoading && agentRoster.length === 0) {
     return <NoAgentsEmptyState projectId={projectId} />;
   }
 
   return (
     <div className="chat-layout">
-      <SessionList
-        tenantId={null}
-        sessions={[]}
-        loading={false}
-        showDirect={false}
-        channels={projectChannels}
-        channelsLoading={channelsQuery.isLoading}
-        availableAgents={projectAgents.map((a) => ({ id: a.id, name: a.name, sources: [] }))}
-        activeSessionId={activeSessionId}
-        onSelectSession={selectSession}
-        onNewChat={() => {}}
-        onCreateChannel={createChannelWithAgents}
-        onInsertPrompt={setDraft}
-        onDeleteSession={() => {}}
-        draft={draft}
-      />
       <MessageThread
+        hideHeader
         messages={messages}
         sending={sending}
         sendError={sendError}
@@ -678,20 +458,25 @@ export default function ProjectChatTab() {
         liveNotice={liveNotice}
         personalityMode={personalityMode}
         operationMode={operationMode}
-        onPersonalityChange={setPersonalityMode}
-        onOperationChange={setOperationMode}
+        onPersonalityChange={() => {}}
+        onOperationChange={() => {}}
         attachedContext={attachedContext}
         onClearContext={() => setAttachedContext(null)}
         draft={draft}
         onDraftChange={setDraft}
         onSend={send}
         onGoToApprovals={() => router.push("/approvals")}
-        onStartTask={() => setTaskModalOpen(true)}
+        // "+ Start a Task" removed from this route (§7.2: "you start work
+        // by typing") -- MessageThread's own header (and this prop's only
+        // caller) is hidden here via hideHeader, so this is structurally
+        // unreachable, kept only because the prop itself stays required
+        // for /chat, which still uses it.
+        onStartTask={() => {}}
         channel={activeChannel}
-        channelAgents={channelDetailQuery.data?.agents ?? []}
-        channelUsers={channelDetailQuery.data?.users ?? []}
-        availableAgents={projectAgents.map((a) => ({ id: a.id, name: a.name, sources: [] }))}
-        availablePeople={teamQuery.data?.members ?? []}
+        channelAgents={channelAgents}
+        channelUsers={channelUsers}
+        availableAgents={selectableAgents}
+        availablePeople={availablePeople}
         currentUserId={currentUserId}
         onAddAgent={addAgentToActiveChannel}
         onRemoveAgent={removeAgentFromActiveChannel}
@@ -701,11 +486,6 @@ export default function ProjectChatTab() {
         uploading={uploading}
         uploadError={uploadError}
         onUploadFile={handleUploadFile}
-        liveWorkToggle={{
-          count: sessionActiveTaskCount,
-          open: liveWorkOpen,
-          onToggle: () => setLiveWorkOpen((v) => !v),
-        }}
         onTagUnhiredType={() => setInlineHireOpen(true)}
         onApproveTask={(id) => resolveApprovalCard(id, "approving")}
         onRejectTask={(id) => resolveApprovalCard(id, "rejecting")}
@@ -722,22 +502,8 @@ export default function ProjectChatTab() {
         onGoToApprovals={() => router.push("/approvals")}
         currentUserRole={currentUserRole}
         sessionId={activeSessionId}
-        channelAgents={channelDetailQuery.data?.agents ?? []}
+        channelAgents={channelAgents}
         mobileOpen={liveWorkOpen}
-      />
-      <TaskCreateModal
-        token={token}
-        open={taskModalOpen}
-        onClose={() => setTaskModalOpen(false)}
-        sessionId={activeSessionId ?? undefined}
-        channelAgentIds={channelDetailQuery.data?.agents.map((a) => a.id)}
-        onCreated={(task: TaskItem) => {
-          const taskCardMsg: LocalChatMessage = {
-            role: "assistant", content: "", tool_calls: [], timestamp: new Date().toISOString(),
-            taskCard: { id: task.id, goal: task.goal },
-          };
-          setMessages((prev) => [...prev, taskCardMsg]);
-        }}
       />
       <HireAgentModal
         token={token}
