@@ -232,6 +232,46 @@ def test_value_detection_on_neutral_names(values, expected, label):
     assert level == expected, (label, level, reason)
 
 
+# ── Free-text redaction survives a Unicode dash lookalike ────────────────────
+
+def test_redact_free_text_survives_a_unicode_dash_lookalike_in_ssn_and_card():
+    """Found live 2026-09-29, same bug class as prompt_guard's identity
+    redaction: pii_classifier._SSN/_CARD anchor on a literal ASCII '-' in
+    their character class, so an agent-generated handoff (supervisor.py)
+    rendering an SSN/card's separators as e.g. U+2011 (NON-BREAKING HYPHEN)
+    instead of ASCII hyphen silently passed the value through unredacted --
+    confirmed by hand against pre-fix code before writing this test. Runs
+    every dash/hyphen lookalike normalize_for_matching() claims to cover."""
+    real_ssn = "123-45-6789"
+    real_card = "4111-1111-1111-1111"
+    for lookalike in ("‐", "‑", "‒", "–", "—", "―",
+                       "−", "­", "﹣", "－"):
+        bad_ssn = real_ssn.replace("-", lookalike)
+        redacted, found = pii_classifier.redact_free_text(f"SSN: {bad_ssn}")
+        assert bad_ssn not in redacted, f"SSN leaked with lookalike {lookalike!r}"
+        assert found == ["ssn"], (lookalike, found)
+
+        bad_card = real_card.replace("-", lookalike)
+        redacted, found = pii_classifier.redact_free_text(f"Card: {bad_card}")
+        assert bad_card not in redacted, f"card leaked with lookalike {lookalike!r}"
+        assert found == ["payment card"], (lookalike, found)
+
+
+def test_redact_free_text_still_redacts_ordinary_ascii_hyphenated_pii():
+    redacted, found = pii_classifier.redact_free_text("SSN: 123-45-6789")
+    assert "123-45-6789" not in redacted
+    assert found == ["ssn"]
+
+
+def test_redact_free_text_leaves_ordinary_prose_dashes_functionally_intact():
+    """The normalization runs on the whole input, so a stray em dash in
+    ordinary prose becomes a plain hyphen -- an accepted, documented cosmetic
+    trade against a silent redaction bypass, not a functional change."""
+    redacted, found = pii_classifier.redact_free_text("The report is done—mostly.")
+    assert found == []
+    assert redacted == "The report is done-mostly."
+
+
 # ── Task 2/3: the profiler writes classification, never samples ──────────────
 
 @pytest.mark.asyncio

@@ -168,6 +168,25 @@ def test_identity_redaction_removes_identifiers_from_output():
     assert "[redacted]" in out
 
 
+def test_redaction_survives_a_unicode_dash_lookalike_in_the_model_output():
+    """Found live 2026-09-29: Gemini has been observed emitting U+2011
+    (NON-BREAKING HYPHEN) in place of U+002D (ASCII hyphen) inside UUID-shaped
+    text. redact_identifiers() matches via a literal str.replace(value, ...),
+    so before normalize_for_matching() was added, this exact input left the
+    tenant_id in the output unredacted -- confirmed by hand against pre-fix
+    code before writing this test, not assumed. Uses every dash/hyphen
+    lookalike normalize_for_matching() claims to cover, not just the one
+    reported, since the whole point of the fix is the systemic class."""
+    tid = "764530c3-b45e-402a-a11d-a388852c26ec"
+    for lookalike in ("‐", "‑", "‒", "–", "—", "―",
+                       "−", "­", "﹣", "－"):
+        disguised_tid = tid.replace("-", lookalike)
+        text = f"Sure, the tenant is {disguised_tid} and everything looks good."
+        out = prompt_guard.redact_identifiers(text, (tid, None))
+        assert disguised_tid not in out, f"leaked with lookalike {lookalike!r}"
+        assert "[redacted]" in out, f"not redacted with lookalike {lookalike!r}"
+
+
 def test_redaction_leaves_ordinary_text_alone():
     text = "You have 3 sources and 2 pipelines."
     assert prompt_guard.redact_identifiers(text, ("t-1234567890", None)) == text
