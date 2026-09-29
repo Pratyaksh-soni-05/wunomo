@@ -645,9 +645,6 @@ tr.selected td:first-child {
 .sidebar-section-label {
   font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--sidebar-text-faint);
 }
-.sidebar-section-label-link { background: none; border: none; cursor: pointer; transition: color var(--t-fast); }
-.sidebar-section-label-link:hover { color: var(--sidebar-text-subtle); }
-
 /* Full-width rows stay easy to hit regardless of visual height, so this
    intentionally sits below the app's usual 44px Tier-3 floor (that floor
    is about small icon-only controls, not a full-width nav row) — matching

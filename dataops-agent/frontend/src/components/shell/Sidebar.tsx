@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
-  RAIL_NAV_ITEMS, RAIL_NAV_ITEMS_TOP, RAIL_FOOTER_ITEMS, ICON_PROJECT, ICON_NEW_PROJECT, type NavItem,
+  RAIL_NAV_ITEMS, ICON_PROJECT, ICON_NEW_PROJECT, type NavItem,
 } from "./navItems";
 import { useToast } from "@/components/ui";
 import { WorkspacePicker } from "@/components/auth/WorkspacePicker";
@@ -25,9 +25,16 @@ import { useNeedsYou } from "@/lib/needsYou";
  *
  * IA-rail pass (blueprint §03, 2026-09-29): restructured to §03's seven
  * named destinations + Scheduled (kept, real and useful, §03's own
- * omission — see this pass's report). RAIL_NAV_ITEMS_TOP (Command Center)
- * renders before the Projects section, RAIL_NAV_ITEMS (Team/Approvals/
- * Outputs/Connections/Scheduled) after it, matching §03's own order.
+ * omission — see this pass's report). RAIL_NAV_ITEMS renders as ONE
+ * uninterrupted block (Command Center, Projects, Team, Approvals,
+ * Outputs, Connections, Scheduled, Settings, in that order) — a same-pass
+ * follow-up fix: the first cut split Command Center out above the live
+ * Projects list and Settings into a separate footer, which left "PROJECTS"
+ * as a bare section-label link (not a real nav item) and made the other
+ * five read as that project's children rather than workspace-level
+ * siblings. §03 has no such hierarchy; all eight are peers. The live
+ * recent-projects list renders strictly AFTER this whole block, as its
+ * own clearly-subordinate section.
  *
  * The nested per-project channel list (under whichever project was
  * active) is removed this pass — not a straight deletion, a real bug
@@ -135,7 +142,11 @@ export function Sidebar({
       );
     }
     const href = `/${item.slug}`;
-    const active = pathname === href;
+    // "Projects" is the one item with real sub-routes reachable from
+    // elsewhere in the app (/projects/[id]/...) -- §03 itself describes
+    // this destination as "the list, then the workspace," so both count
+    // as being "in Projects." Every other item here is a bare leaf route.
+    const active = item.slug === "projects" ? pathname.startsWith("/projects") : pathname === href;
     return (
       <Link key={item.slug} href={href} className={["sidebar-item", active ? "active" : ""].filter(Boolean).join(" ")}>
         <span className="sidebar-item-icon">{item.icon}</span>
@@ -160,12 +171,21 @@ export function Sidebar({
       </button>
 
       <nav className="sidebar-nav">
-        {RAIL_NAV_ITEMS_TOP.map((item) => railItem(item))}
+        {RAIL_NAV_ITEMS.map((item) =>
+          railItem(
+            item,
+            item.slug === "approvals" && needsYouCount > 0 ? (
+              <span className="badge-count badge-attention">{needsYouCount}</span>
+            ) : undefined
+          )
+        )}
 
+        {/* Recent projects -- strictly below the whole nav block above,
+            clearly subordinate to it (plain text label, not a link:
+            "Projects" above already is the real destination, a second
+            link to the same place here would be redundant). */}
         <div className="sidebar-section">
-          <Link href="/projects" className="sidebar-section-label sidebar-section-label-link">
-            Projects
-          </Link>
+          <span className="sidebar-section-label">Recent</span>
         </div>
 
         {projectsQuery.isLoading ? (
@@ -185,20 +205,9 @@ export function Sidebar({
             );
           })
         )}
-
-        {RAIL_NAV_ITEMS.map((item) =>
-          railItem(
-            item,
-            item.slug === "approvals" && needsYouCount > 0 ? (
-              <span className="badge-count badge-attention">{needsYouCount}</span>
-            ) : undefined
-          )
-        )}
       </nav>
 
       <div className="sidebar-footer">
-        {RAIL_FOOTER_ITEMS.map((item) => railItem(item))}
-
         <div className="sidebar-account" ref={accountRef}>
           <button className="sidebar-account-trigger" onClick={() => setAccountMenuOpen((v) => !v)}>
             <span className="sidebar-account-avatar">{initials}</span>

@@ -94,17 +94,27 @@ export const ICON_CONNECTIONS = railIcon(
  * rebuilt; every slug here already pointed at a real page before this
  * pass and still does.
  *
- * Split into two arrays, not one, because §03's own order interleaves a
- * static item between the two: Command Center, THEN Projects (rendered
- * separately in Sidebar.tsx from live project data — unchanged from
- * before this pass), THEN the rest. RAIL_NAV_ITEMS_TOP is just Command
- * Center; RAIL_NAV_ITEMS is everything after the Projects section.
+ * One uninterrupted array, all eight as siblings — a follow-up fix within
+ * the same pass. The first cut split this into RAIL_NAV_ITEMS_TOP (just
+ * Command Center) + RAIL_NAV_ITEMS (the rest) with the live Projects list
+ * rendered in between and Settings pinned in a separate footer block —
+ * which left "PROJECTS" as a plain section-label link with no real nav
+ * item of its own, and made Team/Approvals/Outputs/Connections/Scheduled
+ * render BELOW the project list, reading as that project's children
+ * rather than workspace-level siblings. §03 has no such hierarchy — all
+ * seven (plus Scheduled) are peers. Sidebar.tsx now renders this whole
+ * array as one block, with "projects" a real item in it (icon, href,
+ * active state, all identical to every other item here), and the live
+ * recent-projects list rendered as its own visually subordinate section
+ * strictly after this entire block.
  *
  * Real re-mappings this pass made, not just relabels:
  * - Command Center -> /home. The page itself is unchanged this pass
  *   (§03's "live x-ray" content is a separate, later pass) — only the
  *   label and rail position change, matching what the destination is
  *   named, not what it currently shows.
+ * - Projects -> /projects (the list page — unchanged; §03 itself
+ *   describes this destination as "the list, then the workspace").
  * - Team -> /agents (the cross-project employee roster, real since slice
  *   12 but never railed) — NOT the old "Team & billing" slug. §03's Team
  *   is about employees (AI agents); the old rail's "Team & billing" was
@@ -121,13 +131,13 @@ export const ICON_CONNECTIONS = railIcon(
  *   branch. Do not point these at a page that doesn't exist.
  *
  * Settings keeps its own slug/label unchanged; what changed is what's
- * folded into it (Team & billing's tabs) — see settings/page.tsx.
+ * folded into it (Team & billing's tabs, see settings/page.tsx) and its
+ * position — no longer a separate footer block, now the last of this one
+ * uninterrupted group, matching where §03 places it among its siblings.
  */
-export const RAIL_NAV_ITEMS_TOP: NavItem[] = [
-  { slug: "home", label: "Command Center", icon: ICON_HOME },
-];
-
 export const RAIL_NAV_ITEMS: NavItem[] = [
+  { slug: "home", label: "Command Center", icon: ICON_HOME },
+  { slug: "projects", label: "Projects", icon: ICON_PROJECT },
   { slug: "agents", label: "Team", icon: ICON_TEAM },
   { slug: "approvals", label: "Approvals", icon: ICON_NEEDS_YOU },
   {
@@ -139,9 +149,6 @@ export const RAIL_NAV_ITEMS: NavItem[] = [
     disabledReason: "Not tenant-wide yet — manage sources inside each project's Workbench.",
   },
   { slug: "scheduled", label: "Scheduled", icon: ICON_SCHEDULED },
-];
-
-export const RAIL_FOOTER_ITEMS: NavItem[] = [
   { slug: "settings", label: "Settings", icon: ICON_SETTINGS },
 ];
 
