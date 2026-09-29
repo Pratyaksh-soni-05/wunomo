@@ -1,12 +1,19 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Skeleton } from "@/components/ui";
-import { HireAgentModal } from "@/components/agents/HireAgentModal";
-import { getToken, listProjects } from "@/lib/api";
+import { Button, Skeleton, useToast } from "@/components/ui";
+import { ProjectHeader } from "@/components/chat";
+import { ProjectChatContext, type ProjectChatContextValue } from "@/components/chat/ProjectChatContext";
+import {
+  getToken, decodeUserFromToken, listProjects, getProjectAgents, listChannels, getChannel,
+  getTeamMembers, getTasks, getActiveTasks, createChannel, addChannelAgent, removeChannelAgent,
+  addChannelUser, removeChannelUser, ApiError,
+} from "@/lib/api";
+
+type BadgeVariant = "success" | "danger" | "warning" | "info" | "hold" | "gray" | "midnight";
 
 const TABS = [
   { slug: "chat", label: "Chat" },
@@ -16,28 +23,171 @@ const TABS = [
 ];
 
 /**
- * The project container shell (Wunomo UI-rebuild slice 5, 2026-09-14) —
- * matches wunomo-all-screens.html's PHEAD + subnav exactly: project name,
- * a "Hire agent" button, then the Chat/Workbench/Tasks/Agents tabs. Wraps
- * every /projects/[id]/* route, including the bare /projects/[id] page,
- * which only ever redirects to a real tab (see that file).
+ * The project container shell. Header-merge pass (item 1, blueprint chrome
+ * follow-up): this used to render a plain "← All Projects / {name} / [Hire
+ * agent]" row, and the chat page rendered a SECOND, full §7.2 header below
+ * it -- two headers, ~180px of chrome before any message, the single
+ * biggest divergence from the blueprint's one-header layout. This file now
+ * owns everything ProjectHeader needs (roster, channels, task counts,
+ * personality/operation mode) and renders it as the container's only
+ * header row, on all four tabs -- not just Chat, since project name, task
+ * progress, and roster are project-level facts true regardless of which
+ * tab is open. The chat page consumes this same state via
+ * ProjectChatContext instead of owning its own copy.
  *
- * No GET /api/v1/projects/{id} endpoint exists -- same reasoning as the
- * pre-slice-5 project detail page this replaces: listProjects() is
- * already a single cheap tenant-scoped query, so finding this project's
- * own name client-side avoids a second backend endpoint for one field.
+ * No GET /api/v1/projects/{id} endpoint exists -- same reasoning as before:
+ * listProjects() is already a single cheap tenant-scoped query, so finding
+ * this project's own name client-side avoids a second backend endpoint for
+ * one field.
  */
 export default function ProjectContainerLayout({ children }: { children: ReactNode }) {
   const token = getToken() as string;
+  const decoded = decodeUserFromToken(token);
+  const currentUserId = decoded?.sub ?? null;
   const params = useParams();
   const projectId = params.id as string;
   const pathname = usePathname();
   const router = useRouter();
   const qc = useQueryClient();
-  const [hireOpen, setHireOpen] = useState(false);
+  const toast = useToast();
+
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [personalityMode, setPersonalityMode] = useState("engineer");
+  const [operationMode, setOperationMode] = useState("assisted");
+  const [liveWorkOpen, setLiveWorkOpen] = useState(false);
+  const autoSelectedRef = useRef(false);
 
   const projects = useQuery({ queryKey: ["projects"], queryFn: () => listProjects(token) });
   const project = projects.data?.projects.find((p) => p.id === projectId);
+
+  const projectAgentsQuery = useQuery({ queryKey: ["project-agents", projectId], queryFn: () => getProjectAgents(token, projectId) });
+  const agentRoster = projectAgentsQuery.data?.agents ?? [];
+  const selectableAgents = agentRoster.map((a) => ({ id: a.id, name: a.name, sources: [] }));
+
+  const channelsQuery = useQuery({ queryKey: ["channels"], queryFn: () => listChannels(token) });
+  const projectChannels = (channelsQuery.data?.channels ?? []).filter((c) => c.project_id === projectId);
+  const teamQuery = useQuery({ queryKey: ["team-members"], queryFn: () => getTeamMembers(token) });
+
+  const agentIds = new Set(agentRoster.map((a) => a.id));
+  const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: () => getTasks(token) });
+  const projectTasks = (tasksQuery.data ?? []).filter((t) => t.agent_id && agentIds.has(t.agent_id));
+  const tasksTotal = projectTasks.length;
+  const tasksDone = projectTasks.filter((t) => t.status === "completed").length;
+
+  const activeTasksQuery = useQuery({ queryKey: ["active-tasks"], queryFn: () => getActiveTasks(token), enabled: !!token });
+  const sessionActiveTaskCount = activeSessionId
+    ? (activeTasksQuery.data ?? []).filter((t) => t.originating_session_id === activeSessionId).length
+    : 0;
+
+  // §7.2 header status badge -- project-wide (every channel's tasks).
+  // Precedence exactly as specified: approval pending outranks running
+  // outranks a real failure/block outranks the "nothing active" default --
+  // first match wins, checked top to bottom.
+  const projectActiveTasks = (activeTasksQuery.data ?? []).filter((t) => t.project_id === projectId);
+  const ISSUE_STATUSES = new Set(["failed", "blocked_on_dependency", "paused_failed_step", "paused_plan_invalid"]);
+  const RUNNING_STATUSES = new Set([
+    "running", "supervisor_running", "queued", "supervisor_queued",
+    "paused_quota_exceeded", "paused_source_locked",
+  ]);
+  const issueCount = projectActiveTasks.filter((t) => ISSUE_STATUSES.has(t.status)).length;
+  const statusBadge: { variant: BadgeVariant; label: string } = projectActiveTasks.some((t) => t.status === "paused_needs_approval")
+    ? { variant: "hold", label: "needs you" }
+    : projectActiveTasks.some((t) => RUNNING_STATUSES.has(t.status))
+    ? { variant: "info", label: "working" }
+    : issueCount > 0
+    ? { variant: "warning", label: issueCount === 1 ? "1 issue" : `${issueCount} issues` }
+    : { variant: "success", label: "all clear" };
+
+  const activeChannel = projectChannels.find((c) => c.id === activeSessionId) ?? null;
+  const channelDetailQuery = useQuery({
+    queryKey: ["channel-detail", activeSessionId],
+    queryFn: () => getChannel(token, activeSessionId as string),
+    enabled: !!activeChannel,
+  });
+
+  // Lands on the project's most recently active channel rather than a
+  // blank composer with nothing selected. Lives here, not the chat page,
+  // now that activeSessionId itself lives here -- and since this layout
+  // persists across tab switches (the chat page fully unmounts/remounts),
+  // the selection now survives navigating to Workbench and back, which it
+  // didn't before.
+  useEffect(() => {
+    if (autoSelectedRef.current || activeSessionId) return;
+    if (projectChannels.length > 0) {
+      autoSelectedRef.current = true;
+      setActiveSessionId(projectChannels[0].id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectChannels.length]);
+
+  const createChannelWithAgents = async (name: string, agentIds2: string[]) => {
+    try {
+      const channel = await createChannel(token, { name, project_id: projectId });
+      for (const agentId of agentIds2) {
+        await addChannelAgent(token, channel.id, agentId);
+      }
+      qc.invalidateQueries({ queryKey: ["channels"] });
+      autoSelectedRef.current = true;
+      setActiveSessionId(channel.id);
+      if (!pathname.endsWith("/chat")) router.push(`/projects/${projectId}/chat`);
+      toast.push(`Channel "${channel.name}" created.`, "success");
+    } catch {
+      toast.push("Failed to create channel.", "danger");
+    }
+  };
+
+  const addAgentToActiveChannel = async (agentId: string) => {
+    if (!activeSessionId) return;
+    try {
+      const result = await addChannelAgent(token, activeSessionId, agentId);
+      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
+      toast.push(`${result.agent_name} added to the channel.`, "success");
+    } catch {
+      toast.push("Failed to add agent.", "danger");
+    }
+  };
+
+  const removeAgentFromActiveChannel = async (agentId: string, agentName: string) => {
+    if (!activeSessionId) return;
+    try {
+      await removeChannelAgent(token, activeSessionId, agentId);
+      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+      qc.invalidateQueries({ queryKey: ["channels"] });
+      toast.push(`${agentName} removed from the channel.`, "default");
+    } catch {
+      toast.push("Failed to remove agent.", "danger");
+    }
+  };
+
+  const addPersonToActiveChannel = async (userId: string) => {
+    if (!activeSessionId) return;
+    try {
+      await addChannelUser(token, activeSessionId, userId);
+      qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+      toast.push("Added to the channel.", "success");
+    } catch {
+      toast.push("Failed to add person.", "danger");
+    }
+  };
+
+  const removePersonFromActiveChannel = async (userId: string) => {
+    if (!activeSessionId) return;
+    try {
+      await removeChannelUser(token, activeSessionId, userId);
+      if (userId === currentUserId) {
+        setActiveSessionId(null);
+        qc.invalidateQueries({ queryKey: ["channels"] });
+        toast.push("You left the channel.", "default");
+      } else {
+        qc.invalidateQueries({ queryKey: ["channel-detail", activeSessionId] });
+        toast.push("Removed from the channel.", "default");
+      }
+    } catch (err) {
+      const message = err instanceof ApiError && typeof err.detail === "string" ? err.detail : "Failed to remove person.";
+      toast.push(message, "danger");
+    }
+  };
 
   const activeTab = pathname.split("/")[3] ?? "";
 
@@ -84,17 +234,57 @@ export default function ProjectContainerLayout({ children }: { children: ReactNo
     );
   }
 
+  const contextValue: ProjectChatContextValue = {
+    activeSessionId, setActiveSessionId,
+    channels: projectChannels, channelsLoading: channelsQuery.isLoading,
+    activeChannel,
+    channelAgents: channelDetailQuery.data?.agents ?? [],
+    channelUsers: channelDetailQuery.data?.users ?? [],
+    agentRoster, agentRosterLoading: projectAgentsQuery.isLoading,
+    selectableAgents,
+    availablePeople: teamQuery.data?.members ?? [],
+    currentUserId,
+    createChannelWithAgents, addAgentToActiveChannel, removeAgentFromActiveChannel,
+    addPersonToActiveChannel, removePersonFromActiveChannel,
+    personalityMode, operationMode, setPersonalityMode, setOperationMode,
+    liveWorkOpen, setLiveWorkOpen,
+    sessionActiveTaskCount,
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div className="page-header">
-        <div className="flex items-center justify-between">
-          <div>
-            <Link href="/projects" className="btn btn-text text-sm">← All Projects</Link>
-            <h1 className="page-title" style={{ marginTop: 4 }}>{project.name}</h1>
-          </div>
-          <Button size="sm" onClick={() => setHireOpen(true)}>Hire agent</Button>
-        </div>
-      </div>
+      <ProjectHeader
+        token={token}
+        projectId={projectId}
+        projectName={project.name}
+        projectDescription={project.description ?? null}
+        tasksDone={tasksDone}
+        tasksTotal={tasksTotal}
+        statusBadge={statusBadge}
+        agentRoster={agentRoster}
+        availableAgents={selectableAgents}
+        channels={projectChannels}
+        activeChannel={activeChannel}
+        onSelectChannel={setActiveSessionId}
+        onCreateChannel={createChannelWithAgents}
+        channelAgents={channelDetailQuery.data?.agents ?? []}
+        channelUsers={channelDetailQuery.data?.users ?? []}
+        availablePeople={teamQuery.data?.members ?? []}
+        currentUserId={currentUserId}
+        onAddAgent={addAgentToActiveChannel}
+        onRemoveAgent={removeAgentFromActiveChannel}
+        onAddPerson={addPersonToActiveChannel}
+        onRemovePerson={removePersonFromActiveChannel}
+        personalityMode={personalityMode}
+        operationMode={operationMode}
+        onPersonalityChange={setPersonalityMode}
+        onOperationChange={setOperationMode}
+        liveWorkToggle={
+          activeTab === "chat"
+            ? { count: sessionActiveTaskCount, open: liveWorkOpen, onToggle: () => setLiveWorkOpen((v) => !v) }
+            : undefined
+        }
+      />
 
       <div className="tabs" role="tablist" style={{ padding: "0 24px" }}>
         {TABS.map((t) => (
@@ -110,15 +300,11 @@ export default function ProjectContainerLayout({ children }: { children: ReactNo
         ))}
       </div>
 
-      <div style={{ flex: 1, minHeight: 0 }}>{children}</div>
-
-      <HireAgentModal
-        token={token}
-        open={hireOpen}
-        onClose={() => setHireOpen(false)}
-        initialProjectId={projectId}
-        onHired={() => qc.invalidateQueries({ queryKey: ["project-agents", projectId] })}
-      />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <ProjectChatContext.Provider value={contextValue}>
+          {children}
+        </ProjectChatContext.Provider>
+      </div>
     </div>
   );
 }

@@ -557,7 +557,11 @@ async def plan_node(state: SupervisorState) -> dict:
         dep_name = p["depends_on"][0]
         if p["confidence"] == "high":
             edges.append((name_to_index[dep_name], i))
-            reason_clause = f" -- {p['reason']}" if p.get("reason") else ""
+            # Em dash, not the ASCII "--" this used to build (item 4g,
+            # blueprint chrome pass screenshot review) -- DESIGN_SPEC.md's
+            # own typography and every blueprint example ("Running Ravi
+            # after Priya — he needs the shortlist") use a real em dash.
+            reason_clause = f" — {p['reason']}" if p.get("reason") else ""
             notices.append(f"Running {p['agent']}'s task after {dep_name}'s{reason_clause}.")
         else:
             # medium or low confidence: the LLM DID answer here, just
@@ -1004,11 +1008,44 @@ async def _write_handoffs_for_completion(
     raw_output_text = from_step.outcome_summary or ""
     output_text, pii_withheld = pii_classifier.redact_free_text(raw_output_text)
     wrapped_output = prompt_guard.wrap("tool_result", output_text)
-    summary_source = prompt_guard.neutralize_markup(output_text)
-    summary = summary_source if len(summary_source) <= 200 else summary_source[:200].rstrip() + "…"
     from_agent_name = prompt_guard.sanitize_identifier(
         from_agent.name if from_agent is not None else completed_task.agent_id
     )
+    # DESIGN_SPEC.md §7.3.F: payload_summary is "one sentence... what was
+    # passed" for the handoff card, not the raw tool/step output truncated
+    # to 200 chars (what this used to be -- a Python dict repr or raw JSON
+    # cut off mid-token reads as a bug, not a summary). Built from the
+    # task's own human-authored goal instead of raw_output_text/output_text
+    # -- those two stay exactly as they are, still redacted and wrapped,
+    # still injected into the dependent's own goal below; only the
+    # UI-facing display sentence changes.
+    #
+    # goal_text goes through redact_free_text() too, not just
+    # neutralize_markup() -- found live: a Handoff's payload_summary is
+    # channel-wide visible (_handoff_entries() below), but the ChatMessage
+    # carrying the task's own originating @mention, and the "Started task"
+    # card, are BOTH user_id-scoped to whoever created the task (private,
+    # not shared with the rest of the channel -- see get_history()'s own
+    # ChatMessage query and _task_card_entries()'s Task.user_id filter,
+    # the latter also now excluding SUPERVISOR_INTENT tasks entirely).
+    # So a channel member who never saw the goal any other way sees it
+    # here, unredacted, the moment a task they had no visibility into
+    # hands off to a dependent -- confirmed live with two real users in the
+    # same channel before this fix, one of whom saw the handoff card and
+    # nothing else. The task's own goal is human free-typed text and needs
+    # the same treatment output_text already gets.
+    #
+    # Its own redaction result is intentionally NOT folded into
+    # pii_withheld above -- that field means "what the DEPENDENT agent
+    # (dep.goal, via wrapped_output) did not receive", a claim this
+    # function makes about output_text specifically. What the payload_
+    # summary display itself masked is a separate fact with no existing
+    # place to surface it, so it's applied silently here rather than
+    # overloading a field whose meaning is already fixed elsewhere.
+    goal_text, _goal_withheld = pii_classifier.redact_free_text(completed_task.goal)
+    goal_text = prompt_guard.neutralize_markup(goal_text)
+    short_goal = goal_text if len(goal_text) <= 80 else goal_text[:80].rstrip() + "…"
+    summary = f'{from_agent_name} finished "{short_goal}" and passed the result along.'
 
     handoff_ids = []
     for dep in dependents:
