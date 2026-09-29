@@ -8,10 +8,10 @@ from .auth import get_current_user, enforce_quota, enforce_agent_budget
 from agent.dataops_agent import run_agent, run_agent_stream, window_and_summarize, _finalize_agent_result
 from database import AsyncSessionLocal
 from models.all_models import (
-    AgentInstance, AgentInstanceStatus, Channel, ChannelUser, ChatMessage, Handoff, Task,
+    AgentInstance, AgentInstanceStatus, Channel, ChannelUser, ChatMessage, Handoff, Task, TaskShape,
 )
 from sqlalchemy import select, func, delete
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 from models.approval_model import ApprovalRequest, ApprovalStatus
 from schemas.chat_schema import ChatRequest
@@ -548,6 +548,22 @@ async def _run_supervisor_and_stream(
     async def sink(event_type: str, data: dict) -> None:
         await queue.put(_sse(event_type, data))
 
+    # Captured before run_supervisor() runs, not after it returns (item 4a,
+    # blueprint chrome pass screenshot review -- found live: a "Started
+    # task" ack rendered ABOVE the user message that caused it). This
+    # function's own ChatMessage rows below are only persisted once
+    # run_supervisor() has already fully drained the turn -- including
+    # running Nova's task to its approval pause -- so a plain
+    # datetime.utcnow() called at persistence time gave the user's own
+    # message a created_at LATER than the live "queued" acks dispatch_node
+    # already streamed to the client while run_supervisor() was still
+    # running. Every live per-task event is tagged with a client-side
+    # timestamp captured as it arrives, which is necessarily before
+    # run_supervisor() returns -- so the user's own message needs a
+    # timestamp from before that call too, for GET .../history to ever
+    # reconstruct the same order the live turn actually rendered in.
+    turn_started_at = datetime.utcnow()
+
     try:
         result = await run_supervisor(
             tenant_id=tenant_id, channel_id=channel.id, project_id=channel.project_id,
@@ -584,7 +600,7 @@ async def _run_supervisor_and_stream(
                 session_id=session_id, role="user", content=req.message,
                 agent_id=None, mentioned_agent_id=None,
                 personality_mode=req.personality_mode, operation_mode=req.operation_mode,
-                tool_calls=[], created_at=datetime.utcnow(),
+                tool_calls=[], created_at=turn_started_at,
             ))
 
             # An @mention naming a real agent who isn't on this channel/
@@ -616,13 +632,22 @@ async def _run_supervisor_and_stream(
             # explanation for their ordering. role="system_notice" (see
             # _handoff_entries' own comment on this free-text value) --
             # a system-authored note, not any one agent's own words.
-            for notice in result.get("inferred_edge_notices", []):
+            for notice_index, notice in enumerate(result.get("inferred_edge_notices", [])):
+                # turn_started_at + a tiny per-notice increment, not a fresh
+                # datetime.utcnow() (same reasoning as the user message
+                # above, and the same bug: a notice explains an edge
+                # inferred during planning, before any task ran, but a
+                # plain "now" here timestamps it after the whole turn
+                # already drained). The increment keeps multiple notices
+                # from tying exactly with each other or with the user
+                # message while still sorting the whole group before any
+                # live per-task event, which necessarily arrives later.
                 db.add(ChatMessage(
                     id=str(uuid.uuid4()), tenant_id=tenant_id, user_id=user["sub"],
                     session_id=session_id, role="system_notice", content=notice,
                     agent_id=None, mentioned_agent_id=None,
                     personality_mode=req.personality_mode, operation_mode=req.operation_mode,
-                    tool_calls=[], created_at=datetime.utcnow(),
+                    tool_calls=[], created_at=turn_started_at + timedelta(microseconds=notice_index + 1),
                 ))
                 await queue.put(_sse("system_line", {"text": notice}))
 
@@ -999,9 +1024,27 @@ async def _task_card_entries(db, tenant_id: str, user_id: str, session_id: str) 
     second stored copy that could drift -- the same principle behind every
     other *_reason() helper in api/v1/tasks.py. Interleaved into the real
     message timeline by created_at below, matching where the card actually
-    appeared the first time (right after the message that triggered it)."""
+    appeared the first time (right after the message that triggered it).
+
+    Excludes SUPERVISOR_INTENT tasks (blueprint chrome pass,
+    feature/blueprint-workspace-chrome) -- a supervisor-dispatched task
+    already gets full representation in the thread through its own
+    ChatMessage row (an acknowledgement/result) and, when it has a
+    dependent, a Handoff row -- this card was never designed to represent
+    that path, it just wasn't filtered against it. Found live during this
+    pass's own screenshot-verification loop: every supervisor task in a
+    channel rendered TWICE, once as this generic "Started task: ... [View
+    progress]" card and again as its real B/D-shaped message -- and the
+    card's own timestamp (a bare str(datetime), pre-existing) sorting
+    against a mis-parsed-without-Z reading of it made the duplicate appear
+    to render before the user's own message that triggered it, which is
+    what surfaced this in the first place. The original manual-task-card
+    case this function was built for (TaskCreateModal, still real on
+    /chat) is unaffected -- that path never sets task_shape to
+    SUPERVISOR_INTENT."""
     r = await db.execute(select(Task).where(
         Task.tenant_id == tenant_id, Task.user_id == user_id, Task.originating_session_id == session_id,
+        Task.task_shape != TaskShape.SUPERVISOR_INTENT,
     ).order_by(Task.created_at.asc()))
     return [
         {

@@ -57,6 +57,23 @@ SYSTEM_PROMPTS = {
     ),
 }
 
+# Item 3, blueprint chrome follow-up: found live -- a completed tool's raw
+# result (a Python dict repr) was appearing verbatim in the model's own
+# final answer ("Result: {'run_id': '82a90154-...', 'pipeline_id': ...}"),
+# which then rendered as unreadable text inside §7.3.D's output card. The
+# card is supposed to hold a summary; the raw structure belongs exclusively
+# behind "Show work" (already real -- ToolCallBlock renders it there).
+# Applies to every employee type and every personality tone equally (this
+# is a formatting rule, not a communication style), so it's appended once
+# in build_system_prompt() below rather than duplicated into all eight
+# EMPLOYEE_TYPE_IDENTITY x SYSTEM_PROMPTS combinations.
+RESULT_FORMATTING_RULE = (
+    "When you report a tool's result, never paste its raw output structure (a Python dict, JSON, "
+    "or similar) into your answer. State the relevant facts in plain language instead -- exact IDs, "
+    "counts, and names are still welcome, just written as prose, not as a data structure. The tool's "
+    "raw output is already shown to the user separately, under \"Show work\"."
+)
+
 OPERATION_MODE_CONTEXT = {
     OperationMode.ADVISORY: "ADVISORY: Only recommend — never execute. Always ask for approval first.",
     OperationMode.ASSISTED: "ASSISTED: Execute safe low-risk actions. Route medium/high-risk through approval gate.",
@@ -129,7 +146,7 @@ def build_system_prompt(
     ).format(agent_name=agent_name)
     tone = SYSTEM_PROMPTS.get(personality, SYSTEM_PROMPTS[PersonalityMode.ENGINEER]).format(agent_name=agent_name)
     op_ctx = OPERATION_MODE_CONTEXT.get(operation, "")
-    return f"{identity}\n\n{tone}\n\n{op_ctx}"
+    return f"{identity}\n\n{tone}\n\n{op_ctx}\n\n{RESULT_FORMATTING_RULE}"
 
 def get_risk_level(action: str) -> str:
     for level, actions in RISK_ACTIONS.items():

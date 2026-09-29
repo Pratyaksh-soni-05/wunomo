@@ -557,7 +557,11 @@ async def plan_node(state: SupervisorState) -> dict:
         dep_name = p["depends_on"][0]
         if p["confidence"] == "high":
             edges.append((name_to_index[dep_name], i))
-            reason_clause = f" -- {p['reason']}" if p.get("reason") else ""
+            # Em dash, not the ASCII "--" this used to build (item 4g,
+            # blueprint chrome pass screenshot review) -- DESIGN_SPEC.md's
+            # own typography and every blueprint example ("Running Ravi
+            # after Priya — he needs the shortlist") use a real em dash.
+            reason_clause = f" — {p['reason']}" if p.get("reason") else ""
             notices.append(f"Running {p['agent']}'s task after {dep_name}'s{reason_clause}.")
         else:
             # medium or low confidence: the LLM DID answer here, just
@@ -1004,11 +1008,20 @@ async def _write_handoffs_for_completion(
     raw_output_text = from_step.outcome_summary or ""
     output_text, pii_withheld = pii_classifier.redact_free_text(raw_output_text)
     wrapped_output = prompt_guard.wrap("tool_result", output_text)
-    summary_source = prompt_guard.neutralize_markup(output_text)
-    summary = summary_source if len(summary_source) <= 200 else summary_source[:200].rstrip() + "…"
     from_agent_name = prompt_guard.sanitize_identifier(
         from_agent.name if from_agent is not None else completed_task.agent_id
     )
+    # DESIGN_SPEC.md §7.3.F: payload_summary is "one sentence... what was
+    # passed" for the handoff card, not the raw tool/step output truncated
+    # to 200 chars (what this used to be -- a Python dict repr or raw JSON
+    # cut off mid-token reads as a bug, not a summary). Built from the
+    # task's own human-authored goal instead of raw_output_text/output_text
+    # -- those two stay exactly as they are, still redacted and wrapped,
+    # still injected into the dependent's own goal below; only the
+    # UI-facing display sentence changes.
+    goal_text = prompt_guard.neutralize_markup(completed_task.goal)
+    short_goal = goal_text if len(goal_text) <= 80 else goal_text[:80].rstrip() + "…"
+    summary = f'{from_agent_name} finished "{short_goal}" and passed the result along.'
 
     handoff_ids = []
     for dep in dependents:
