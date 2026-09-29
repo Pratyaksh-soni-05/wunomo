@@ -15,13 +15,21 @@
 // avatar pulse, and trailing caret depend on it.
 import { useState } from "react";
 import { Card, Badge, Button } from "@/components/ui";
+import { parseApiDate } from "@/lib/dates";
 import { EmployeeAvatar, employeeHueClass } from "./EmployeeAvatar";
 import { ToolCallBlock } from "./ToolCallBlock";
 import type { ChannelMemberAgent, ChatToolCall, PendingApproval } from "@/lib/api";
 
+// parseApiDate (lib/dates.ts), not a bare `new Date(timestamp)` -- a
+// history-loaded message's timestamp is a bare backend `str(datetime)`
+// with no timezone marker (naive UTC, no "Z"), which `new Date()` parses
+// as the BROWSER's local time instead of UTC. Every message loaded from
+// GET .../history was showing a clock time off by the local/UTC offset
+// (found live during this pass's own screenshot-verification loop, same
+// root cause as the ordering fix in MessageThread's own sort).
 export function formatTime(timestamp: string): string {
-  const d = new Date(timestamp);
-  if (Number.isNaN(d.getTime())) return "";
+  const d = parseApiDate(timestamp);
+  if (!d || Number.isNaN(d.getTime())) return "";
   return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
@@ -173,27 +181,60 @@ function wordCount(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
 
-// No real file-producing tool exists anywhere in this codebase today
-// (confirmed by reading every agent/tools/*.py file -- export_dataset is
-// an explicit, permanent stub: "there is no real export path in this
-// system for any format or destination"). Rather than a Download button
-// with nothing real behind it, this downloads the turn's own real content
-// client-side -- a real file, genuinely produced from the real response
-// text, never a fabricated filename pointing at nothing.
-function downloadAsFile(filename: string, content: string) {
-  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
 function titleCaseToolName(tool: string): string {
   return tool.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+// §7.3.D: "never surface a UUID or tool signature." splitLeadAndRest's
+// sentence-boundary split finds the right CUT POINT, but can't tell good
+// prose from the model narrating its own tool call ("call the run_pipeline
+// tool with pipeline_id 356e8ee4-...") -- that's still a grammatically
+// complete "sentence" by the regex's own rule. Caught after the fact
+// instead: a lead matching a raw UUID or "call the X tool" phrasing isn't
+// an answer, so it's replaced with a synthesized one built from the real
+// completed tool's name, and the full original text (never truncated,
+// never dropped) moves into the card where the mechanical detail belongs.
+//
+// The dash class below is not cosmetic: found live (item 3 verification)
+// that Gemini renders the hyphens inside a UUID it writes out as U+2011
+// (non-breaking hyphen), not ASCII U+002D -- confirmed via the raw
+// persisted bytes, not assumed. A plain "-" here silently let every
+// model-written UUID straight through; this class also covers the other
+// dash variants a model could plausibly reach for (en/em dash, figure
+// dash) for the same reason.
+const DASH = "[-‐‑‒–—]";
+const RAW_ARTIFACT_RE = new RegExp(
+  `[0-9a-f]{8}${DASH}[0-9a-f]{4}${DASH}[0-9a-f]{4}${DASH}[0-9a-f]{4}${DASH}[0-9a-f]{12}` +
+  `|\\bcall(?:ed|ing)?\\s+the\\s+\\S+\\s+tool\\b`,
+  "i",
+);
+
+function safeLead(
+  content: string,
+  completedTool: ChatToolCall | undefined,
+  name: string,
+): { lead: string; rest: string | null } {
+  const { lead, rest } = splitLeadAndRest(content);
+  if (!RAW_ARTIFACT_RE.test(lead)) return { lead, rest };
+  const synthesized = completedTool
+    ? `${name} ran ${titleCaseToolName(completedTool.tool)}.`
+    : `${name} finished.`;
+  return { lead: synthesized, rest: content };
+}
+
+// §7.3.D's card holds a READABLE result -- item 3's fix. The system prompt
+// (agent/personality.py's RESULT_FORMATTING_RULE) now tells the agent to
+// never paste a tool's raw output structure into its own answer, but a
+// system-prompt instruction is guidance, not a guarantee -- this is the
+// structural backstop for whenever the model still does it anyway. A
+// single-quoted key ('run_id': ...) is the unambiguous tell: real JSON
+// never uses single quotes, so this only fires on an actual Python repr,
+// never on ordinary prose that happens to contain a colon.
+const RAW_DICT_RE = /\{\s*['"]\w+['"]\s*:/;
+
+function looksLikeRawDump(text: string): boolean {
+  const trimmed = text.trim();
+  return RAW_DICT_RE.test(trimmed) && trimmed.endsWith("}");
 }
 
 export function EmployeeResult({
@@ -225,10 +266,9 @@ export function EmployeeResult({
 }) {
   const [showWork, setShowWork] = useState(false);
   const [showHowMade, setShowHowMade] = useState(false);
-  const { lead, rest } = splitLeadAndRest(content);
-  const showCard = needsOutputCard(rest, toolCalls);
   const completedTool = toolCalls.find((c) => c.status === "completed");
-  const filename = completedTool ? `${titleCaseToolName(completedTool.tool)}.md` : "Response.md";
+  const { lead, rest } = safeLead(content, completedTool, name);
+  const showCard = needsOutputCard(rest, toolCalls);
 
   return (
     <div className="chat-bubble-assistant msg-enter">
@@ -244,19 +284,33 @@ export function EmployeeResult({
         </Card>
         {showCard && (
           <div className="output-card">
+            {/* No filename/Download here -- §7.3.D's literal spec wants
+                both, but no tool in this codebase produces a real file
+                (export_dataset is a permanent stub: "there is no real
+                export path in this system"). A fake ".md" extension plus a
+                button that downloads the turn's own chat text back as a
+                file misrepresented that text as a produced artifact --
+                found live during this pass's own screenshot review.
+                Title describes what the card actually is instead. */}
             <div className="output-card-header">
               <div className="output-card-title-group">
-                <span className="output-card-filename">{filename}</span>
+                <span className="output-card-filename">
+                  {completedTool ? `${titleCaseToolName(completedTool.tool)} result` : "Full response"}
+                </span>
                 <span className="output-card-subline">{wordCount(content)} words · {name}</span>
               </div>
               <Badge variant="gray">AI-generated</Badge>
-              <Button size="sm" className="btn-dense" onClick={() => downloadAsFile(filename, content)}>
-                Download
-              </Button>
             </div>
             {rest && (
               <div className="output-card-preview">
-                <span dangerouslySetInnerHTML={{ __html: formatAssistantText(rest) }} />
+                {looksLikeRawDump(rest) ? (
+                  <span className="text-muted">
+                    {completedTool ? titleCaseToolName(completedTool.tool) : "This action"} finished — see{" "}
+                    <strong>Show work</strong> below for the full result.
+                  </span>
+                ) : (
+                  <span dangerouslySetInnerHTML={{ __html: formatAssistantText(rest) }} />
+                )}
               </div>
             )}
             <div className="output-card-footer">
@@ -355,10 +409,17 @@ export function ApprovalCard({
         )}
       </div>
       <div className="approval-card-actions">
-        <Button size="sm" variant="success" className="btn-dense" onClick={onApprove} disabled={!!busy}>
+        {/* Blueprint's own approval markup (wunomo-blueprint.html) uses
+            `.m-btn.pri` (the accent fill, same job as .btn-primary here) for
+            Approve and `.m-btn.dang` (bordered, --err text/border, no fill)
+            for Reject -- never the status-colour success/danger pair. Those
+            two are real, correct tokens, but the wrong semantic: green/red
+            here would say "this is a positive/negative outcome," when
+            Approve vs Reject is an action choice, not a status. */}
+        <Button size="sm" variant="primary" className="btn-dense" onClick={onApprove} disabled={!!busy}>
           {busy === "approving" ? "Approving…" : "Approve"}
         </Button>
-        <Button size="sm" variant="danger" className="btn-dense" onClick={onReject} disabled={!!busy}>
+        <Button size="sm" variant="danger-outline" className="btn-dense" onClick={onReject} disabled={!!busy}>
           {busy === "rejecting" ? "Rejecting…" : "Reject"}
         </Button>
         <span className="approval-card-status">Task is paused</span>

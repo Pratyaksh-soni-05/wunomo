@@ -392,6 +392,14 @@
   /* Layout */
   --sidebar-w: 228px;  /* was 220px — matches wunomo-all-screens.html exactly (slice 3) */
   --topbar-h: 52px;
+  /* DESIGN_SPEC.md §7.1's Project Workspace layout table names these two
+     explicitly (chat column cap, live panel width) -- previously hardcoded
+     as bare 780px/352px literals at each consumer instead of a named
+     token, so this stage names them for real. Values unchanged from what
+     was already shipped (.chat-bubble-user-inner's max-width, .chat-
+     sidebar-right.livework-panel's width). */
+  --chat-max: 780px;
+  --livepanel-w: 352px;
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius: 8px;

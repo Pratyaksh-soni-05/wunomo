@@ -162,6 +162,21 @@ img { display: block; max-width: 100%; }
   background: var(--surface-hover); border-color: var(--border-strong); color: var(--text-primary);
 }
 
+/* Tier 2/3 danger variant -- a lower-emphasis destructive action (e.g. the
+   approval card's Reject, §7.3.E) that shouldn't carry Tier 1's full
+   solid-fill weight the way a standalone "Delete this forever" does.
+   DESIGN_SPEC.md §3's own "Still open" note flagged this exact gap ("no
+   shipped Danger outline variant... a real component gap, not a
+   token-naming fix") -- added here rather than reusing .btn-danger's
+   filled treatment for a bordered job. Same --danger/--danger-border
+   tokens .badge-danger and .input-error already use, no new colour. */
+.btn-danger-outline {
+  background: transparent; color: var(--danger); border-color: var(--danger-border);
+}
+.btn-danger-outline:hover:not(:disabled) {
+  background: var(--danger-bg); border-color: var(--danger);
+}
+
 /* Tier 4 — TEXT: replaces .auth-link-btn/.link-btn (2026-09-14). Same job
    (a clickable action that reads as text, not a control) but a real button
    underneath, never underlined. Deliberately opts OUT of the shared .btn's
@@ -470,6 +485,10 @@ tr.selected td:first-child {
    PROGRESS
    ========================================== */
 .progress-bar { height: 4px; background: var(--surface-hover); border-radius: var(--radius-full); overflow: hidden; }
+/* DESIGN_SPEC.md §3 Progress bar: "Track: height 3px (inline) or 4px
+   (card)" -- 4px above is the card default already shipped; .thin is the
+   inline variant (§7.2's project-header progress track). */
+.progress-bar.thin { height: 3px; }
 .progress-fill { height: 100%; border-radius: var(--radius-full); background: var(--accent-fill); transition: width var(--dur-bar) var(--ease); }
 .progress-fill.success { background: var(--success-fill); }
 .progress-fill.danger { background: var(--danger-fill); }
@@ -814,6 +833,46 @@ tr.selected td:first-child {
    the project layout's own flex:1 children-slot div for the project
    route) -- 100% resolves against that in both cases, instead of
    overflowing it by however much extra chrome sits above. */
+/* §7.2 Project header -- rendered once by the project container layout
+   (header-merge pass: item 1), not a second shell inside the Chat tab.
+   layout.tsx's own outer flex column already gives the header, tab bar,
+   and {children} slot a shared height:100% arrangement, so the header
+   never scrolls with the thread underneath it (§7.1: "Thread and live
+   panel scroll independently") -- no extra wrapper needed here for that. */
+.project-header {
+  flex-shrink: 0; padding: 12px 20px; border-bottom: 1px solid var(--border);
+  background: var(--surface); display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.project-header-identity { min-width: 0; }
+.project-header-breadcrumb { display: block; margin-bottom: 2px; }
+.project-header-name-row { display: flex; align-items: center; gap: 9px; }
+.project-header-name { font-size: 16.5px; font-weight: 650; letter-spacing: -0.025em; color: var(--text-primary); }
+.project-header-subline { font-size: 12.3px; color: var(--text-secondary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-header-roster { display: flex; align-items: center; margin-left: 8px; }
+.project-header-avatars { display: flex; align-items: center; }
+.project-header-avatars .avatar-wrap + .avatar-wrap { margin-left: -6px; }
+.project-header-roster .btn { margin-left: 10px; }
+.project-header-right { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+.project-header-progress { width: 120px; }
+.project-header-menu { position: relative; }
+.project-header-dropdown {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 50; width: 240px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); padding: 6px; animation: modal-in 0.12s ease;
+}
+.project-header-dropdown-label { padding: 6px 8px 4px; font-size: 10.5px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.project-header-dropdown-empty { padding: 4px 8px 8px; font-size: 12px; color: var(--text-muted); }
+.project-header-dropdown-item {
+  display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
+  padding: 7px 8px; border-radius: var(--radius-sm); font-size: 13px; color: var(--text-primary);
+}
+.project-header-dropdown-item:hover { background: var(--surface-hover); }
+.project-header-dropdown-item.active { background: var(--surface-hover); font-weight: 600; }
+.project-header-dropdown-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.project-header-dropdown-sep { height: 1px; background: var(--border); margin: 6px 2px; }
+.project-header-dropdown-selects { display: flex; flex-direction: column; gap: 6px; padding: 0 8px 6px; }
+.project-header-dropdown-selects .select, .project-header-dropdown-selects select { width: 100%; }
+
 .chat-layout { display: flex; height: 100%; overflow: hidden; }
 
 .chat-sidebar-left, .chat-sidebar-right { flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface-hover); }
@@ -824,7 +883,7 @@ tr.selected td:first-child {
    change to it: ContextPanel.tsx (the plain /chat page's own right pane)
    keeps the 260px default, only LiveWorkPanel.tsx opts into the wider
    352px. */
-.chat-sidebar-right.livework-panel { width: 352px; }
+.chat-sidebar-right.livework-panel { width: var(--livepanel-w); }
 .livework-toggle { display: none; align-items: center; gap: 6px; }
 
 @media (max-width: 1180px) {
@@ -930,7 +989,14 @@ tr.selected td:first-child {
 .avatar-sm { width: 22px; height: 22px; border-radius: 6px; font-size: 9.5px; }
 .avatar-lg { width: 52px; height: 52px; border-radius: 13px; font-size: 16px; }
 
-.chat-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+/* §7.1: "Message column capped at --chat-max (780px), centred." Applied
+   directly to the scrolling flex container itself (not a separate inner
+   wrapper) -- its children already stretch to its own width by default
+   (column-flex's default align-items: stretch), so capping and centring
+   this element centres every message inside it for free, including the
+   already-shipped .chat-bubble-user-inner/600px nested one level further
+   in. */
+.chat-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; max-width: var(--chat-max); width: 100%; margin: 0 auto; }
 
 /* Shape A -- user message (§7.3.A). Was a solid --accent-fill bubble;
    now a tinted, bordered card per spec. --accent (spec's bare token
@@ -1028,7 +1094,12 @@ tr.selected td:first-child {
    muted/italicised down to a lesser aside. */
 .handoff-card-withheld { margin-top: 4px; font-size: 12.6px; color: var(--text-secondary); }
 
+/* §7.1: "The composer is fixed at the bottom of the thread pane" -- same
+   --chat-max/centred treatment as .chat-messages above, so the composer's
+   own edges line up with the message column above it rather than
+   stretching the full width of .chat-main. */
 .chat-composer { padding: 14px 20px; border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+.chat-composer > * { max-width: var(--chat-max); margin-left: auto; margin-right: auto; }
 
 /* Composer card (§7.5) -- radius/border per spec; background left as the
    existing recessed --bg (the outer .chat-composer above is already
