@@ -1049,6 +1049,20 @@ async def _handoff_entries(db, tenant_id: str, channel_id: str) -> list[dict]:
         entries.append({
             "role": "system_notice", "content": text, "tool_calls": [],
             "timestamp": str(h.created_at), "agent_id": None, "mentioned_agent_id": None,
+            # Structured fields matching the live "handoff" SSE event
+            # exactly (api/v1/chat.py's own emission above) -- added so
+            # §7.3.F's real card (separate from/to avatars, its own
+            # payload_summary line, a distinctly-styled withheld line) can
+            # render after a page reload too, not only for the live,
+            # pre-refresh few seconds. Before this, a reload silently
+            # downgraded a rendered Handoff card back to plain sentence
+            # text (`content` above) with no way for the frontend to tell
+            # the two apart -- `content` is kept for any caller that only
+            # ever reads the flattened sentence, but a caller that wants
+            # the real card checks for `from_agent_id` first.
+            "from_agent_id": h.from_agent_id, "from_agent_name": from_name,
+            "to_agent_id": h.to_agent_id, "to_agent_name": to_name,
+            "payload_summary": h.payload_summary, "withheld": h.withheld,
         })
     return entries
 

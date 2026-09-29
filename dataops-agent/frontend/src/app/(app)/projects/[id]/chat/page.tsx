@@ -12,7 +12,8 @@ import {
   getToken, decodeUserFromToken, getChatHistory, sendChatMessageStream,
   listChannels, createChannel, getChannel, addChannelAgent, removeChannelAgent,
   addChannelUser, removeChannelUser, getProjectAgents, getTeamMembers, uploadToChannel,
-  getActiveTasks, ApiError, type ChatContext, type ChatToolCall, type HiredAgent, type TaskItem,
+  getActiveTasks, approveRequest, rejectRequest,
+  ApiError, type ChatContext, type ChatToolCall, type HiredAgent, type TaskItem,
 } from "@/lib/api";
 
 /**
@@ -65,6 +66,10 @@ export default function ProjectChatTab() {
   // opens that same real modal instead of faking an inline action that
   // doesn't exist.
   const [inlineHireOpen, setInlineHireOpen] = useState(false);
+  // §7.3.E's inline action row. A single pair, not a set -- only one
+  // approve/reject click can be in flight from this composer at a time.
+  const [busyApprovalId, setBusyApprovalId] = useState<string | null>(null);
+  const [busyApprovalAction, setBusyApprovalAction] = useState<"approving" | "rejecting" | null>(null);
 
   const chatGenerationRef = useRef(0);
   const autoSelectedRef = useRef(false);
@@ -239,6 +244,48 @@ export default function ProjectChatTab() {
       setUploadError(message);
     } finally {
       setUploading(false);
+    }
+  };
+
+  // §7.3.E's inline action row. approveRequest()/rejectRequest() (the
+  // already-shipped Approvals-screen actions, reused rather than a second
+  // implementation) both resolve only once resolve_task_approval()'s own
+  // wave-drain is fully done server-side -- by the time either promise
+  // settles, this task AND any dependent it released have already reached
+  // their real, persisted final state, so a plain history refetch is the
+  // whole job here, not a second stream or a hand-rolled poll.
+  const resolveApprovalCard = async (approvalRequestId: string, action: "approving" | "rejecting") => {
+    if (!activeSessionId) return;
+    const myGeneration = chatGenerationRef.current;
+    setBusyApprovalId(approvalRequestId);
+    setBusyApprovalAction(action);
+    try {
+      if (action === "approving") await approveRequest(token, approvalRequestId);
+      else await rejectRequest(token, approvalRequestId);
+      if (chatGenerationRef.current !== myGeneration) return;
+      const history = await getChatHistory(token, activeSessionId);
+      if (chatGenerationRef.current === myGeneration) {
+        // Preserve any OTHER still-pending approval card in this channel
+        // (a different task, paused on its own gate) -- only the one just
+        // resolved is guaranteed to have real history behind it now.
+        setMessages((prev) => {
+          const stillPaused = prev.filter(
+            (m) => !!m.approvalCard && m.approvalCard.approval_request_id !== approvalRequestId,
+          );
+          return [...history.messages, ...stillPaused];
+        });
+      }
+      qc.invalidateQueries({ queryKey: ["active-tasks"] });
+    } catch {
+      toast.push(
+        action === "approving" ? "Failed to approve — try again." : "Failed to reject — try again.",
+        "danger",
+      );
+    } finally {
+      if (chatGenerationRef.current === myGeneration) {
+        setBusyApprovalId(null);
+        setBusyApprovalAction(null);
+      }
     }
   };
 
@@ -438,6 +485,19 @@ export default function ProjectChatTab() {
               : null;
             updateTaskMessage(data.task_id, (msg) => ({
               ...msg, agent_id: data.agent_id, content: data.response ?? fallbackText ?? msg.content, streaming: false,
+              taskFailed: data.status === "failed",
+              // §7.3.E -- present only on this exact status (see
+              // ChatStreamSupervisorTask's own comment); cleared on any
+              // other terminal status so a message never carries a stale
+              // approvalCard from an earlier pause once it resolves.
+              approvalCard: data.status === "paused_needs_approval"
+                ? {
+                    approval_request_id: data.approval_request_id ?? "",
+                    risk_level: data.risk_level ?? "high",
+                    reason: data.reason ?? "",
+                    unblocks: data.unblocks ?? null,
+                  }
+                : undefined,
             }));
           },
           onSystemLine: ({ text }) => {
@@ -453,21 +513,18 @@ export default function ProjectChatTab() {
               timestamp: new Date().toISOString(), isSystemNotice: true,
             }]);
           },
-          onHandoff: ({ from_agent_name, to_agent_name, payload_summary, withheld }) => {
+          onHandoff: ({ from_agent_id, from_agent_name, to_agent_id, to_agent_name, payload_summary, withheld }) => {
             if (isStale()) return;
-            // Shape F (§7.3.F, a dedicated handoff card) isn't built yet
-            // -- approximated with shape I's plain-text treatment
-            // (§7.3.I already covers "handoffs" in its own list of what
-            // a system line is used for) rather than inventing a new
-            // shape this pass. The real Handoff row already persists
-            // (api/v1/chat.py's _handoff_entries reconstructs this exact
-            // text on refetch), so this is purely the pre-refetch, live
-            // view of it.
-            const text = `${from_agent_name} handed over to ${to_agent_name}. ${payload_summary}`
-              + (withheld.length > 0 ? ` (${to_agent_name} did not receive: ${withheld.join(", ")}.)` : "");
+            // Shape F, rendered by MessageThread's dispatcher off
+            // `from_agent_id`'s presence -- the same structured fields
+            // GET .../history now also returns (_handoff_entries, see
+            // this pass's own report), so the card survives a reload
+            // identically instead of degrading to flattened text.
             setMessages((prev) => [...prev, {
-              role: "assistant", content: text, tool_calls: [],
-              timestamp: new Date().toISOString(), isSystemNotice: true,
+              role: "system_notice", content: "", tool_calls: [],
+              timestamp: new Date().toISOString(),
+              from_agent_id, from_agent_name, to_agent_id, to_agent_name,
+              payload_summary, withheld,
             }]);
           },
           onNeedsClarification: (data) => {
@@ -524,7 +581,25 @@ export default function ProjectChatTab() {
       if (historySessionId) {
         try {
           const history = await getChatHistory(token, historySessionId);
-          if (!isStale()) setMessages(history.messages);
+          if (!isStale()) {
+            // `done` fires once the whole turn's waves have drained, and a
+            // task pausing for approval IS a drained wave from
+            // run_supervisor()'s point of view -- but a paused task has no
+            // ChatMessage row at all yet (_persist_task_completion_message
+            // only ever writes one on real completion), so history has
+            // nothing to reconstruct shape E's card from. Wholesale-
+            // replacing `messages` with `history.messages` here silently
+            // erased a still-pending approval card the instant `done`
+            // fired, seconds before a human could act on it -- confirmed
+            // live (see this pass's own report). Any locally-held task
+            // bubble still carrying approvalCard is preserved by appending
+            // it back on, since nothing in the fresh history can represent
+            // it yet.
+            setMessages((prev) => {
+              const stillPaused = prev.filter((m) => !!m.approvalCard);
+              return [...history.messages, ...stillPaused];
+            });
+          }
         } catch {
           // Keep the locally-accumulated placeholder rather than losing
           // the turn the user just watched complete.
@@ -632,6 +707,10 @@ export default function ProjectChatTab() {
           onToggle: () => setLiveWorkOpen((v) => !v),
         }}
         onTagUnhiredType={() => setInlineHireOpen(true)}
+        onApproveTask={(id) => resolveApprovalCard(id, "approving")}
+        onRejectTask={(id) => resolveApprovalCard(id, "rejecting")}
+        busyApprovalId={busyApprovalId}
+        busyApprovalAction={busyApprovalAction}
       />
       <LiveWorkPanel
         token={token}

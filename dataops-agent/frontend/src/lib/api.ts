@@ -474,6 +474,20 @@ export interface ChatMessageItem {
   // @mention anyone -- never guess an agent when this is null.
   agent_id?: string | null;
   mentioned_agent_id?: string | null;
+  // Present only on a system_notice row reconstructed from a real Handoff
+  // row (api/v1/chat.py's _handoff_entries) -- the same structured fields
+  // the live "handoff" SSE event carries, added so §7.3.F's real card
+  // (separate from/to avatars, its own payload_summary line, a distinct
+  // withheld line) survives a page reload instead of degrading to the
+  // flattened `content` sentence. A system_notice row without
+  // `from_agent_id` (an inferred-edge explanation) has none of these --
+  // render it via shape I using `content`, never assume this shape.
+  from_agent_id?: string | null;
+  from_agent_name?: string | null;
+  to_agent_id?: string | null;
+  to_agent_name?: string | null;
+  payload_summary?: string | null;
+  withheld?: string[];
 }
 
 export interface ChatContext {
@@ -587,6 +601,17 @@ export interface ChatStreamSupervisorTask {
   // ChatMessage id, so a live-pushed render can be reconciled with the
   // same row the next history refetch returns, not just re-added.
   message_id: string | null;
+  // Present only on a "paused_needs_approval" emission (§7.3.E) -- the
+  // real ApprovalRequest just created for this task's first blocked call,
+  // and the same describe_unblocked_dependents() sentence
+  // PolicyEngine._serialize() computes for the polled GET /approvals/{id}
+  // ("Approving this also unblocks Ravi's task"), relayed live instead of
+  // requiring a second round-trip just to render the card the moment it
+  // appears. null on every other status.
+  approval_request_id?: string | null;
+  risk_level?: string | null;
+  reason?: string | null;
+  unblocks?: string | null;
 }
 
 // Shape I (§7.3.I) content that arrives live before it's persisted (an

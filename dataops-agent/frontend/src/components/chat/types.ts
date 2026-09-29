@@ -39,4 +39,26 @@ export interface LocalChatMessage extends ChatMessageItem {
   // (onDone for the single-agent placeholder, the terminal supervisor_task
   // status for a task bubble) -- never derived from array position.
   streaming?: boolean;
+  // §7.3.E -- set on a task bubble the moment its "paused_needs_approval"
+  // supervisor_task event arrives (see modules/orchestration/supervisor.py's
+  // _run_one_task, which now relays these fields alongside the status
+  // itself). Never reconstructed from history: a paused task has no
+  // ChatMessage row at all yet (_persist_task_completion_message only ever
+  // writes one on real completion), so this is live-only by construction,
+  // same as task_id above -- once resolved, the next history refetch shows
+  // the task's real completed/blocked outcome instead.
+  approvalCard?: {
+    approval_request_id: string;
+    risk_level: string;
+    reason: string;
+    unblocks: string | null;
+  };
+  // Set on a task bubble's own terminal supervisor_task event when
+  // status === "failed" -- distinguishes a genuine failure from a success
+  // so MessageThread doesn't render a failed task under shape D's success
+  // badge. Undefined (not "completed") is the default/success case,
+  // including every history-loaded message -- a persisted assistant
+  // ChatMessage row only ever exists for a real completion in the first
+  // place, so there is nothing to distinguish there.
+  taskFailed?: boolean;
 }

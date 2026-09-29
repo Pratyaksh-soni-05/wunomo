@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Badge, Modal, Select } from "@/components/ui";
 import { EmployeeAvatar } from "./EmployeeAvatar";
-import { UserMessage, EmployeeMessage, SystemLine, TaskStartedLine } from "./messageShapes";
+import { UserMessage, EmployeeMessage, EmployeeResult, ApprovalCard, HandoffCard, SystemLine, TaskStartedLine } from "./messageShapes";
 import { KNOWN_EMPLOYEE_TYPES, EMPLOYEE_TYPE_LABEL } from "@/lib/employeeTypes";
 import type { LocalChatMessage } from "./types";
 import type {
@@ -102,6 +102,10 @@ export function MessageThread({
   liveNotice,
   liveWorkToggle,
   onTagUnhiredType,
+  onApproveTask,
+  onRejectTask,
+  busyApprovalId,
+  busyApprovalAction,
 }: {
   messages: LocalChatMessage[];
   sending: boolean;
@@ -157,6 +161,19 @@ export function MessageThread({
   // consistent with everything else here) -- the parent owns hiring +
   // adding the new agent to the channel + the resulting system line.
   onTagUnhiredType?: (employeeType: string) => void;
+  // §7.3.E's inline action row -- approveRequest()/rejectRequest() (the
+  // already-shipped Approvals-screen actions) called with the message's
+  // own approvalCard.approval_request_id. Both resolve only once
+  // resolve_task_approval()'s wave-drain is fully done server-side, so the
+  // parent's job on success is just a history refetch, not a second
+  // stream. Undefined on a host with no approval card ever rendered.
+  onApproveTask?: (approvalRequestId: string) => void;
+  onRejectTask?: (approvalRequestId: string) => void;
+  // Which one card (if any) is mid-request right now, and which action --
+  // a single pair, not a set, because only one inline approve/reject click
+  // can be in flight at a time from this one composer.
+  busyApprovalId?: string | null;
+  busyApprovalAction?: "approving" | "rejecting" | null;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -434,21 +451,74 @@ export function MessageThread({
           if (m.role === "user") {
             return <UserMessage key={i} content={m.content} timestamp={m.timestamp} roster={channelAgents} />;
           }
+          // Shape F -- checked before the generic system_notice branch
+          // below: a persisted handoff row is ALSO role="system_notice"
+          // (api/v1/chat.py's _handoff_entries), so `from_agent_id`
+          // presence is what actually distinguishes "real Handoff row" from
+          // "plain inferred-edge sentence" -- never role alone.
+          if (m.from_agent_id) {
+            return (
+              <HandoffCard
+                key={i}
+                fromAgentId={m.from_agent_id}
+                fromAgentName={m.from_agent_name ?? m.from_agent_id}
+                toAgentId={m.to_agent_id}
+                toAgentName={m.to_agent_name ?? m.to_agent_id ?? "?"}
+                payloadSummary={m.payload_summary ?? ""}
+                withheld={m.withheld ?? []}
+                timestamp={m.timestamp}
+                roster={channelAgents}
+              />
+            );
+          }
           if (m.isSystemNotice || m.role === "system_notice") {
             // A channel routing failure (client-side-only isSystemNotice,
             // never persisted), or a persisted system_notice row (an
-            // inferred-edge explanation or a handoff between two agents,
-            // supervisor wiring) -- shape I either way, so neither ever
-            // reads as if an agent said it.
+            // inferred-edge explanation) -- shape I either way, so neither
+            // ever reads as if an agent said it.
             return <SystemLine key={i} text={m.content} />;
           }
-          // Shapes D-H (output, approval, handoff, clarification,
-          // refusal) are not built yet -- every real assistant message
-          // today renders as B or C. When they exist, they'd branch here
-          // on real outcome data (a Handoff row, an approval's
-          // risk_level, a supervisor error/needs_clarification), not as
-          // a placeholder that renders something today.
           const identity = resolveIdentity(m.agent_id);
+          // Shape E -- a task bubble the moment its own "paused_needs_
+          // approval" event arrives (page.tsx's onSupervisorTask sets
+          // approvalCard directly on that message). Checked before D/B/C:
+          // a paused task is neither streaming nor a finished result.
+          if (m.approvalCard) {
+            const card = m.approvalCard;
+            return (
+              <ApprovalCard
+                key={i}
+                riskLevel={card.risk_level}
+                reason={card.reason}
+                unblocks={card.unblocks}
+                onApprove={() => onApproveTask?.(card.approval_request_id)}
+                onReject={() => onRejectTask?.(card.approval_request_id)}
+                busy={busyApprovalId === card.approval_request_id ? busyApprovalAction : null}
+              />
+            );
+          }
+          // Shape D once a message is done streaming and didn't fail --
+          // every history-loaded assistant row qualifies too (a persisted
+          // ChatMessage only ever exists for a real completion in the
+          // first place, so `streaming`/`taskFailed` are simply absent
+          // there, not falsely true). Still streaming, or a genuine
+          // failure, falls through to the plain B/C bubble below instead
+          // -- D's unconditional "done" badge would misstate either case.
+          if (!m.streaming && !m.taskFailed) {
+            return (
+              <EmployeeResult
+                key={i}
+                name={identity.name}
+                employeeType={identity.employeeType}
+                timestamp={m.timestamp}
+                content={m.content}
+                toolCalls={m.tool_calls}
+                approvals={m.approvals}
+                onGoToApprovals={onGoToApprovals}
+                currentUserRole={currentUserRole}
+              />
+            );
+          }
           return (
             <EmployeeMessage
               key={i}

@@ -878,6 +878,7 @@ async def _run_one_task(
             # (SUPERVISOR_TASK_STEP_BUDGET), the same single-approval-per-
             # step assumption task_executor.py's own structured-plan flow
             # already makes for TaskStep.approval_request_id.
+            first_approval: ApprovalRequest | None = None
             for i, pa in enumerate(result["pending_approvals"]):
                 approval = ApprovalRequest(
                     tenant_id=tenant_id, user_id=user_id, session_id=channel_id,
@@ -888,10 +889,26 @@ async def _run_one_task(
                 if i == 0:
                     await db.flush()  # real id, before linking
                     step.approval_request_id = approval.id
+                    first_approval = approval
             await db.commit()
+            # DESIGN_SPEC.md §7.3.E requires naming any dependent this
+            # approval unblocks ("Approving this also unblocks Ravi's
+            # task") -- PolicyEngine._serialize() already computes this for
+            # the polled GET /approvals/{id} via describe_unblocked_
+            # dependents(), but the live supervisor_task event a streaming
+            # client actually receives on pause carried neither that text
+            # nor even the approval_id needed to go fetch it separately.
+            # Reused directly here, not re-derived -- same function, same
+            # answer, one real call site instead of two definitions that
+            # could drift.
+            unblocks = await describe_unblocked_dependents(task_id)
             await _emit(event_sink, "supervisor_task", {
                 "task_id": task_id, "agent_id": agent_id, "agent_name": agent_name,
                 "status": "paused_needs_approval", "response": None, "message_id": None,
+                "approval_request_id": first_approval.id if first_approval is not None else None,
+                "risk_level": first_approval.risk_level if first_approval is not None else None,
+                "reason": first_approval.reason if first_approval is not None else None,
+                "unblocks": unblocks,
             })
             return {"task_id": task_id, "status": "paused_needs_approval"}
 

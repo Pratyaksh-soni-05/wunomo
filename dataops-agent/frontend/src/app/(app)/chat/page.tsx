@@ -10,6 +10,7 @@ import {
   getToken, decodeUserFromToken, getChatSessions, getChatHistory, sendChatMessageStream, getSources,
   deleteChatSession, listChannels, createChannel, getChannel, addChannelAgent, removeChannelAgent,
   addChannelUser, removeChannelUser, listSelectableAgents, getTeamMembers, uploadToChannel,
+  approveRequest, rejectRequest,
   ApiError, type ChatContext, type ChatToolCall, type TaskItem,
 } from "@/lib/api";
 
@@ -35,6 +36,10 @@ export default function ChatPage() {
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  // §7.3.E's inline action row. A single pair, not a set -- only one
+  // approve/reject click can be in flight from this composer at a time.
+  const [busyApprovalId, setBusyApprovalId] = useState<string | null>(null);
+  const [busyApprovalAction, setBusyApprovalAction] = useState<"approving" | "rejecting" | null>(null);
 
   // Bumped by newChat() so a response from a request sent before "New Chat"
   // was clicked can be detected as stale and dropped instead of silently
@@ -252,6 +257,44 @@ export default function ChatPage() {
     }
   };
 
+  // §7.3.E's inline action row -- see projects/[id]/chat/page.tsx's own
+  // copy of this function for the full reasoning (both resolve/reject
+  // calls fully drain server-side before returning, so a history refetch
+  // is the whole job on success).
+  const resolveApprovalCard = async (approvalRequestId: string, action: "approving" | "rejecting") => {
+    if (!activeSessionId) return;
+    const myGeneration = chatGenerationRef.current;
+    setBusyApprovalId(approvalRequestId);
+    setBusyApprovalAction(action);
+    try {
+      if (action === "approving") await approveRequest(token, approvalRequestId);
+      else await rejectRequest(token, approvalRequestId);
+      if (chatGenerationRef.current !== myGeneration) return;
+      const history = await getChatHistory(token, activeSessionId);
+      if (chatGenerationRef.current === myGeneration) {
+        // Preserve any OTHER still-pending approval card in this channel
+        // (a different task, paused on its own gate) -- only the one just
+        // resolved is guaranteed to have real history behind it now.
+        setMessages((prev) => {
+          const stillPaused = prev.filter(
+            (m) => !!m.approvalCard && m.approvalCard.approval_request_id !== approvalRequestId,
+          );
+          return [...history.messages, ...stillPaused];
+        });
+      }
+    } catch {
+      toast.push(
+        action === "approving" ? "Failed to approve — try again." : "Failed to reject — try again.",
+        "danger",
+      );
+    } finally {
+      if (chatGenerationRef.current === myGeneration) {
+        setBusyApprovalId(null);
+        setBusyApprovalAction(null);
+      }
+    }
+  };
+
   // Streaming (POST /api/v1/chat/stream) -- this page stayed on the
   // buffered sendChatMessage() until the per-task_id concurrent-rendering
   // path (projects/[id]/chat/page.tsx) was live-verified with two real
@@ -392,6 +435,15 @@ export default function ChatPage() {
               : null;
             updateTaskMessage(data.task_id, (msg) => ({
               ...msg, agent_id: data.agent_id, content: data.response ?? fallbackText ?? msg.content, streaming: false,
+              taskFailed: data.status === "failed",
+              approvalCard: data.status === "paused_needs_approval"
+                ? {
+                    approval_request_id: data.approval_request_id ?? "",
+                    risk_level: data.risk_level ?? "high",
+                    reason: data.reason ?? "",
+                    unblocks: data.unblocks ?? null,
+                  }
+                : undefined,
             }));
           },
           onSystemLine: ({ text: lineText }) => {
@@ -401,13 +453,13 @@ export default function ChatPage() {
               timestamp: new Date().toISOString(), isSystemNotice: true,
             }]);
           },
-          onHandoff: ({ from_agent_name, to_agent_name, payload_summary, withheld }) => {
+          onHandoff: ({ from_agent_id, from_agent_name, to_agent_id, to_agent_name, payload_summary, withheld }) => {
             if (isStale()) return;
-            const text = `${from_agent_name} handed over to ${to_agent_name}. ${payload_summary}`
-              + (withheld.length > 0 ? ` (${to_agent_name} did not receive: ${withheld.join(", ")}.)` : "");
             setMessages((prev) => [...prev, {
-              role: "assistant", content: text, tool_calls: [],
-              timestamp: new Date().toISOString(), isSystemNotice: true,
+              role: "system_notice", content: "", tool_calls: [],
+              timestamp: new Date().toISOString(),
+              from_agent_id, from_agent_name, to_agent_id, to_agent_name,
+              payload_summary, withheld,
             }]);
           },
           onNeedsClarification: (data) => {
@@ -436,7 +488,20 @@ export default function ChatPage() {
       if (historySessionId) {
         try {
           const history = await getChatHistory(token, historySessionId);
-          if (!isStale()) setMessages(history.messages);
+          if (!isStale()) {
+            // `done` fires once the turn's waves have drained, and a task
+            // pausing for approval IS a drained wave from
+            // run_supervisor()'s point of view -- but a paused task has no
+            // ChatMessage row yet, so history has nothing to reconstruct
+            // shape E's card from. Wholesale replacement here silently
+            // erased a still-pending approval card the instant `done`
+            // fired, seconds before a human could act on it (confirmed
+            // live, see this pass's own report) -- preserved instead.
+            setMessages((prev) => {
+              const stillPaused = prev.filter((m) => !!m.approvalCard);
+              return [...history.messages, ...stillPaused];
+            });
+          }
         } catch {
           // Keep the locally-accumulated placeholder rather than losing
           // the turn the user just watched complete.
@@ -535,6 +600,10 @@ export default function ChatPage() {
         uploading={uploading}
         uploadError={uploadError}
         onUploadFile={handleUploadFile}
+        onApproveTask={(id) => resolveApprovalCard(id, "approving")}
+        onRejectTask={(id) => resolveApprovalCard(id, "rejecting")}
+        busyApprovalId={busyApprovalId}
+        busyApprovalAction={busyApprovalAction}
       />
       <ContextPanel
         messages={messages}
