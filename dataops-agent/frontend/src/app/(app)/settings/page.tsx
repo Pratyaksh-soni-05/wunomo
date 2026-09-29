@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Card, Badge, Button, Modal, Input, Select, Tabs, Skeleton, useToast, RowActionsMenu,
@@ -39,9 +40,22 @@ const NOTIFY_ON_LABELS: Record<keyof NotifyOn, string> = {
 // /governance page (findings item 94): tenant-wide by nature, so
 // Settings is its real home, not a per-project Workbench surface the
 // way Contracts (the OTHER governance tab) became.
+//
+// "people" and "billing" added in the IA-rail pass (blueprint §03):
+// §03 lists Settings as holding "workspace, people & roles, billing,
+// security, audit log" -- but /team (the real member-invite/role/billing
+// UI) isn't rebuilt inline here, this pass is rail structure only.
+// Clicking either navigates to the real /team page instead of switching
+// `tab` state (see the Tabs onChange override below) -- "the existing
+// /team page keeps working; only its entry point moves." Excluded from
+// REAL_TAB_IDS/the deep-link effect below for the same reason: a stale
+// ?tab=people/billing link should land you on /team, not a blank pane
+// with no matching render branch.
 const TABS = [
   { id: "workspace", label: "Workspace" },
   { id: "profile", label: "Profile" },
+  { id: "people", label: "People & Roles" },
+  { id: "billing", label: "Billing" },
   { id: "security", label: "Security" },
   { id: "notifications", label: "Notifications" },
   { id: "ai-model", label: "AI Model" },
@@ -49,7 +63,7 @@ const TABS = [
   { id: "api-keys", label: "API Keys" },
   { id: "audit-log", label: "Audit Log" },
 ];
-const TAB_IDS = new Set(TABS.map((t) => t.id));
+const REAL_TAB_IDS = new Set(TABS.map((t) => t.id).filter((id) => id !== "people" && id !== "billing"));
 
 export default function SettingsPage() {
   const token = getToken() as string;
@@ -57,6 +71,7 @@ export default function SettingsPage() {
   const canManage = user?.role === "owner" || user?.role === "admin";
   const toast = useToast();
   const qc = useQueryClient();
+  const router = useRouter();
   const [tab, setTab] = useState("workspace");
 
   // Reads window.location.search directly rather than next/navigation's
@@ -67,7 +82,7 @@ export default function SettingsPage() {
   // real, shareable deep link, unlike /chat's one-shot ?session= marker.
   useEffect(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
-    if (requested && TAB_IDS.has(requested)) setTab(requested);
+    if (requested && REAL_TAB_IDS.has(requested)) setTab(requested);
   }, []);
 
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => getSettings(token) });
@@ -89,7 +104,15 @@ export default function SettingsPage() {
       </div>
 
       <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 20 }}>
-        <Tabs items={TABS} activeId={tab} onChange={setTab} />
+        <Tabs
+          items={TABS}
+          activeId={tab}
+          onChange={(id) => {
+            if (id === "people") { router.push("/team"); return; }
+            if (id === "billing") { router.push("/team?tab=billing"); return; }
+            setTab(id);
+          }}
+        />
 
         {settings.isLoading ? (
           <Skeleton style={{ height: 200, borderRadius: 12 }} />

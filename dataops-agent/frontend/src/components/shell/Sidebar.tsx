@@ -5,14 +5,14 @@ import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
-  RAIL_NAV_ITEMS, RAIL_FOOTER_ITEMS, ICON_PROJECT, ICON_NEW_PROJECT, type NavItem,
+  RAIL_NAV_ITEMS, RAIL_NAV_ITEMS_TOP, RAIL_FOOTER_ITEMS, ICON_PROJECT, ICON_NEW_PROJECT, type NavItem,
 } from "./navItems";
 import { useToast } from "@/components/ui";
 import { WorkspacePicker } from "@/components/auth/WorkspacePicker";
 import { WunomoMark } from "@/components/brand";
 import {
   getToken, getMyWorkspaces, switchWorkspace, saveSession, clearSession,
-  listProjects, getProjectChannels, type DecodedUser,
+  listProjects, type DecodedUser,
 } from "@/lib/api";
 import { useNeedsYou } from "@/lib/needsYou";
 
@@ -23,11 +23,27 @@ import { useNeedsYou } from "@/lib/needsYou";
  * docs/design/UI_REBUILD_INVENTORY.md, slice 3, for the full disagreement
  * log against the preview and the reasoning behind every deviation below.
  *
+ * IA-rail pass (blueprint §03, 2026-09-29): restructured to §03's seven
+ * named destinations + Scheduled (kept, real and useful, §03's own
+ * omission — see this pass's report). RAIL_NAV_ITEMS_TOP (Command Center)
+ * renders before the Projects section, RAIL_NAV_ITEMS (Team/Approvals/
+ * Outputs/Connections/Scheduled) after it, matching §03's own order.
+ *
+ * The nested per-project channel list (under whichever project was
+ * active) is removed this pass — not a straight deletion, a real bug
+ * fix: its links pointed at /chat?session={id}, the old global chat
+ * route, which drops the user out of the project shell (no header, no
+ * tabs) even though the link lived inside that project's own row.
+ * Channel switching already lives in the project header's "⋯" menu
+ * (blueprint chrome pass), which stays inside the shell correctly — see
+ * this pass's own report for what, if anything, still needs the rail's
+ * copy.
+ *
  * Collapse-to-icons is retired, not omitted — a deliberate decision
  * (findings item 90), not a gap: neither preview shows a collapsed state,
- * and 5 static items + a Projects section is short enough that collapsing
- * it no longer earns its own complexity the way it did against the old
- * sidebar's shape.
+ * and a handful of static items + a Projects section is short enough
+ * that collapsing it no longer earns its own complexity the way it did
+ * against the old sidebar's shape.
  */
 export function Sidebar({
   mobileOpen,
@@ -97,21 +113,27 @@ export function Sidebar({
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: () => listProjects(getToken() as string) });
   const projects = projectsQuery.data?.projects ?? [];
 
-  // A project's own chats are only nested under it while you're actually
-  // looking at that project (/projects/[id]) — matches the preview, whose
-  // RAIL() template only ever injects .rsub items for the screen's own
-  // active project, never for every project at once (see the slice 3
-  // disagreement log). No project container exists yet (slice 5), so this
-  // is the only "you're in project X" signal available today.
+  // Signals "you're in project X" for highlighting its row in the
+  // Projects list below — the per-project nested channel list this used
+  // to also drive is gone (IA-rail pass; see this file's own top comment
+  // for the real bug that removal fixes, not just a preview-fidelity
+  // choice).
   const activeProjectId = pathname.startsWith("/projects/") ? pathname.split("/")[2] : null;
-  const activeProjectChannelsQuery = useQuery({
-    queryKey: ["project-channels", activeProjectId],
-    queryFn: () => getProjectChannels(getToken() as string, activeProjectId as string),
-    enabled: !!activeProjectId,
-  });
-  const activeProjectChannels = activeProjectChannelsQuery.data?.channels ?? [];
 
   function railItem(item: NavItem, badge?: ReactNode) {
+    if (item.disabled) {
+      return (
+        <div
+          key={item.slug}
+          className="sidebar-item disabled"
+          title={item.disabledReason}
+          aria-disabled="true"
+        >
+          <span className="sidebar-item-icon">{item.icon}</span>
+          <span>{item.label}</span>
+        </div>
+      );
+    }
     const href = `/${item.slug}`;
     const active = pathname === href;
     return (
@@ -138,14 +160,7 @@ export function Sidebar({
       </button>
 
       <nav className="sidebar-nav">
-        {RAIL_NAV_ITEMS.map((item) =>
-          railItem(
-            item,
-            item.slug === "approvals" && needsYouCount > 0 ? (
-              <span className="badge-count badge-attention">{needsYouCount}</span>
-            ) : undefined
-          )
-        )}
+        {RAIL_NAV_ITEMS_TOP.map((item) => railItem(item))}
 
         <div className="sidebar-section">
           <Link href="/projects" className="sidebar-section-label sidebar-section-label-link">
@@ -159,22 +174,25 @@ export function Sidebar({
           projects.map((p) => {
             const isActive = p.id === activeProjectId;
             return (
-              <div key={p.id}>
-                <Link
-                  href={`/projects/${p.id}/chat`}
-                  className={["sidebar-item", isActive ? "active" : ""].filter(Boolean).join(" ")}
-                >
-                  <span className="sidebar-item-icon">{ICON_PROJECT}</span>
-                  <span>{p.name}</span>
-                </Link>
-                {isActive && activeProjectChannels.map((c) => (
-                  <Link key={c.id} href={`/chat?session=${c.id}`} className="sidebar-rsub">
-                    {c.name}
-                  </Link>
-                ))}
-              </div>
+              <Link
+                key={p.id}
+                href={`/projects/${p.id}/chat`}
+                className={["sidebar-item", isActive ? "active" : ""].filter(Boolean).join(" ")}
+              >
+                <span className="sidebar-item-icon">{ICON_PROJECT}</span>
+                <span>{p.name}</span>
+              </Link>
             );
           })
+        )}
+
+        {RAIL_NAV_ITEMS.map((item) =>
+          railItem(
+            item,
+            item.slug === "approvals" && needsYouCount > 0 ? (
+              <span className="badge-count badge-attention">{needsYouCount}</span>
+            ) : undefined
+          )
         )}
       </nav>
 

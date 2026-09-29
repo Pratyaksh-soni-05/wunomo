@@ -103,7 +103,12 @@ export default function NeedsYouPage() {
     <div>
       <div className="page-header">
         <div className="flex items-center justify-between">
-          <h1 className="page-title">Needs You</h1>
+          {/* IA-rail pass (blueprint §03): renamed from "Needs You" to match
+              the rail's own rename -- same route, same real content
+              (lib/needsYou.ts), a rail item pointing here labeled
+              "Approvals" while the page itself said something else would
+              read as a bug, not a rename. */}
+          <h1 className="page-title">Approvals</h1>
           {!needsYou.loading && needsYou.count > 0 && (
             <span className="text-muted text-sm">{needsYou.count} item{needsYou.count === 1 ? "" : "s"}</span>
           )}

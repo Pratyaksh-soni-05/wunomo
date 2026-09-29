@@ -660,23 +660,17 @@ tr.selected td:first-child {
 }
 .sidebar-item:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-hover); }
 .sidebar-item.active { background: var(--sidebar-active-bg); color: var(--sidebar-active-text); box-shadow: inset 3px 0 0 var(--sidebar-active-border); }
+/* IA-rail pass: Outputs/Connections, real §03 destinations with nothing
+   to route to yet (see navItems.tsx). Same treatment .tab.disabled
+   already established, not a new pattern. */
+.sidebar-item.disabled { cursor: default; color: var(--text-disabled); }
+.sidebar-item.disabled:hover { background: none; color: var(--text-disabled); }
+.sidebar-item.disabled .sidebar-item-icon { opacity: 0.35; }
 .sidebar-item-icon { flex: none; opacity: 0.6; display: flex; }
 .sidebar-item.active .sidebar-item-icon { opacity: 0.9; }
 .sidebar-item .badge-count { margin-left: auto; font-size: 11px; padding: 0 6px; border-radius: var(--radius-xs); line-height: 17px; }
 .sidebar-item .badge-count.badge-attention { color: var(--warning); background: var(--warning-bg); }
 .sidebar-item-skeleton { height: 30px; margin: 1px 8px; border-radius: var(--radius); background: var(--sidebar-hover-bg); }
-
-/* Nested under whichever project is currently open — the preview only ever
-   shows these for the screen's own active project, never for every
-   project at once (see slice 3's disagreement log). Real data
-   (getProjectChannels), not placeholder text. */
-.sidebar-rsub {
-  display: block; margin: 0 8px 0 30px; padding: 4px 8px; border-radius: var(--radius-sm);
-  color: var(--sidebar-text-faint); font-size: 12.5px; text-decoration: none;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  transition: background var(--t-fast), color var(--t-fast);
-}
-.sidebar-rsub:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-subtle); }
 
 .sidebar-footer { margin-top: auto; border-top: 1px solid var(--sidebar-hairline); padding: 8px 0 6px; }
 .sidebar-account { position: relative; margin: 2px 8px 0; }

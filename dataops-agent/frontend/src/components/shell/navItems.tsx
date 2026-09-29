@@ -7,6 +7,15 @@ export interface NavItem {
    * its own generic marker per result, Topbar's breadcrumb renders label
    * text only, so an off-rail item genuinely never needs one. */
   icon?: ReactNode;
+  /** IA-rail pass (blueprint §03): renders as an inert row with a tooltip
+   * instead of a <Link> — the same "real, honest disabled state" Tabs.tsx
+   * already established for LiveWorkPanel's Files tab, not a dimmed link
+   * pointing at nothing. Never paired with a slug that resolves to a real
+   * page — Outputs and Connections both have no tenant-wide page to point
+   * at (see this pass's own report), so this is the option, not a stopgap
+   * for something that'll get a route later this same pass. */
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 /**
@@ -56,44 +65,84 @@ export const ICON_NEW_PROJECT = (
     <path d="M8 3.5v9M3.5 8h9" />
   </svg>
 );
+// IA-rail pass (blueprint §03) — Outputs (a document glyph) and
+// Connections (two linked nodes) are new destinations §03 names but this
+// pass doesn't build; both render disabled (see NavItem.disabled), but
+// still need a real icon so the disabled row isn't blank where every
+// sibling has one.
+export const ICON_OUTPUTS = railIcon(
+  <>
+    <path d="M4.8 2.5h4.4l2 2v8.3a.7.7 0 0 1-.7.7H4.8a.7.7 0 0 1-.7-.7V3.2a.7.7 0 0 1 .7-.7z" />
+    <path d="M9.2 2.5v2h2" />
+  </>
+);
+export const ICON_CONNECTIONS = railIcon(
+  <>
+    <circle cx="5" cy="5.2" r="1.7" />
+    <circle cx="11" cy="10.8" r="1.7" />
+    <path d="M6.2 6.4l3.6 3.2" strokeLinecap="round" />
+  </>
+);
 
 /**
- * The persistent rail (2026-09-14, slice 3 — matches
- * wunomo-all-screens.html's RAIL template exactly). Five static
- * destinations; the "Projects" section beneath them is rendered separately
- * in Sidebar.tsx from live project data, not part of this static list.
+ * The persistent rail. IA-rail pass (blueprint §03, 2026-09-29) —
+ * restructured to match §03's seven named destinations (Command Center,
+ * Projects, Team, Approvals, Outputs, Connections, Settings), plus
+ * Scheduled kept even though §03 doesn't name it: the feature is real and
+ * useful, the blueprint's omission reads as a miss, not a decision (see
+ * this pass's own report). Rail structure only — no destination page was
+ * rebuilt; every slug here already pointed at a real page before this
+ * pass and still does.
  *
- * Slugs point at whatever real page already exists for each concept today,
- * not at new routes invented for this slice — "point at what's real" (see
- * docs/design/UI_REBUILD_INVENTORY.md, slice 3). Needs you is /approvals,
- * rebuilt in slice 9 into the real combined screen this label always
- * implied — same route, real content now. Scheduled had no existing
- * equivalent at all, so it was the one genuinely new route — real as of
- * slice 10 (2026-09-15): the tenant-wide ScheduledAgentTask list, agent
- * schedules only (pipeline schedule_cron stays in Workbench, its own
- * unrelated mechanism with no deactivation-reason concept).
- * Settings and Team both already exist. Team's "& billing" half was a
- * rail-copy decision made ahead of the real merge in slice 3 — the merge
- * itself shipped in slice 12 (2026-09-15): /billing retired, its content
- * moved into /team as a real second tab, deep-linked via ?tab=billing
- * (the quota-exceeded toast's "Go to Billing" now lands there directly,
- * not through the retirement redirect).
+ * Split into two arrays, not one, because §03's own order interleaves a
+ * static item between the two: Command Center, THEN Projects (rendered
+ * separately in Sidebar.tsx from live project data — unchanged from
+ * before this pass), THEN the rest. RAIL_NAV_ITEMS_TOP is just Command
+ * Center; RAIL_NAV_ITEMS is everything after the Projects section.
  *
- * Home pointed at /dashboard through slice 3, as an interim "point at
- * what's real" measure — slice 4 is the real rework: Home now has its own
- * route (/home, built fresh) and /dashboard keeps its original KPI/
- * analytics content unchanged, no longer the landing page. See
- * docs/design/UI_REBUILD_INVENTORY.md, slice 4.
+ * Real re-mappings this pass made, not just relabels:
+ * - Command Center -> /home. The page itself is unchanged this pass
+ *   (§03's "live x-ray" content is a separate, later pass) — only the
+ *   label and rail position change, matching what the destination is
+ *   named, not what it currently shows.
+ * - Team -> /agents (the cross-project employee roster, real since slice
+ *   12 but never railed) — NOT the old "Team & billing" slug. §03's Team
+ *   is about employees (AI agents); the old rail's "Team & billing" was
+ *   about human members/invites/billing, which maps to §03's Settings
+ *   instead ("people & roles, billing") — two different concepts that
+ *   happened to share a label before this pass.
+ * - Approvals -> /approvals, same route, renamed from "Needs you" (the
+ *   page's own <h1> renamed to match — a rail label pointing at a page
+ *   titled something else would read as a bug, not a rename).
+ * - Outputs, Connections: real §03 destinations with nothing to route to
+ *   yet (no Output model; Connections only exists project-scoped under
+ *   each project's Workbench). Render disabled with a tooltip — see
+ *   ICON_OUTPUTS/ICON_CONNECTIONS above and Sidebar.tsx's disabled-item
+ *   branch. Do not point these at a page that doesn't exist.
+ *
+ * Settings keeps its own slug/label unchanged; what changed is what's
+ * folded into it (Team & billing's tabs) — see settings/page.tsx.
  */
+export const RAIL_NAV_ITEMS_TOP: NavItem[] = [
+  { slug: "home", label: "Command Center", icon: ICON_HOME },
+];
+
 export const RAIL_NAV_ITEMS: NavItem[] = [
-  { slug: "home", label: "Home", icon: ICON_HOME },
+  { slug: "agents", label: "Team", icon: ICON_TEAM },
+  { slug: "approvals", label: "Approvals", icon: ICON_NEEDS_YOU },
+  {
+    slug: "outputs", label: "Outputs", icon: ICON_OUTPUTS, disabled: true,
+    disabledReason: "Not available yet — outputs aren't tracked as their own object in this system.",
+  },
+  {
+    slug: "connections", label: "Connections", icon: ICON_CONNECTIONS, disabled: true,
+    disabledReason: "Not tenant-wide yet — manage sources inside each project's Workbench.",
+  },
   { slug: "scheduled", label: "Scheduled", icon: ICON_SCHEDULED },
-  { slug: "approvals", label: "Needs you", icon: ICON_NEEDS_YOU },
 ];
 
 export const RAIL_FOOTER_ITEMS: NavItem[] = [
   { slug: "settings", label: "Settings", icon: ICON_SETTINGS },
-  { slug: "team", label: "Team & billing", icon: ICON_TEAM },
 ];
 
 /**
@@ -163,15 +212,15 @@ export const RAIL_FOOTER_ITEMS: NavItem[] = [
  *     gone; building the real screen is its own future slice.
  */
 export const ALL_NAV_ITEMS: NavItem[] = [
-  { slug: "home", label: "Home" },
+  { slug: "home", label: "Command Center" },
   { slug: "dashboard", label: "Dashboard" },
   { slug: "scheduled", label: "Scheduled" },
-  { slug: "approvals", label: "Needs You" },
+  { slug: "approvals", label: "Approvals" },
   { slug: "settings", label: "Settings" },
-  { slug: "team", label: "Team & Billing" },
+  { slug: "team", label: "Team & Billing (now tabs inside Settings — People & Roles, Billing)" },
   { slug: "billing", label: "Billing (now part of Team & billing)" },
   { slug: "projects", label: "Projects" },
-  { slug: "agents", label: "Agents" },
+  { slug: "agents", label: "Agents (railed as \"Team\")" },
   { slug: "ai-employees", label: "AI Employees (moved into the hire-agent flow)" },
   { slug: "chat", label: "AXIOM" },
   { slug: "tasks", label: "Tasks" },
