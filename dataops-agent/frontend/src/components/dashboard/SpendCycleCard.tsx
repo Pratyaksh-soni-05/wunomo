@@ -1,16 +1,28 @@
 "use client";
 
-// Command Center (blueprint §05) -- "Spend this cycle": big ₹ number, "of
-// ₹{limit}", a progress bar, "Resets in {n} days · {plan} plan". Backend
-// has no stored reset-date column anywhere, but quota_service.py's own
-// _month_start() confirms the real reset boundary IS the 1st of the next
-// calendar month (UTC) -- so "days until reset" is computed here from that
-// same real boundary, not fabricated.
+// Command Center (blueprint §05) -- "Spend this cycle": §05's own mock is a
+// big ₹ number against a plan limit. Researched before building (per
+// explicit instruction, not assumed): does a credits-to-currency rate
+// exist anywhere in this codebase -- PLANS dict (quota_service.py),
+// billing models, Stripe integration, a usage_metrics table? It does not.
+// credits_for_event() is explicitly documented as "a deliberately simple
+// placeholder, not a real-dollar-cost calculation"; every Stripe billing
+// call (checkout/change-plan/webhook) 501s; no plan carries a price field
+// anywhere. GOTCHAS.md references an external pricing-strategy doc with a
+// ₹/turn figure, but it's never parsed or wired into any code path --
+// prose for a manual margin check, not a live rate. Inventing one here
+// would be exactly the fabrication this codebase's own conventions forbid.
 //
-// No ₹ conversion: ai_credits has no real currency exchange rate anywhere
-// in this codebase (credits-per-turn calibration is explicitly unfinalized
-// per quota_service.py's own commentary) -- shown as credits, not rupees,
-// rather than inventing a conversion rate blueprint's mock assumes exists.
+// So: no currency. Chosen instead -- the real `percent` field as the
+// headline, not the raw credit count ("0 of 11,493,000 credits" is
+// meaningless to a business owner; a token-scale ceiling was never meant
+// to be read as a number, only as a fraction). Genuine zero usage says so
+// in words, not as a bare "0" that reads as broken. The raw used/limit
+// figures are still shown, but as the secondary line, not the headline.
+//
+// Reset date: no stored reset-date column anywhere, but quota_service.py's
+// own _month_start() confirms the real reset boundary IS the 1st of the
+// next calendar month (UTC) -- computed here from that same real boundary.
 import { Progress } from "@/components/ui";
 import type { QuotaStatus } from "@/lib/api";
 
@@ -29,21 +41,30 @@ function progressVariant(status: QuotaStatus["status"]): "default" | "warning" |
 
 export function SpendCycleCard({ credits, planName }: { credits: QuotaStatus | null; planName: string | null }) {
   const days = daysUntilReset();
+  const resetFootnote = `Resets in ${days} day${days === 1 ? "" : "s"}${planName ? ` · ${planName} plan` : ""}`;
+
   return (
     <div className="spend-cycle-card card">
       <div className="spend-cycle-label">Spend this cycle</div>
       {credits ? (
-        <>
-          <div className="spend-cycle-value">
-            {credits.used.toLocaleString()}
-            <span className="spend-cycle-limit"> of {credits.limit !== null ? credits.limit.toLocaleString() : "∞"} credits</span>
-          </div>
-          <Progress value={credits.percent} variant={progressVariant(credits.status)} />
-          <div className="spend-cycle-footnote">
-            Resets in {days} day{days === 1 ? "" : "s"}
-            {planName ? ` · ${planName} plan` : ""}
-          </div>
-        </>
+        credits.used === 0 ? (
+          <>
+            <div className="spend-cycle-value spend-cycle-value-zero">No usage yet</div>
+            <Progress value={0} variant="default" />
+            <div className="spend-cycle-footnote">{resetFootnote}</div>
+          </>
+        ) : (
+          <>
+            <div className="spend-cycle-value">
+              {Math.round(credits.percent)}
+              <span className="spend-cycle-limit">% of plan used</span>
+            </div>
+            <Progress value={credits.percent} variant={progressVariant(credits.status)} />
+            <div className="spend-cycle-footnote">
+              {credits.used.toLocaleString()} of {credits.limit !== null ? credits.limit.toLocaleString() : "∞"} credits · {resetFootnote}
+            </div>
+          </>
+        )
       ) : (
         <div className="chat-empty-note">Usage unavailable.</div>
       )}

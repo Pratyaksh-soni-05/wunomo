@@ -37,6 +37,19 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// §05's own copy spells small counts out ("One employee is working on one
+// project. One thing needs you.") rather than leading with a bare digit --
+// applied only to the header line's small, human-scale counts (employees/
+// projects/pending items), never to data-table-scale numbers elsewhere on
+// the page (credit counts, task counts) where a numeral is the right read.
+const SMALL_NUMBERS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+function spellCount(n: number): string {
+  return n <= 10 ? SMALL_NUMBERS[n] : String(n);
+}
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function greeting(): string {
   const h = new Date().getHours();
   if (h < 12) return "Good morning";
@@ -91,12 +104,20 @@ export default function HomePage() {
 
   let statusLine: string;
   if (needsYouTasks.length > 0) {
-    statusLine = `${needsYouTasks.length} need${needsYouTasks.length === 1 ? "s" : ""} you.`;
+    const n = needsYouTasks.length;
+    statusLine = `${capitalize(spellCount(n))} thing${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} you.`;
   } else if (workingTasks.length > 0) {
     statusLine = "Everything's moving.";
   } else {
     statusLine = "Nothing needs you right now.";
   }
+
+  const employeeWord = workingAgentCount === 1 ? "employee" : "employees";
+  const employeeVerb = workingAgentCount === 1 ? "is" : "are";
+  const projectWord = activeProjectCount === 1 ? "project" : "projects";
+  const headline =
+    `${capitalize(spellCount(workingAgentCount))} ${employeeWord} ${employeeVerb} working on ` +
+    `${spellCount(activeProjectCount)} ${projectWord}. ${statusLine}`;
 
   return (
     <div style={{ padding: "44px 24px 56px", maxWidth: 1360, margin: "0 auto", width: "100%" }}>
@@ -104,9 +125,7 @@ export default function HomePage() {
         <div>
           <h1 className="font-display text-3xl">{greeting()}, {displayName}</h1>
           <p className="text-muted text-sm" style={{ margin: "6px 0 0" }}>
-            {isLoading
-              ? "Loading your workspace…"
-              : `${workingAgentCount} employee${workingAgentCount === 1 ? "" : "s"} working across ${activeProjectCount} project${activeProjectCount === 1 ? "" : "s"}. ${statusLine}`}
+            {isLoading ? "Loading your workspace…" : headline}
           </p>
         </div>
         <Button onClick={() => router.push("/projects?new=1")}>New project</Button>

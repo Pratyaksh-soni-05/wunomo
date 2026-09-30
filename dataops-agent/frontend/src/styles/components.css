@@ -1662,6 +1662,13 @@ tr.selected td:first-child {
    ========================================== */
 .command-center-grid {
   display: grid; grid-template-columns: 1fr 1fr 1fr 360px; gap: 16px;
+  /* Default stretch made working-now-card match command-center-side's
+     height whenever the sidebar (spend + just-finished stacked) was
+     taller -- a single working-now row rendered inside a box sized for
+     two stacked cards, reading as "a tall box with one row floating in
+     it." align-items: start lets every grid item size to its own
+     content, matching §05's "working-now sizes to its content." */
+  align-items: start;
 }
 @media (max-width: 1100px) {
   .command-center-grid { grid-template-columns: 1fr; }
@@ -1707,6 +1714,10 @@ tr.selected td:first-child {
 .spend-cycle-card, .just-finished-card { padding: 20px; }
 .spend-cycle-label { font-size: 11.5px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 10px; }
 .spend-cycle-value { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; font-family: var(--font-display); font-variant-numeric: tabular-nums; color: var(--text-primary); margin-bottom: 10px; }
+/* Genuine zero usage: a short phrase, not a numeral -- the numeric sizing
+   above (26px, tabular-nums, tight tracking) is built for a digit-led
+   value and looks wrong applied to text. */
+.spend-cycle-value-zero { font-size: 15px; font-weight: 600; letter-spacing: normal; font-variant-numeric: normal; }
 .spend-cycle-limit { font-size: 13px; font-weight: 500; color: var(--text-muted); }
 .spend-cycle-footnote { margin-top: 8px; font-size: 11.7px; color: var(--text-muted); }
 
@@ -1714,14 +1725,26 @@ tr.selected td:first-child {
 .just-finished-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .just-finished-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
 .just-finished-body { flex: 1; min-width: 0; }
-.just-finished-title { font-size: 12.7px; font-weight: 550; color: var(--text-primary); }
+/* Wraps to two lines instead of clipping mid-word -- a goal string is
+   often longer than a filename would have been, and "...for sc..." reads
+   as broken, not just truncated. */
+.just-finished-title {
+  font-size: 12.7px; font-weight: 550; color: var(--text-primary); line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
 .just-finished-meta { margin-top: 2px; font-size: 11.4px; color: var(--text-muted); }
 
+/* Flex-wrap, not a fixed 3-column grid: repeat(3, 1fr) stretched a single
+   card to a third of the full-width row, reading as "a lone square" with
+   two empty column-tracks beside it. A capped flex basis lets 1-2 cards
+   size to their own content instead of implying missing ones, while still
+   wrapping to a new row past 3 -- the same "up to three columns" shape
+   without forcing sparse counts to look broken. */
 .project-status-strip {
-  grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 16px;
 }
-@media (max-width: 900px) { .project-status-strip { grid-template-columns: 1fr; } }
-.project-status-card { padding: 16px 18px; cursor: pointer; }
+.project-status-card { flex: 1 1 320px; max-width: 420px; padding: 16px 18px; cursor: pointer; }
+@media (max-width: 900px) { .project-status-card { flex-basis: 100%; max-width: none; } }
 .project-status-card:hover { border-color: var(--border-strong); }
 .project-status-card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .project-status-card-name { flex: 1; min-width: 0; font-size: 13.4px; font-weight: 600; color: var(--text-primary); }

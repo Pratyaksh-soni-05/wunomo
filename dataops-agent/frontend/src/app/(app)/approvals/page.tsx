@@ -7,6 +7,7 @@ import { Card, Badge, Button, Skeleton, useToast } from "@/components/ui";
 import { TaskCreateModal } from "@/components/tasks/TaskCreateModal";
 import { timeAgo } from "@/lib/dates";
 import { useNeedsYou, type NeedsYouItem } from "@/lib/needsYou";
+import { resumeActuallyHappened, describeNoOpOutcome } from "@/lib/resumeOutcome";
 import {
   getToken, resumeTask, rejectTaskStep, cancelTask,
   approveRequest, rejectRequest, approveCommit, rejectCommit,
@@ -71,14 +72,31 @@ export default function NeedsYouPage() {
     qc.invalidateQueries({ queryKey: ["merged-approvals"] });
   };
 
+  // Both mutations return a 200 even when nothing happened (e.g. the step
+  // was already resolved elsewhere) -- check the real outcome before
+  // claiming success. See lib/resumeOutcome.ts.
   const resumeMut = useMutation({
     mutationFn: (id: string) => resumeTask(token, id),
-    onSuccess: () => { toast.push("Approved — resuming.", "success"); invalidate(); },
+    onSuccess: (result) => {
+      if (resumeActuallyHappened(result.resume_outcome?.outcome)) {
+        toast.push("Approved — resuming.", "success");
+      } else {
+        toast.push(describeNoOpOutcome(result.resume_outcome?.outcome), "danger");
+      }
+      invalidate();
+    },
     onError: () => toast.push("Failed to approve.", "danger"),
   });
   const rejectStepMut = useMutation({
     mutationFn: (id: string) => rejectTaskStep(token, id),
-    onSuccess: () => { toast.push("Rejected.", "default"); invalidate(); },
+    onSuccess: (result) => {
+      if (resumeActuallyHappened(result.reject_outcome?.outcome)) {
+        toast.push("Rejected.", "default");
+      } else {
+        toast.push(describeNoOpOutcome(result.reject_outcome?.outcome), "danger");
+      }
+      invalidate();
+    },
     onError: () => toast.push("Failed to reject.", "danger"),
   });
   const cancelMut = useMutation({

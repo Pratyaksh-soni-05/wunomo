@@ -49,7 +49,7 @@ function JustFinishedRow({
       <span className="just-finished-dot" aria-hidden="true" />
       <EmployeeAvatar name={agentName ?? "AXIOM"} employeeType={employeeType} size="sm" />
       <div className="just-finished-body">
-        <div className="just-finished-title truncate">{task.goal}</div>
+        <div className="just-finished-title">{task.goal}</div>
         <div className="just-finished-meta truncate">
           {agentName ?? "Unassigned"} · {timeAgo(task.completed_at)}
         </div>

@@ -24,6 +24,7 @@ import { Button, useToast } from "@/components/ui";
 import { EmployeeAvatar } from "@/components/chat/EmployeeAvatar";
 import { timeAgo } from "@/lib/dates";
 import { getToken, resumeTask, type ActiveTaskRailItem } from "@/lib/api";
+import { resumeActuallyHappened, describeNoOpOutcome } from "@/lib/resumeOutcome";
 
 // Two actions, matching §05's "Review detail"/"Approve" pair -- reusing
 // the exact same resumeTask() mutation /approvals's own Needs You screen
@@ -35,9 +36,21 @@ export function NeedsYouStrip({ tasks }: { tasks: ActiveTaskRailItem[] }) {
   const toast = useToast();
   const qc = useQueryClient();
 
+  // resume_task() returns a 200 even when nothing happened (e.g. the step
+  // was already resolved) -- resumeActuallyHappened() checks the real
+  // outcome before this button is allowed to claim success. See
+  // lib/resumeOutcome.ts for why this exists (caught live on this exact
+  // button, first seed).
   const resumeMut = useMutation({
     mutationFn: (id: string) => resumeTask(token, id),
-    onSuccess: () => { toast.push("Approved — resuming.", "success"); qc.invalidateQueries({ queryKey: ["active-tasks"] }); },
+    onSuccess: (result) => {
+      if (resumeActuallyHappened(result.resume_outcome?.outcome)) {
+        toast.push("Approved — resuming.", "success");
+      } else {
+        toast.push(describeNoOpOutcome(result.resume_outcome?.outcome), "danger");
+      }
+      qc.invalidateQueries({ queryKey: ["active-tasks"] });
+    },
     onError: () => toast.push("Failed to approve.", "danger"),
   });
 
