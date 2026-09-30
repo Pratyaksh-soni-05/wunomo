@@ -102,22 +102,34 @@ export default function HomePage() {
 
   const nothingActive = activeTasks.length === 0 && justFinished.length === 0;
 
-  let statusLine: string;
-  if (needsYouTasks.length > 0) {
-    const n = needsYouTasks.length;
-    statusLine = `${capitalize(spellCount(n))} thing${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} you.`;
-  } else if (workingTasks.length > 0) {
-    statusLine = "Everything's moving.";
+  // Zero state: no tally to report, so don't report one -- "Zero employees
+  // are working on zero projects" counts nothing real. Two sub-cases
+  // (never had a project vs. has one but nothing's active right now), and
+  // never appended with a "needs you" status line -- that phrasing implies
+  // something might have needed you, which isn't true of an empty account.
+  let headline: string;
+  if (nothingActive) {
+    headline = projects.length === 0
+      ? "Nothing's running. Start a project and hire the employees it needs."
+      : "No one's working right now.";
   } else {
-    statusLine = "Nothing needs you right now.";
-  }
+    let statusLine: string;
+    if (needsYouTasks.length > 0) {
+      const n = needsYouTasks.length;
+      statusLine = `${capitalize(spellCount(n))} thing${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} you.`;
+    } else if (workingTasks.length > 0) {
+      statusLine = "Everything's moving.";
+    } else {
+      statusLine = "Nothing needs you right now.";
+    }
 
-  const employeeWord = workingAgentCount === 1 ? "employee" : "employees";
-  const employeeVerb = workingAgentCount === 1 ? "is" : "are";
-  const projectWord = activeProjectCount === 1 ? "project" : "projects";
-  const headline =
-    `${capitalize(spellCount(workingAgentCount))} ${employeeWord} ${employeeVerb} working on ` +
-    `${spellCount(activeProjectCount)} ${projectWord}. ${statusLine}`;
+    const employeeWord = workingAgentCount === 1 ? "employee" : "employees";
+    const employeeVerb = workingAgentCount === 1 ? "is" : "are";
+    const projectWord = activeProjectCount === 1 ? "project" : "projects";
+    headline =
+      `${capitalize(spellCount(workingAgentCount))} ${employeeWord} ${employeeVerb} working on ` +
+      `${spellCount(activeProjectCount)} ${projectWord}. ${statusLine}`;
+  }
 
   return (
     <div style={{ padding: "44px 24px 56px", maxWidth: 1360, margin: "0 auto", width: "100%" }}>
