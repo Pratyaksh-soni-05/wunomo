@@ -67,24 +67,38 @@ async def _log(tenant_id, n=3):
 async def test_raw_update_is_rejected_by_the_database(client):
     tenant_id = await _register(client)
     await _log(tenant_id, 1)
-    row_id = _rows(tenant_id)[0]["id"]
+    # Selected by this test's own action, not position [0] -- registration
+    # itself now writes a user.registered row ahead of it in the chain
+    # (identity-audit PR, 2026-09-30).
+    row_id = next(r for r in _rows(tenant_id) if r["action"] == "test.step_0")["id"]
     with _admin().connect() as c:
         with pytest.raises(Exception) as exc:
             c.execute(text("UPDATE audit_logs SET action = 'forged' WHERE id = :id"), {"id": row_id})
     assert "append-only" in str(exc.value)
-    assert _rows(tenant_id)[0]["action"] == "test.step_0"
+    after = next(r for r in _rows(tenant_id) if r["id"] == row_id)
+    assert after["action"] == "test.step_0"
 
 
 @pytest.mark.asyncio
 async def test_raw_delete_is_rejected_by_the_database(client):
     tenant_id = await _register(client)
     await _log(tenant_id, 1)
-    row_id = _rows(tenant_id)[0]["id"]
+    rows_before = _rows(tenant_id)
+    # Depends on _log() writing AFTER registration, so this test's own row
+    # is always the chain's newest -- if a future change ever made _log()
+    # (or the registration call above) run in the other order, this needs
+    # to be picked by action instead, the way the update test just above
+    # already is.
+    row_id = rows_before[-1]["id"]
+    before_count = len(rows_before)
     with _admin().connect() as c:
         with pytest.raises(Exception) as exc:
             c.execute(text("DELETE FROM audit_logs WHERE id = :id"), {"id": row_id})
     assert "append-only" in str(exc.value)
-    assert len(_rows(tenant_id)) == 1
+    # Relative to what existed before the (rejected) delete, not an absolute
+    # count -- registration may contribute 0 or more rows of its own ahead
+    # of this test's single row.
+    assert len(_rows(tenant_id)) == before_count
 
 
 @pytest.mark.asyncio
@@ -122,30 +136,38 @@ async def test_app_role_cannot_disable_the_trigger(client):
 
 @pytest.mark.asyncio
 async def test_new_rows_chain_from_genesis_and_verify(client):
+    """Runs over the WHOLE tenant chain, not just this test's own 3 rows --
+    the registration row (user.registered, since the identity-audit PR,
+    2026-09-30) is genuinely part of the chain, and genesis-linkage/
+    sequential hashing are real properties of the chain as a whole, not of
+    any one test's own contribution to it."""
     tenant_id = await _register(client)
     await _log(tenant_id, 3)
     rows = _rows(tenant_id)
-    assert len(rows) == 3
+    assert len(rows) >= 3  # this test's own 3, plus whatever registration wrote
     assert rows[0]["prev_hash"] == GENESIS, "a tenant's first row links to the sentinel"
-    assert rows[1]["prev_hash"] == rows[0]["row_hash"]
-    assert rows[2]["prev_hash"] == rows[1]["row_hash"]
-    assert rows[0]["chain_seq"] < rows[1]["chain_seq"] < rows[2]["chain_seq"]
+    for i in range(len(rows) - 1):
+        assert rows[i + 1]["prev_hash"] == rows[i]["row_hash"]
+        assert rows[i]["chain_seq"] < rows[i + 1]["chain_seq"]
     report = verify_rows(rows)
     assert report["ok"], report["breaks"]
-    assert report["rows"] == 3 and report["unchained"] == 0
-    assert report["tail_hash"] == rows[2]["row_hash"]
+    assert report["rows"] == len(rows) and report["unchained"] == 0
+    assert report["tail_hash"] == rows[-1]["row_hash"]
 
 
 @pytest.mark.asyncio
 async def test_stored_hash_is_exactly_what_the_documented_function_produces(client):
     """Pins the hash definition: if compute_row_hash ever changes, every
     stored hash becomes wrong and this fails immediately rather than the
-    first time a reviewer runs the verifier."""
+    first time a reviewer runs the verifier. Checked over the whole chain
+    (registration row included), not just this test's own 2 rows -- same
+    reasoning as test_new_rows_chain_from_genesis_and_verify above."""
     tenant_id = await _register(client)
     await _log(tenant_id, 2)
-    r0, r1 = _rows(tenant_id)
-    assert compute_row_hash(r0, GENESIS) == r0["row_hash"]
-    assert compute_row_hash(r1, r0["row_hash"]) == r1["row_hash"]
+    prev = GENESIS
+    for row in _rows(tenant_id):
+        assert compute_row_hash(row, prev) == row["row_hash"]
+        prev = row["row_hash"]
 
 
 def test_hash_is_deterministic_and_key_order_independent():
@@ -218,7 +240,12 @@ async def test_forging_prev_hash_to_hide_a_tamper_still_fails(client):
     a full re-forge, which is what the anchored tail hash catches."""
     tenant_id = await _register(client)
     await _log(tenant_id, 3)
-    r0, r1, r2 = _rows(tenant_id)
+    # The last 3 rows, not the first 3 -- depends on _log() writing AFTER
+    # registration, so this test's own rows are always the chain's tail
+    # regardless of whatever registration wrote ahead of them. If a future
+    # change ever made _log() (or the registration call above) run in the
+    # other order, this needs to pick rows by action instead.
+    r0, r1, r2 = _rows(tenant_id)[-3:]
     forged_r1 = compute_row_hash({**r1, "action": "forged"}, r1["prev_hash"])
     _tamper("UPDATE audit_logs SET action = 'forged', row_hash = :h WHERE id = :id",
             {"h": forged_r1, "id": r1["id"]})
