@@ -172,6 +172,16 @@ async def accept_invite(*, token: str, password: str, full_name: str) -> dict:
         await db.commit()
         await db.refresh(user)
 
+        # After commit, own session -- see auth_service.py's
+        # _provision_sso_user for why this isn't atomic with the row above
+        # and why that's accepted here (same fix, same family, 2026-09-30).
+        from modules.governance.audit_trail import AuditTrail
+        await AuditTrail(user.tenant_id).log_action(
+            actor=user.email, action="user.invite_accepted",
+            resource_type="user", resource_id=user.id,
+            payload={"role": invite.role, "invited_by_user_id": invite.invited_by_user_id},
+        )
+
         token_str = await issue_token_and_remember(user, "password")
         return {
             "access_token": token_str, "token_type": "bearer",

@@ -274,6 +274,7 @@ async def complete(code: str, state: str) -> dict:
         sso_subject=profile["id"], provider_email_verified=domain_ok,
         sso_satisfies_mfa=cfg["satisfies_mfa"],
         full_name=" ".join(x for x in (profile["first_name"], profile["last_name"]) if x) or None,
+        connection_id=cfg["connection_id"],
     )
     identity["tenant_id"] = identity.get("tenant_id", tenant_id)
     identity["profile_email"] = profile["email"]
