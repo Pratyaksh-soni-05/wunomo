@@ -10,6 +10,7 @@ import { EmployeeAvatar } from "./EmployeeAvatar";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { useProjectScope } from "@/lib/projectScope";
 import { EMPLOYEE_TYPE_LABEL } from "@/lib/employeeTypes";
+import { liveWorkBadge, liveWorkStepLine } from "@/lib/activeTaskDisplay";
 import type { LocalChatMessage } from "./types";
 import {
   getActiveTasks, getSources,
@@ -18,8 +19,6 @@ import {
 
 const ACTIVE_TASKS_POLL_MS = 20000;
 const ACTIVE_TASKS_IDLE_POLL_MS = 60000;
-
-type BadgeVariant = "success" | "danger" | "warning" | "info" | "hold" | "gray" | "midnight";
 
 /**
  * §7.6's Live work panel -- replaces ProjectContextPanel (renamed, not
@@ -236,39 +235,6 @@ export function LiveWorkPanel({
       />
     </div>
   );
-}
-
-// §7.6's own status→badge/step-line table assumes fields this schema
-// doesn't have: a numeric SUPERVISOR_RUNNING "{n}%" (no units_total/
-// units_done anywhere on Task/TaskStep) and a BLOCKED_ON_DEPENDENCY line
-// naming "{upstream agent}'s {task}" (ActiveTaskRailItem carries no
-// depends_on_task_id or upstream identity at all). Mapped here against
-// what's actually real; "default" (spec's badge name for queued) isn't a
-// real Badge variant -- "gray" is the same neutral job taskStatusVariant()
-// already gives "queued" elsewhere in this app.
-function liveWorkBadge(status: string): { variant: BadgeVariant; label: string } {
-  switch (status) {
-    case "supervisor_queued": return { variant: "gray", label: "queued" };
-    case "supervisor_running": return { variant: "info", label: "running" };
-    case "blocked_on_dependency": return { variant: "warning", label: "blocked" };
-    case "paused_needs_approval": return { variant: "hold", label: "needs you" };
-    case "failed": return { variant: "danger", label: "failed" };
-    case "queued": return { variant: "gray", label: "queued" };
-    case "running": return { variant: "info", label: "running" };
-    default: return { variant: "warning", label: "paused" };
-  }
-}
-
-function liveWorkStepLine(t: ActiveTaskRailItem): string {
-  // "The step line always carries a real unit of work... where no count
-  // exists, name the step" (§7.6) -- every real task takes the "name the
-  // step" branch, never a numeric one; see this function's own report note.
-  if (t.current_step) return `Step ${t.current_step.step_index + 1}: ${t.current_step.description}`;
-  if (t.status === "paused_needs_approval") return "Paused — waiting for your approval";
-  if (t.status === "blocked_on_dependency") return t.pause_reason ?? "Blocked on an upstream task — retry it to release this.";
-  if (t.action_text) return t.action_text;
-  if (t.pause_reason) return t.pause_reason;
-  return "Waiting to start";
 }
 
 function TaskCard({

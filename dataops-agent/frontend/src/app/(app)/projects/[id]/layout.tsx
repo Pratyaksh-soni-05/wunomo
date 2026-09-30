@@ -7,13 +7,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Skeleton, useToast } from "@/components/ui";
 import { ProjectHeader } from "@/components/chat";
 import { ProjectChatContext, type ProjectChatContextValue } from "@/components/chat/ProjectChatContext";
+import { computeProjectStatusBadge } from "@/lib/projectStatusBadge";
 import {
   getToken, decodeUserFromToken, listProjects, getProjectAgents, listChannels, getChannel,
   getTeamMembers, getTasks, getActiveTasks, createChannel, addChannelAgent, removeChannelAgent,
   addChannelUser, removeChannelUser, ApiError,
 } from "@/lib/api";
-
-type BadgeVariant = "success" | "danger" | "warning" | "info" | "hold" | "gray" | "midnight";
 
 const TABS = [
   { slug: "chat", label: "Chat" },
@@ -80,23 +79,10 @@ export default function ProjectContainerLayout({ children }: { children: ReactNo
     : 0;
 
   // §7.2 header status badge -- project-wide (every channel's tasks).
-  // Precedence exactly as specified: approval pending outranks running
-  // outranks a real failure/block outranks the "nothing active" default --
-  // first match wins, checked top to bottom.
+  // Precedence lives in lib/projectStatusBadge.ts, shared with Command
+  // Center's project-cards strip (blueprint §05) so the two can't drift.
   const projectActiveTasks = (activeTasksQuery.data ?? []).filter((t) => t.project_id === projectId);
-  const ISSUE_STATUSES = new Set(["failed", "blocked_on_dependency", "paused_failed_step", "paused_plan_invalid"]);
-  const RUNNING_STATUSES = new Set([
-    "running", "supervisor_running", "queued", "supervisor_queued",
-    "paused_quota_exceeded", "paused_source_locked",
-  ]);
-  const issueCount = projectActiveTasks.filter((t) => ISSUE_STATUSES.has(t.status)).length;
-  const statusBadge: { variant: BadgeVariant; label: string } = projectActiveTasks.some((t) => t.status === "paused_needs_approval")
-    ? { variant: "hold", label: "needs you" }
-    : projectActiveTasks.some((t) => RUNNING_STATUSES.has(t.status))
-    ? { variant: "info", label: "working" }
-    : issueCount > 0
-    ? { variant: "warning", label: issueCount === 1 ? "1 issue" : `${issueCount} issues` }
-    : { variant: "success", label: "all clear" };
+  const statusBadge = computeProjectStatusBadge(projectActiveTasks);
 
   const activeChannel = projectChannels.find((c) => c.id === activeSessionId) ?? null;
   const channelDetailQuery = useQuery({

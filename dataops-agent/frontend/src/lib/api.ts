@@ -1626,6 +1626,8 @@ export interface TaskSummary {
   status: string;
   plan_edited: boolean;
   created_at: string | null;
+  // Command Center (blueprint §05) -- null for every non-completed task.
+  completed_at: string | null;
 }
 
 export function getTasks(token: string): Promise<TaskSummary[]> {
