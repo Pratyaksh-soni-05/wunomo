@@ -27,3 +27,9 @@ the two standing guard tests on every push/PR — the full suite
 (`docker compose exec backend python -m pytest tests/ -v --tb=short`, see
 root `CLAUDE.md`) is not yet wired into CI, so until it is, running it
 yourself before a larger or riskier change is still on you.
+
+## Workflow
+
+Before switching branches, run `git status` and commit or stash uncommitted
+work. Branch switches carry uncommitted changes across and it is easy to
+commit them to the wrong branch.
