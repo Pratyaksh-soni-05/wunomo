@@ -140,18 +140,28 @@ async def test_new_rows_chain_from_genesis_and_verify(client):
     the registration row (user.registered, since the identity-audit PR,
     2026-09-30) is genuinely part of the chain, and genesis-linkage/
     sequential hashing are real properties of the chain as a whole, not of
-    any one test's own contribution to it."""
+    any one test's own contribution to it.
+
+    The exact-count checks below (baseline + 3, and the test.step_* names
+    in order) are a separate, narrower property from the whole-chain
+    checks -- that _log() itself actually wrote exactly 3 rows, not more,
+    not fewer. A generic `len(rows) >= 3` would pass even if _log() silently
+    dropped a write, since chain-integrity checks don't care how many rows
+    exist, only whether the ones present are correctly linked."""
     tenant_id = await _register(client)
+    baseline = len(_rows(tenant_id))
     await _log(tenant_id, 3)
     rows = _rows(tenant_id)
-    assert len(rows) >= 3  # this test's own 3, plus whatever registration wrote
+    assert len(rows) == baseline + 3
+    own_rows = [r for r in rows if r["action"].startswith("test.step_")]
+    assert [r["action"] for r in own_rows] == ["test.step_0", "test.step_1", "test.step_2"]
     assert rows[0]["prev_hash"] == GENESIS, "a tenant's first row links to the sentinel"
     for i in range(len(rows) - 1):
         assert rows[i + 1]["prev_hash"] == rows[i]["row_hash"]
         assert rows[i]["chain_seq"] < rows[i + 1]["chain_seq"]
     report = verify_rows(rows)
     assert report["ok"], report["breaks"]
-    assert report["rows"] == len(rows) and report["unchained"] == 0
+    assert report["rows"] == baseline + 3 and report["unchained"] == 0
     assert report["tail_hash"] == rows[-1]["row_hash"]
 
 
@@ -161,11 +171,22 @@ async def test_stored_hash_is_exactly_what_the_documented_function_produces(clie
     stored hash becomes wrong and this fails immediately rather than the
     first time a reviewer runs the verifier. Checked over the whole chain
     (registration row included), not just this test's own 2 rows -- same
-    reasoning as test_new_rows_chain_from_genesis_and_verify above."""
+    reasoning as test_new_rows_chain_from_genesis_and_verify above.
+
+    The count/name checks are independent of the hash-recomputation loop
+    below -- a loop with no count check at all would pass even if _log()
+    silently wrote fewer than 2 rows, since recomputing a hash over
+    whatever rows happen to exist says nothing about whether the right
+    number of rows exist in the first place."""
     tenant_id = await _register(client)
+    baseline = len(_rows(tenant_id))
     await _log(tenant_id, 2)
+    rows = _rows(tenant_id)
+    assert len(rows) == baseline + 2
+    own_rows = [r for r in rows if r["action"].startswith("test.step_")]
+    assert [r["action"] for r in own_rows] == ["test.step_0", "test.step_1"]
     prev = GENESIS
-    for row in _rows(tenant_id):
+    for row in rows:
         assert compute_row_hash(row, prev) == row["row_hash"]
         prev = row["row_hash"]
 
