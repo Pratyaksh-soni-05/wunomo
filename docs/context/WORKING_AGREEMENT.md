@@ -88,6 +88,17 @@ Only these. For each, write the question in the PR and **continue on other work 
 
 ---
 
+## 4b. What counts as urgent (message Daksh immediately)
+
+1. A secret was committed or exposed
+2. One tenant's data is visible to another tenant
+3. `master` or CI is broken in a way that blocks everyone
+4. Something could cause irreversible data loss or move money
+
+For these, send Daksh one line with the PR or branch link, and keep working on other things while waiting. Nothing else is urgent.
+
+---
+
 ## 5. Migrations and `.env` (self-serve, no announcement needed)
 
 Before generating a migration:
@@ -107,7 +118,7 @@ git ls-tree -r --name-only origin/master -- dataops-agent/backend/migrations/ver
 ## 6. Branches and stacking
 
 - Branch from fresh `master`: `feature/<stage-or-area>-<short-name>`.
-- Independent work gets its own branch from `master`. **Maximum two open PRs stacked on each other.**
+- Independent work gets its own branch from `master`. **Maximum three open PRs stacked on each other. Daksh reviews in batches roughly every 3-4 days, so you will often have several PRs open at once. If a fourth would depend on an unmerged PR, start an independent stream from master in a different area instead of stacking deeper.**
 - When the base PR merges, retarget the next PR to `master` and merge `master` into it.
 - Push at least every 2-3 days, even if unfinished (open a Draft PR). Never leave work only on your laptop.
 - Address review comments with new commits on the same branch. Do not force-push.
@@ -118,14 +129,15 @@ git ls-tree -r --name-only origin/master -- dataops-agent/backend/migrations/ver
 
 Every PR must contain, in the description:
 
-1. **Lane** and the reason for it
-2. **Decisions I made**: decision, alternative, why, whether it is easy to reverse
-3. **Questions for Daksh**: each with your recommended answer and "will proceed with this default if no answer in 24h"
-4. **Test evidence**: `scripts/fast_pretest.sh` result, both guard tests, and a **`full-suite.yml` run on your branch** (trigger it with `workflow_dispatch`) with the link
-5. **How to see it working**: two or three steps Daksh can follow in the browser or with a curl command
-6. **Security checklist** (the six rules, ticked or marked not applicable)
-7. **CODEOWNERS files touched** (list them, or "none")
-8. **Out of scope / follow-ups**
+1. **Prefix the PR title with `[green]`, `[yellow]` or `[red]`** (the lane), so the PR list can be scanned at a glance.
+2. **Lane** and the reason for it
+3. **Decisions I made**: decision, alternative, why, whether it is easy to reverse
+4. **Questions for Daksh**: each with your recommended answer and "will proceed with this default if no answer in 24h"
+5. **Test evidence**: `scripts/fast_pretest.sh` result, both guard tests, and a **`full-suite.yml` run on your branch** (trigger it with `workflow_dispatch`) with the link
+6. **How to see it working**: two or three steps Daksh can follow in the browser or with a curl command
+7. **Security checklist** (the six rules, ticked or marked not applicable)
+8. **CODEOWNERS files touched** (list them, or "none")
+9. **Out of scope / follow-ups**
 
 For bug fixes: show the test **fails without the fix and passes with it**. For anything with a live effect: verify it live, not only in mocks. Claims in the description should be things Daksh can check, not things he has to trust.
 
@@ -144,7 +156,7 @@ Don't wait for an answer. Do all of these:
 
 ## 9. Review, merge and acknowledgement
 
-**What Daksh does:** reviews PRs when he can, red lane first, using a fixed routine (diff, CODEOWNERS check, standing patterns, CI, the full-suite run on your branch). He merges with a regular merge commit.
+**What Daksh does:** reviews in batches roughly every 3-4 days, red lane first, using a fixed routine (diff, CODEOWNERS check, standing patterns, CI, the full-suite run on your branch). He merges with a regular merge commit. Until your PR is merged, keep building; never wait for a merge. Treat every non-urgent question as already answered by the default you recorded.
 
 **What you see:** after merging, Daksh (or his Claude) posts a **comment on the PR** with the merge commit SHA, `master`'s full-suite result, and what to do next. You will also see it in the section 1 check, so the comment is a convenience, not something you have to wait for.
 
@@ -195,4 +207,6 @@ design note. Stop and ask only for the five items in section 4, and
 keep working on other things while waiting. Start every session with
 the section 1 routine. Never push to master. Every PR needs the
 section 7 contents, including a full-suite.yml run on your branch.
+Prefix PR titles with [green]/[yellow]/[red]. Up to three stacked PRs
+are allowed.
 ```
