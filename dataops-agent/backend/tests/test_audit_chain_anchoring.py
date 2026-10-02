@@ -61,17 +61,27 @@ async def test_anchor_matches_what_the_verifier_independently_computes(client):
     is exactly the one a reviewer would get from the verifier, and exactly
     the one stored on the last row."""
     tenant_id = await _register(client)
+    # Registration itself is an audited event (user.registered, since the
+    # identity-audit PR, 2026-09-30) -- not assumed to be zero rows, and not
+    # hardcoded as "+1" either, since a future audited registration step
+    # would silently re-break that. Measured directly via the same
+    # mechanism under test, before this test adds its own 4.
+    baseline_record = next((r for r in compute_anchors() if r["tenant_id"] == tenant_id), None)
+    baseline_rows = baseline_record["rows"] if baseline_record else 0
     await _log(tenant_id, 4)
 
     record = next(r for r in compute_anchors() if r["tenant_id"] == tenant_id)
 
+    # Independent comparison, not derived from compute_anchors() itself --
+    # the verifier's own tail hash and the raw DB row must agree with the
+    # anchor record, not just with each other.
     with create_engine(settings.ADMIN_DATABASE_URL).connect() as c:
         verifier_report = vac.verify_tenant(c, tenant_id)
     seq, stored_tail = _tail_from_db(tenant_id)
 
     assert record["tail_hash"] == verifier_report["tail_hash"] == stored_tail
     assert record["chain_seq"] == seq
-    assert record["rows"] == 4 and record["ok"] is True and record["breaks"] == 0
+    assert record["rows"] == baseline_rows + 4 and record["ok"] is True and record["breaks"] == 0
     assert len(record["tail_hash"]) == 64
 
 
@@ -120,12 +130,40 @@ async def test_email_body_round_trips_as_json_per_line(client):
     assert parsed == records, "a reviewer must be able to parse the hash straight back out"
 
 
+async def _register_tenant_with_no_audit_rows() -> str:
+    """A genuinely empty tenant: a Tenant row and nothing else. _register()
+    can no longer produce this state -- POST /auth/register writes a
+    user.registered audit row as of the identity-audit PR (2026-09-30) --
+    so this mints the tenant directly instead, the same RLS-context dance
+    create_new_tenant_and_user() itself uses: `tenants` is WITH CHECK
+    (id = current_setting('app.current_tenant_id')), so the context must
+    already be set to the id being inserted before the INSERT can satisfy
+    its own policy. No User, no AgentInstance, no audit call -- just the
+    one property this test needs: zero rows in audit_logs for this tenant."""
+    import uuid as _uuid
+    from slugify import slugify
+    from database import AsyncSessionLocal
+    from models.all_models import Tenant
+    from services.auth_service import utcnow
+    from services.tenant_context import async_tenant_context
+
+    tenant_id = str(_uuid.uuid4())
+    async with async_tenant_context(tenant_id), AsyncSessionLocal() as db:
+        db.add(Tenant(
+            id=tenant_id, name="Empty Corp",
+            slug=slugify("Empty Corp") + "-" + tenant_id[:6], created_at=utcnow(),
+        ))
+        await db.commit()
+    return tenant_id
+
+
 @pytest.mark.asyncio
 async def test_tenant_with_no_audit_rows_is_skipped_not_fatal(client):
-    """A freshly registered tenant has a tenant row and zero audit rows. The
-    job must skip it -- there is no chain to anchor -- and still anchor
+    """A tenant with zero audit rows (see _register_tenant_with_no_audit_rows
+    for why a real registration can no longer produce this state directly).
+    The job must skip it -- there is no chain to anchor -- and still anchor
     everyone else."""
-    empty_tenant = await _register(client)
+    empty_tenant = await _register_tenant_with_no_audit_rows()
     full_tenant = await _register(client)
     await _log(full_tenant, 1)
 

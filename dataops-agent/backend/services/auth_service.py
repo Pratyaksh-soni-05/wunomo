@@ -319,7 +319,16 @@ async def create_new_tenant_and_user(
         await db.commit()
         await db.refresh(tenant)
         await db.refresh(user)
-        return tenant, user
+
+    # After commit, own session (see _provision_sso_user's comment on why
+    # this isn't atomic with the rows above, and why that's accepted here).
+    from modules.governance.audit_trail import AuditTrail
+    await AuditTrail(tenant.id).log_action(
+        actor=email, action="user.registered",
+        resource_type="user", resource_id=user.id,
+        payload={"auth_method": auth_method, "tenant_id": tenant.id},
+    )
+    return tenant, user
 
 
 async def find_existing_tenants_for_email(email: str, active_only: bool = False) -> list[dict]:
@@ -472,7 +481,7 @@ async def resolve_identity(
     email: str, auth_method: str, intended_tenant_id: Optional[str] = None,
     google_id: Optional[str] = None, provider_email_verified: bool = False,
     sso_subject: Optional[str] = None, sso_satisfies_mfa: bool = False,
-    full_name: Optional[str] = None,
+    full_name: Optional[str] = None, connection_id: Optional[str] = None,
 ) -> dict:
     """Shared post-proof resolver for email-code, Google and (Item #14) SSO.
     SSO always arrives with intended_tenant_id -- the connection IS the
@@ -480,7 +489,13 @@ async def resolve_identity(
     email with no account in that tenant is provisioned just-in-time
     (`viewer`; the domain guard already proved the IdP owns the domain),
     because enterprise SSO where every employee first needs an invite is
-    SSO in name only."""
+    SSO in name only.
+
+    connection_id: passed through from sso_service.complete() (its own
+    cfg["connection_id"], already confirmed to match the profile's) purely
+    for the sso.user_provisioned / user.linked_sso audit payloads below --
+    not used for any access decision, that already happened in complete()
+    before this is called."""
     async with AsyncSessionLocal() as db:
         if intended_tenant_id:
             r = await db.execute(select(User).where(
@@ -490,11 +505,13 @@ async def resolve_identity(
             user = r.scalars().first()
             if user is None:
                 if auth_method == "sso" and provider_email_verified:
-                    user = await _provision_sso_user(intended_tenant_id, email, sso_subject, full_name)
+                    user = await _provision_sso_user(intended_tenant_id, email, sso_subject, full_name,
+                                                      connection_id=connection_id)
                     return await establish_session(user, "sso", mfa_via_idp=sso_satisfies_mfa)
                 return {"status": "none"}
             return await _link_and_issue(db, user, auth_method, google_id, provider_email_verified,
-                                         sso_subject=sso_subject, sso_satisfies_mfa=sso_satisfies_mfa)
+                                         sso_subject=sso_subject, sso_satisfies_mfa=sso_satisfies_mfa,
+                                         connection_id=connection_id)
 
         r = await db.execute(select(User).where(User.email == email, User.is_active.is_(True)))
         users = r.scalars().all()
@@ -516,7 +533,7 @@ async def resolve_identity(
 
 
 async def _provision_sso_user(tenant_id: str, email: str, sso_subject: Optional[str],
-                              full_name: Optional[str]) -> User:
+                              full_name: Optional[str], connection_id: Optional[str] = None) -> User:
     async with tenant_session(tenant_id) as db:
         user = User(
             id=str(uuid.uuid4()), tenant_id=tenant_id, email=email, hashed_password=None,
@@ -527,11 +544,46 @@ async def _provision_sso_user(tenant_id: str, email: str, sso_subject: Optional[
         await db.commit()
         await db.refresh(user)
     log.info("sso.user_provisioned", tenant_id=tenant_id, user_id=user.id)
+    # Found 2026-09-30: this log.info line reads like an audit event (same
+    # string as the action name below) but was never one -- AuditTrail.
+    # log_action was never called here, so the first real browser round-trip
+    # produced zero audit_logs rows. AuditTrail is @tenant_scoped, so this
+    # establishes its own RLS context from tenant_id regardless of the
+    # pre-auth caller having none. Called after the commit above, not before
+    # -- log_action opens its own separate session/transaction (not atomic
+    # with the user row), and a row describing a user whose own transaction
+    # later rolled back is worse than an occasional missing row if
+    # log_action itself fails (it fails closed on nothing -- see its own
+    # swallowed-exception behaviour, unchanged here, GOTCHAS.md).
+    from modules.governance.audit_trail import AuditTrail
+    from services.sso_service import email_domain
+    await AuditTrail(tenant_id).log_action(
+        actor=email, action="sso.user_provisioned",
+        resource_type="user", resource_id=user.id,
+        payload={"provider": "workos", "connection_id": connection_id,
+                 "email_domain": email_domain(email)},
+    )
     return user
 
 
+def _existing_auth_methods(user: User) -> list[str]:
+    """Which methods this account already had, captured BEFORE the
+    mutation about to happen in _link_and_issue -- the audit payload's
+    previous_auth_methods field. Derived from persistent identity columns,
+    not a separately tracked list, so there is nothing to keep in sync."""
+    methods = []
+    if user.hashed_password:
+        methods.append("password")
+    if user.google_id:
+        methods.append("google")
+    if user.sso_subject:
+        methods.append("sso")
+    return methods
+
+
 async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_email_verified,
-                          sso_subject: Optional[str] = None, sso_satisfies_mfa: bool = False) -> dict:
+                          sso_subject: Optional[str] = None, sso_satisfies_mfa: bool = False,
+                          connection_id: Optional[str] = None) -> dict:
     # This is the write half of the pre-auth chicken-and-egg. The caller found
     # this user by email across all tenants, which the `pre_auth_read` policy
     # permits precisely because the tenant isn't known until the user is. The
@@ -548,6 +600,16 @@ async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_
        (auth_method == "sso" and user.sso_subject != sso_subject):
         await apply_tenant_to_session(db, user.tenant_id)
 
+    # Linking a new external identity onto an EXISTING account is an
+    # account-takeover vector (found 2026-09-30, same pass as
+    # sso.user_provisioned) -- captured before any of the three branches
+    # below mutate the row, so the payload shows what the account could
+    # already authenticate with before this link, never token/id material.
+    # auto_linked is always True: nothing in this codebase asks the human
+    # to confirm a link first, resolve_identity()'s whole point is that a
+    # provider-proven email match links automatically.
+    previous_auth_methods = _existing_auth_methods(user)
+
     if auth_method == "google" and not user.google_id:
         if not provider_email_verified:
             return {"status": "blocked_unverified"}
@@ -555,10 +617,24 @@ async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_
         user.email_verified = True
         db.add(user)
         await db.commit()
+        from modules.governance.audit_trail import AuditTrail
+        await AuditTrail(user.tenant_id).log_action(
+            actor=user.email, action="user.linked_google",
+            resource_type="user", resource_id=user.id,
+            payload={"provider": "google", "previous_auth_methods": previous_auth_methods,
+                     "email_verified_source": "google", "auto_linked": True},
+        )
     elif auth_method == "email_code" and not user.email_verified:
         user.email_verified = True
         db.add(user)
         await db.commit()
+        from modules.governance.audit_trail import AuditTrail
+        await AuditTrail(user.tenant_id).log_action(
+            actor=user.email, action="user.linked_email_code",
+            resource_type="user", resource_id=user.id,
+            payload={"provider": "email_code", "previous_auth_methods": previous_auth_methods,
+                     "email_verified_source": "email code", "auto_linked": True},
+        )
     elif auth_method == "sso":
         # The SSO counterpart of Google's email_verified rule: the IdP is
         # believed only for the domain the tenant configured, and
@@ -571,6 +647,14 @@ async def _link_and_issue(db, user: User, auth_method: str, google_id, provider_
             user.email_verified = True
             db.add(user)
             await db.commit()
+            from modules.governance.audit_trail import AuditTrail
+            await AuditTrail(user.tenant_id).log_action(
+                actor=user.email, action="user.linked_sso",
+                resource_type="user", resource_id=user.id,
+                payload={"provider": "workos", "connection_id": connection_id,
+                         "previous_auth_methods": previous_auth_methods,
+                         "email_verified_source": "tenant verified domain", "auto_linked": True},
+            )
         return await establish_session(user, "sso", mfa_via_idp=sso_satisfies_mfa)
 
     return await establish_session(user, auth_method)

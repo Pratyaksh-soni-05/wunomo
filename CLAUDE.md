@@ -15,6 +15,10 @@ by design. See "Deeper History" at the bottom.
 **Before starting any blueprint/platform stage, read `docs/context/STAGE_OWNERSHIP.md`.** If it
 lists a prerequisite that doesn't exist yet in the code, stop and report — don't improvise it.
 
+**Before any work, read `docs/context/WORKING_AGREEMENT.md`.** Work asynchronously: never block
+on a question, put questions and recommended defaults in the PR description, and classify every
+change green, yellow or red.
+
 ---
 
 ## Stack
