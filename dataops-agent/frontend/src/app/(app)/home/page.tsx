@@ -158,7 +158,7 @@ export default function HomePage() {
               </>
             ) : (
               <>
-                <div className="command-center-empty-title">Your team is idle</div>
+                <div className="command-center-empty-title">Nothing&apos;s running right now</div>
                 <div className="command-center-empty-body">
                   Nothing&apos;s active and nothing finished in the last 24 hours. Open a project and give an employee a goal.
                 </div>
