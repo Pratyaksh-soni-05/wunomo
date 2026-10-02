@@ -146,7 +146,7 @@ export default function HomePage() {
       {isLoading ? (
         <Skeleton style={{ height: 300, borderRadius: 12 }} />
       ) : nothingActive ? (
-        <div className="command-center-grid">
+        <div className="command-center-layout">
           <div className="command-center-empty card">
             {projects.length === 0 ? (
               <>
@@ -168,17 +168,21 @@ export default function HomePage() {
           </div>
         </div>
       ) : (
-        <div className="command-center-grid">
+        <div className="command-center-layout">
           <NeedsYouStrip tasks={needsYouTasks} />
-          <WorkingNowList tasks={workingTasks} />
-          <div className="command-center-side">
-            <SpendCycleCard
-              credits={usageQuery.data?.usage.ai_credits ?? null}
-              planName={planQuery.data?.plan ?? null}
-            />
-            <JustFinishedCard tasks={justFinished} agentsById={agentsById} />
+          <div className="command-center-main-row">
+            <div className="command-center-main">
+              <WorkingNowList tasks={workingTasks} />
+              <ProjectStatusStrip activeTasks={activeTasks} />
+            </div>
+            <div className="command-center-side">
+              <SpendCycleCard
+                credits={usageQuery.data?.usage.ai_credits ?? null}
+                planName={planQuery.data?.plan ?? null}
+              />
+              <JustFinishedCard tasks={justFinished} agentsById={agentsById} />
+            </div>
           </div>
-          <ProjectStatusStrip activeTasks={activeTasks} />
         </div>
       )}
     </div>

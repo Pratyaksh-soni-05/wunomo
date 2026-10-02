@@ -13,6 +13,7 @@
 // last 24h, it is not on this page") since a lifetime completion count
 // isn't a last-24h fact. A project with zero rows in getActiveTasks() has
 // had nothing happen and is correctly absent from this strip.
+import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui";
 import { EmployeeAvatar } from "@/components/chat/EmployeeAvatar";
@@ -43,7 +44,7 @@ export function ProjectStatusStrip({ activeTasks }: { activeTasks: ActiveTaskRai
   if (groups.length === 0) return null;
 
   return (
-    <div className="project-status-strip">
+    <div className="project-status-strip" style={{ "--project-cols": Math.min(groups.length, 3) } as CSSProperties}>
       {groups.map((g) => {
         const badge = computeProjectStatusBadge(g.tasks);
         const agents = Array.from(new Map(g.tasks.map((t) => [t.agent_id ?? t.agent_name ?? "", t])).values()).slice(0, 4);

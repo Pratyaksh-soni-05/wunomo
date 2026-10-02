@@ -1656,29 +1656,38 @@ tr.selected td:first-child {
 
 /* ==========================================
    COMMAND CENTER (blueprint §05) -- home/page.tsx
-   4-column grid (1fr 1fr 1fr 360px): needs-you strip spans all 4 at the
-   top when present, working-now takes the first 3, the right column
-   stacks spend + just-finished, project cards span all 4 in 3 equal cols.
-   ========================================== */
-.command-center-grid {
-  display: grid; grid-template-columns: 1fr 1fr 1fr 360px; gap: 16px;
-  /* Default stretch made working-now-card match command-center-side's
-     height whenever the sidebar (spend + just-finished stacked) was
-     taller -- a single working-now row rendered inside a box sized for
-     two stacked cards, reading as "a tall box with one row floating in
-     it." align-items: start lets every grid item size to its own
-     content, matching §05's "working-now sizes to its content." */
-  align-items: start;
-}
+
+   2026-10-02: rebuilt from a single 4-column CSS grid to a flex "main
+   column + fixed sidebar" layout. The blueprint's own mock (§05, 4 dense
+   working-now rows beside 3 stacked sidebar cards) never has to confront
+   what happens when the two sides have very different natural heights --
+   a single-grid-row design with grid-item-start alignment leaves whatever
+   is in the shorter column (working-now, in a sparse real tenant) sitting
+   above a dead gap before the next full-width row (the project strip)
+   starts, because the grid ROW's own height is still set by the taller
+   sidebar even when neither item stretches to fill it. Decoupling the
+   main column (working-now + project strip, stacked) from the sidebar
+   into two independent flex tracks means the project strip starts right
+   after working-now's own content ends, full stop -- the sidebar is free
+   to run shorter or longer without holding anything else open. Trade-off,
+   recorded deliberately: the project strip is now full-width of the MAIN
+   column (not full-bleed under the sidebar's 360px too, unlike the mock's
+   literal grid-column:span 4) -- a persistent right rail that content
+   doesn't flow under is the standard shape for exactly this reason, and
+   nothing in §05's own text requires edge-to-edge under the rail
+   specifically. Needs-you keeps the old literal full-bleed width (it has
+   no such mismatch to create dead space from). */
+.command-center-layout { display: flex; flex-direction: column; gap: 16px; }
+.command-center-main-row { display: flex; align-items: flex-start; gap: 16px; }
+.command-center-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 @media (max-width: 1100px) {
-  .command-center-grid { grid-template-columns: 1fr; }
+  .command-center-main-row { flex-direction: column; }
 }
 
 /* Needs you -- same --hold vocabulary as .approval-card, full width, one
    row per pending item stacked inside a single bordered strip (rather than
    hiding anything beyond the first when more than one is pending). */
 .needs-you-strip {
-  grid-column: 1 / -1;
   border: 1px solid color-mix(in srgb, var(--hold) 50%, transparent);
   border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--hold) 6%, var(--surface));
@@ -1694,8 +1703,7 @@ tr.selected td:first-child {
 .needs-you-meta { margin-top: 3px; font-size: 12px; color: var(--text-muted); }
 .needs-you-actions { flex-shrink: 0; display: flex; gap: 8px; }
 
-.working-now-card { grid-column: span 3; padding: 20px; }
-@media (max-width: 1100px) { .working-now-card { grid-column: 1 / -1; } }
+.working-now-card { padding: 20px; }
 .working-now-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .working-now-header h3 { font-size: 14.5px; font-weight: 600; color: var(--text-primary); margin: 0; }
 .working-now-rows { display: flex; flex-direction: column; gap: 4px; }
@@ -1708,8 +1716,8 @@ tr.selected td:first-child {
 .working-now-title { font-size: 13px; font-weight: 550; color: var(--text-primary); }
 .working-now-meta { margin-top: 2px; font-size: 11.7px; color: var(--text-muted); }
 
-.command-center-side { grid-column: span 1; display: flex; flex-direction: column; gap: 16px; }
-@media (max-width: 1100px) { .command-center-side { grid-column: 1 / -1; } }
+.command-center-side { width: 360px; flex-shrink: 0; display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 1100px) { .command-center-side { width: auto; } }
 
 .spend-cycle-card, .just-finished-card { padding: 20px; }
 .spend-cycle-label { font-size: 11.5px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 10px; }
@@ -1734,17 +1742,22 @@ tr.selected td:first-child {
 }
 .just-finished-meta { margin-top: 2px; font-size: 11.4px; color: var(--text-muted); }
 
-/* Flex-wrap, not a fixed 3-column grid: repeat(3, 1fr) stretched a single
-   card to a third of the full-width row, reading as "a lone square" with
-   two empty column-tracks beside it. A capped flex basis lets 1-2 cards
-   size to their own content instead of implying missing ones, while still
-   wrapping to a new row past 3 -- the same "up to three columns" shape
-   without forcing sparse counts to look broken. */
+/* 2026-10-02 (superseded the flex-wrap version below): a capped flex-basis
+   kept 1-2 cards "content-sized" to avoid implying missing ones, but that
+   read as the opposite problem instead -- a single project sitting as a
+   small fixed-width square in an otherwise-empty row, which is exactly
+   the "lone square in dead space" look it was meant to avoid. The
+   blueprint's own mock uses a plain repeat(3, 1fr) (full-width, 3 equal
+   columns) for its 3-project example; --project-cols (set inline by
+   ProjectStatusStrip from the real group count, min(count, 3)) makes that
+   dynamic instead of fixed at 3 -- one project fills the whole strip
+   width, two split it evenly, three or more sit at equal thirds and wrap
+   additional projects onto further rows of three. */
 .project-status-strip {
-  grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 16px;
+  display: grid; grid-template-columns: repeat(var(--project-cols, 3), 1fr); gap: 16px;
 }
-.project-status-card { flex: 1 1 320px; max-width: 420px; padding: 16px 18px; cursor: pointer; }
-@media (max-width: 900px) { .project-status-card { flex-basis: 100%; max-width: none; } }
+.project-status-card { padding: 16px 18px; cursor: pointer; }
+@media (max-width: 900px) { .project-status-strip { grid-template-columns: 1fr; } }
 .project-status-card:hover { border-color: var(--border-strong); }
 .project-status-card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .project-status-card-name { flex: 1; min-width: 0; font-size: 13.4px; font-weight: 600; color: var(--text-primary); }
@@ -1755,7 +1768,7 @@ tr.selected td:first-child {
 .avatar-stack-item:first-child { margin-left: 0; }
 
 .command-center-empty {
-  grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center;
+  display: flex; flex-direction: column; align-items: center;
   justify-content: center; text-align: center; padding: 72px 24px; gap: 12px;
 }
 .command-center-empty-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
