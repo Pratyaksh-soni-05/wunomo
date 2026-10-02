@@ -113,14 +113,20 @@ export default function HomePage() {
       ? "Nothing's running. Start a project and hire the employees it needs."
       : "No one's working right now.";
   } else {
-    let statusLine: string;
+    // No status line at all when employees are working and nothing needs
+    // you -- "N employees are working on M projects" already states that
+    // things are moving; appending "Everything's moving." on top of it is
+    // filler restating the sentence just before it. The other two cases
+    // still get their own line: "needs you" is new information the first
+    // sentence doesn't carry, and "nothing needs you" is a real, distinct
+    // fact when nothing is currently working either (e.g. only a blocked
+    // or just-finished task keeps this page off the zero state).
+    let statusLine = "";
     if (needsYouTasks.length > 0) {
       const n = needsYouTasks.length;
-      statusLine = `${capitalize(spellCount(n))} thing${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} you.`;
-    } else if (workingTasks.length > 0) {
-      statusLine = "Everything's moving.";
-    } else {
-      statusLine = "Nothing needs you right now.";
+      statusLine = ` ${capitalize(spellCount(n))} thing${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} you.`;
+    } else if (workingTasks.length === 0) {
+      statusLine = " Nothing needs you right now.";
     }
 
     const employeeWord = workingAgentCount === 1 ? "employee" : "employees";
@@ -128,7 +134,7 @@ export default function HomePage() {
     const projectWord = activeProjectCount === 1 ? "project" : "projects";
     headline =
       `${capitalize(spellCount(workingAgentCount))} ${employeeWord} ${employeeVerb} working on ` +
-      `${spellCount(activeProjectCount)} ${projectWord}. ${statusLine}`;
+      `${spellCount(activeProjectCount)} ${projectWord}.${statusLine}`;
   }
 
   return (

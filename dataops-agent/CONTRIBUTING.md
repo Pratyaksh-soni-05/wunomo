@@ -44,3 +44,15 @@ commit them to the wrong branch.
 
 Seeding a RUNNING task in tests: the live Celery beat reaps plain RUNNING
 tasks within a minute. Use a PAUSED_* status or stop celery_beat first.
+
+Seeding a SUPERVISOR_RUNNING task for UI verification: it needs a real
+TaskStep row (step_index=0, status=RUNNING) in the same seed, or
+`current_step` comes back null and the step line falls back to "Waiting
+to start" while the badge still says "running" — a visibly contradictory
+render that looks like a real bug but is only a seeding gap. The real
+orchestration path (`modules/orchestration/supervisor.py`) always creates
+the TaskStep in the same commit as the Task, before the status ever
+flips to SUPERVISOR_RUNNING (see `_run_ready_wave`), so this combination
+can't happen against real data — confirmed from code, not just assumed,
+after exactly this contradiction showed up in seeded Command Center
+screenshots (2026-10-02).
