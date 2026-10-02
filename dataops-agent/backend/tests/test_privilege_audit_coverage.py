@@ -58,8 +58,9 @@ async def _add_member(tenant_id: str, role: str) -> tuple[str, str]:
 # ── 1. team.role_changed ───────────────────────────────────────────────────
 
 async def test_role_change_writes_an_audit_row_with_old_and_new_role(client):
-    owner_token, tenant_id, owner_id, _ = await _register(client, "rolechange")
-    member_id, _ = await _add_member(tenant_id, "data_analyst")
+    owner_token, tenant_id, owner_id, owner_email = await _register(client, "rolechange")
+    member_id, member_email = await _add_member(tenant_id, "data_analyst")
+    assert owner_email != member_email  # the actor/resource assertions below must not be able to pass by confusing the two
 
     r = await client.patch(
         f"/api/v1/team/members/{member_id}/role", json={"role": "data_engineer"},
@@ -70,6 +71,7 @@ async def test_role_change_writes_an_audit_row_with_old_and_new_role(client):
     rows = await _audit_rows(tenant_id, "team.role_changed")
     assert len(rows) == 1
     row = rows[0]
+    assert row.actor == owner_email  # the caller, never the target -- member_email asserted distinct above
     assert row.resource_type == "user" and row.resource_id == member_id
     assert row.payload["old_role"] == "data_analyst"
     assert row.payload["new_role"] == "data_engineer"
@@ -78,8 +80,9 @@ async def test_role_change_writes_an_audit_row_with_old_and_new_role(client):
 # ── 2. team.member_removed ────────────────────────────────────────────────
 
 async def test_member_removal_writes_an_audit_row_with_removed_role(client):
-    owner_token, tenant_id, owner_id, _ = await _register(client, "memberremove")
-    member_id, _ = await _add_member(tenant_id, "viewer")
+    owner_token, tenant_id, owner_id, owner_email = await _register(client, "memberremove")
+    member_id, member_email = await _add_member(tenant_id, "viewer")
+    assert owner_email != member_email  # the actor/resource assertions below must not be able to pass by confusing the two
 
     r = await client.delete(
         f"/api/v1/team/members/{member_id}", headers={"Authorization": f"Bearer {owner_token}"},
@@ -89,6 +92,7 @@ async def test_member_removal_writes_an_audit_row_with_removed_role(client):
     rows = await _audit_rows(tenant_id, "team.member_removed")
     assert len(rows) == 1
     row = rows[0]
+    assert row.actor == owner_email  # the caller, never the target -- member_email asserted distinct above
     assert row.resource_type == "user" and row.resource_id == member_id
     assert row.payload["removed_role"] == "viewer"
 
@@ -96,7 +100,7 @@ async def test_member_removal_writes_an_audit_row_with_removed_role(client):
 # ── 3. auth.session_revoked ───────────────────────────────────────────────
 
 async def test_revoke_current_session_writes_an_audit_row(client):
-    owner_token, tenant_id, owner_id, _ = await _register(client, "revokecurrent")
+    owner_token, tenant_id, owner_id, owner_email = await _register(client, "revokecurrent")
 
     r = await client.post(
         "/api/v1/auth/revoke", json={"scope": "current"},
@@ -107,6 +111,7 @@ async def test_revoke_current_session_writes_an_audit_row(client):
     rows = await _audit_rows(tenant_id, "auth.session_revoked")
     assert len(rows) == 1
     row = rows[0]
+    assert row.actor == owner_email  # actor and resource are both the caller for a self-service revoke
     assert row.resource_type == "user" and row.resource_id == owner_id
     assert row.payload["scope"] == "current"
 
@@ -114,7 +119,7 @@ async def test_revoke_current_session_writes_an_audit_row(client):
 # ── 4. auth.all_sessions_revoked ──────────────────────────────────────────
 
 async def test_revoke_all_sessions_writes_an_audit_row(client):
-    owner_token, tenant_id, owner_id, _ = await _register(client, "revokeall")
+    owner_token, tenant_id, owner_id, owner_email = await _register(client, "revokeall")
 
     r = await client.post(
         "/api/v1/auth/revoke", json={"scope": "all"},
@@ -125,6 +130,7 @@ async def test_revoke_all_sessions_writes_an_audit_row(client):
     rows = await _audit_rows(tenant_id, "auth.all_sessions_revoked")
     assert len(rows) == 1
     row = rows[0]
+    assert row.actor == owner_email  # actor and resource are both the caller for a self-service revoke
     assert row.resource_type == "user" and row.resource_id == owner_id
     assert row.payload["scope"] == "all"
 
@@ -132,7 +138,7 @@ async def test_revoke_all_sessions_writes_an_audit_row(client):
 # ── 5. api_key.created ────────────────────────────────────────────────────
 
 async def test_api_key_create_writes_an_audit_row_with_no_key_material(client):
-    owner_token, tenant_id, owner_id, _ = await _register(client, "apikeycreate")
+    owner_token, tenant_id, owner_id, owner_email = await _register(client, "apikeycreate")
 
     r = await client.post(
         "/api/v1/api-keys/", json={"name": "CI pipeline key"},
@@ -146,6 +152,7 @@ async def test_api_key_create_writes_an_audit_row_with_no_key_material(client):
     rows = await _audit_rows(tenant_id, "api_key.created")
     assert len(rows) == 1
     row = rows[0]
+    assert row.actor == owner_email  # the caller who made the request
     assert row.resource_type == "api_key" and row.resource_id == key_id
     assert row.payload == {"name": "CI pipeline key"}
 
@@ -157,7 +164,7 @@ async def test_api_key_create_writes_an_audit_row_with_no_key_material(client):
 # ── 6. api_key.revoked ────────────────────────────────────────────────────
 
 async def test_api_key_revoke_writes_an_audit_row(client):
-    owner_token, tenant_id, owner_id, _ = await _register(client, "apikeyrevoke")
+    owner_token, tenant_id, owner_id, owner_email = await _register(client, "apikeyrevoke")
 
     created = await client.post(
         "/api/v1/api-keys/", json={"name": "to be revoked"},
@@ -173,4 +180,5 @@ async def test_api_key_revoke_writes_an_audit_row(client):
     rows = await _audit_rows(tenant_id, "api_key.revoked")
     assert len(rows) == 1
     row = rows[0]
+    assert row.actor == owner_email  # the caller who made the request
     assert row.resource_type == "api_key" and row.resource_id == key_id
