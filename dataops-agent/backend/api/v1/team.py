@@ -175,6 +175,7 @@ async def change_member_role(
             if await _active_owner_count(db, caller["tenant_id"], exclude_user_id=target.id) == 0:
                 raise HTTPException(status_code=400, detail="Cannot demote the last owner")
 
+        old_role = target.role  # before the mutation below -- the audit payload needs both
         target.role = body.role
         # Item #13: promotion into owner/admin starts the MFA enrolment grace
         # clock from now, not from the account's creation date -- an old
@@ -184,6 +185,19 @@ async def change_member_role(
             target.mfa_required_since = _dt.utcnow()
         await db.commit()
 
+    # Found 2026-10-01 (privilege-events audit sweep follow-up to the
+    # identity-creation/linking one): role changes had no audit row at all.
+    # After commit, own session -- see the identity-audit PR's
+    # _provision_sso_user for why this isn't atomic with the row above and
+    # why that's accepted here (log_action's own swallowed-exception
+    # behaviour is unchanged, deliberately not gating this action on it).
+    from modules.governance.audit_trail import AuditTrail
+    await AuditTrail(caller["tenant_id"]).log_action(
+        actor=caller["email"], action="team.role_changed",
+        resource_type="user", resource_id=user_id,
+        payload={"old_role": old_role, "new_role": body.role},
+    )
+
     # Revoke every token this member currently holds. get_current_user already
     # re-reads `role` per request, so their capabilities drop immediately even
     # without this — but that only covers callers who go through it. Bumping the
@@ -191,6 +205,8 @@ async def change_member_role(
     # fresh login so the new role is reflected in the token itself rather than
     # being silently patched over on every request. Automatic on purpose:
     # revocation an admin has to remember is revocation that does not happen.
+    # No separate audit row for this -- it's a side effect of the role
+    # change above, not an independent action.
     from services.token_revocation import bump_epoch
     await bump_epoch(user_id)
     return {"message": "Role updated", "id": user_id, "role": body.role}
@@ -232,12 +248,22 @@ async def remove_team_member(
             if await _active_owner_count(db, caller["tenant_id"], exclude_user_id=target.id) == 0:
                 raise HTTPException(status_code=400, detail="Cannot remove the last owner")
 
+        removed_role = target.role  # before is_active flips below
         target.is_active = False
         await db.commit()
 
+    # Found 2026-10-01, same sweep as the role-change audit call above.
+    from modules.governance.audit_trail import AuditTrail
+    await AuditTrail(caller["tenant_id"]).log_action(
+        actor=caller["email"], action="team.member_removed",
+        resource_type="user", resource_id=user_id,
+        payload={"removed_role": removed_role},
+    )
+
     # Same reasoning as the demotion path: is_active=False already blocks them
     # at get_current_user, but the epoch bump kills the token everywhere,
-    # including before authentication runs.
+    # including before authentication runs. No separate audit row for this --
+    # a side effect of the removal above, not an independent action.
     from services.token_revocation import bump_epoch
     await bump_epoch(user_id)
     return {"message": "Member removed", "id": user_id}

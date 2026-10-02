@@ -177,6 +177,16 @@ async def revoke_tokens(body: RevokeRequest, user=Depends(get_current_user)):
 
     if body.scope == "current":
         await revoke_jti(user.get("jti"), user.get("exp"))
+        # Found 2026-10-01, privilege-events audit sweep: self-service
+        # revocation had no audit row at all. After the revoke, own session
+        # (see the identity-audit PR for why this isn't atomic and why
+        # that's accepted here -- unchanged log_action, not gated on).
+        from modules.governance.audit_trail import AuditTrail
+        await AuditTrail(user["tenant_id"]).log_action(
+            actor=user["email"], action="auth.session_revoked",
+            resource_type="user", resource_id=user["sub"],
+            payload={"scope": body.scope},
+        )
         return {"revoked": "current_session"}
 
     if body.scope != "all":
@@ -186,6 +196,12 @@ async def revoke_tokens(body: RevokeRequest, user=Depends(get_current_user)):
         )
 
     epoch = await bump_epoch(user["sub"])
+    from modules.governance.audit_trail import AuditTrail
+    await AuditTrail(user["tenant_id"]).log_action(
+        actor=user["email"], action="auth.all_sessions_revoked",
+        resource_type="user", resource_id=user["sub"],
+        payload={"scope": body.scope},
+    )
     return {"revoked": "all_sessions", "epoch": epoch}
 
 
