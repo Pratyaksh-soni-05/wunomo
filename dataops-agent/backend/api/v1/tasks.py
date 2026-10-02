@@ -313,6 +313,14 @@ def _serialize_task_summary(task: Task) -> dict:
         "status": task.status.value,
         "plan_edited": bool(task.plan_edited),
         "created_at": task.created_at.isoformat() if task.created_at else None,
+        # Command Center (blueprint §05): "Just finished" needs to sort and
+        # filter by real completion recency ("if nothing happened in the
+        # last 24h, it's not on this page") without an N+1 GET /{id} per
+        # completed task. Same precedent as agent_id above (Wunomo UI-rebuild
+        # slice 5) -- the column has existed on Task since Phase 0, this
+        # serializer just never surfaced it because no list-view consumer
+        # needed it yet. Null for every non-terminal or non-completed task.
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     }
 
 

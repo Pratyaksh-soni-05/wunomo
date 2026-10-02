@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ad-hoc live-verification screenshots (Playwright etc.) -- never committed
+/_shots/

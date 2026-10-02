@@ -1,32 +1,60 @@
 "use client";
 
+// Command Center (blueprint §05, build 2026-09-30). Replaces the old plain
+// "Welcome back" + project grid at /home -- /dashboard (pipeline/quality-
+// centric, unrailed, reachable via ⌘K) is untouched and stays where it is.
+//
+// Governing rule taken directly from the build brief: "if nothing has
+// happened to it in the last 24 hours, it is not on this page." Shipped as
+// six parallel useQuery calls, no aggregating endpoint -- confirmed neither
+// the blueprint nor DESIGN_SPEC.md actually specs a GET /workspace/live
+// anywhere (grepped both directly; zero matches).
+//
+// Three fixed decisions applied, not re-litigated:
+//   - No "Hours given back" card -- no real benchmark-minutes data exists
+//     anywhere in this product to compute it honestly.
+//   - "Working now" names the current step only (liveWorkStepLine) --
+//     never a bare percentage or spinner. ActiveTaskRailItem has no
+//     units_total/units_done to drive a real progress bar.
+//   - No "Last 24 hours ▾" range dropdown from the mock: there is no second
+//     honest range to switch to without new backend support, and a
+//     dropdown with exactly one working option is the same kind of fake
+//     control this codebase's own "never fabricate" rule forbids.
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardBody, Button, Skeleton } from "@/components/ui";
-import { ICON_NEW_PROJECT } from "@/components/shell/navItems";
-import { formatApiDateOnly } from "@/lib/dates";
-import { useProjectScope } from "@/lib/projectScope";
-import { getToken, decodeUserFromToken, listProjects } from "@/lib/api";
+import { Button, Skeleton } from "@/components/ui";
+import { NeedsYouStrip } from "@/components/dashboard/NeedsYouStrip";
+import { WorkingNowList } from "@/components/dashboard/WorkingNowList";
+import { SpendCycleCard } from "@/components/dashboard/SpendCycleCard";
+import { JustFinishedCard } from "@/components/dashboard/JustFinishedCard";
+import { ProjectStatusStrip } from "@/components/dashboard/ProjectStatusStrip";
+import { RUNNING_STATUSES } from "@/lib/activeTaskDisplay";
+import {
+  getToken, decodeUserFromToken,
+  getActiveTasks, getTasks, listAgents, listProjects, getUsage, getCurrentPlan,
+} from "@/lib/api";
 
-// Real agent count + real, de-duplicated source count, both from the same
-// resolver every Workbench surface reads (lib/projectScope.ts, slice 6a) --
-// no aggregate endpoint exists yet for either, source count especially,
-// which is why this is still an N-of-N nested fetch under the hood.
-// Accepted for now given the small project/agent counts expected at this
-// stage; logged as a real backend gap, not silently absorbed:
-// WALKTHROUGH_FINDINGS_2026-08.md item 92 (GET /api/v1/projects/summary).
-function ProjectCardStats({ token, projectId }: { token: string; projectId: string }) {
-  const { agentCount, sourceIds, loading } = useProjectScope(token, projectId);
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-  if (loading && agentCount === 0) return <Skeleton style={{ height: 14, width: 100 }} />;
+// §05's own copy spells small counts out ("One employee is working on one
+// project. One thing needs you.") rather than leading with a bare digit --
+// applied only to the header line's small, human-scale counts (employees/
+// projects/pending items), never to data-table-scale numbers elsewhere on
+// the page (credit counts, task counts) where a numeral is the right read.
+const SMALL_NUMBERS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
+function spellCount(n: number): string {
+  return n <= 10 ? SMALL_NUMBERS[n] : String(n);
+}
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
-  return (
-    <span className="text-muted text-xs">
-      {agentCount} agent{agentCount === 1 ? "" : "s"}
-      {" · "}
-      {loading ? "…" : `${sourceIds.size} source${sourceIds.size === 1 ? "" : "s"}`}
-    </span>
-  );
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
 }
 
 export default function HomePage() {
@@ -35,67 +63,134 @@ export default function HomePage() {
   const user = decodeUserFromToken(token);
   const displayName = user?.email ? user.email.split("@")[0] : "there";
 
+  const activeTasksQuery = useQuery({ queryKey: ["active-tasks"], queryFn: () => getActiveTasks(token) });
+  const tasksQuery = useQuery({ queryKey: ["tasks"], queryFn: () => getTasks(token) });
+  const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: () => listAgents(token) });
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: () => listProjects(token) });
+  const usageQuery = useQuery({ queryKey: ["billing-usage"], queryFn: () => getUsage(token) });
+  const planQuery = useQuery({ queryKey: ["billing-plan"], queryFn: () => getCurrentPlan(token) });
+
+  const activeTasks = useMemo(() => activeTasksQuery.data ?? [], [activeTasksQuery.data]);
+  const needsYouTasks = useMemo(
+    () => activeTasks.filter((t) => t.status === "paused_needs_approval"),
+    [activeTasks]
+  );
+  const workingTasks = useMemo(
+    () => activeTasks.filter((t) => RUNNING_STATUSES.has(t.status)),
+    [activeTasks]
+  );
+
+  const agentsById = useMemo(
+    () => new Map((agentsQuery.data?.agents ?? []).map((a) => [a.id, a])),
+    [agentsQuery.data]
+  );
+
+  const justFinished = useMemo(() => {
+    const cutoff = Date.now() - DAY_MS;
+    return (tasksQuery.data ?? [])
+      .filter((t) => t.status === "completed" && t.completed_at)
+      .filter((t) => new Date(t.completed_at as string).getTime() >= cutoff)
+      .sort((a, b) => new Date(b.completed_at as string).getTime() - new Date(a.completed_at as string).getTime())
+      .slice(0, 6);
+  }, [tasksQuery.data]);
+
+  const isLoading = activeTasksQuery.isLoading || tasksQuery.isLoading || projectsQuery.isLoading;
+
+  const workingAgentCount = new Set(workingTasks.map((t) => t.agent_id).filter(Boolean)).size;
+  const activeProjectCount = new Set(activeTasks.map((t) => t.project_id).filter(Boolean)).size;
   const projects = projectsQuery.data?.projects ?? [];
 
+  const nothingActive = activeTasks.length === 0 && justFinished.length === 0;
+
+  // Zero state: no tally to report, so don't report one -- "Zero employees
+  // are working on zero projects" counts nothing real. Two sub-cases
+  // (never had a project vs. has one but nothing's active right now), and
+  // never appended with a "needs you" status line -- that phrasing implies
+  // something might have needed you, which isn't true of an empty account.
+  let headline: string;
+  if (nothingActive) {
+    headline = projects.length === 0
+      ? "Nothing's running. Start a project and hire the employees it needs."
+      : "No one's working right now.";
+  } else {
+    // No status line at all when employees are working and nothing needs
+    // you -- "N employees are working on M projects" already states that
+    // things are moving; appending "Everything's moving." on top of it is
+    // filler restating the sentence just before it. The other two cases
+    // still get their own line: "needs you" is new information the first
+    // sentence doesn't carry, and "nothing needs you" is a real, distinct
+    // fact when nothing is currently working either (e.g. only a blocked
+    // or just-finished task keeps this page off the zero state).
+    let statusLine = "";
+    if (needsYouTasks.length > 0) {
+      const n = needsYouTasks.length;
+      statusLine = ` ${capitalize(spellCount(n))} thing${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} you.`;
+    } else if (workingTasks.length === 0) {
+      statusLine = " Nothing needs you right now.";
+    }
+
+    const employeeWord = workingAgentCount === 1 ? "employee" : "employees";
+    const employeeVerb = workingAgentCount === 1 ? "is" : "are";
+    const projectWord = activeProjectCount === 1 ? "project" : "projects";
+    headline =
+      `${capitalize(spellCount(workingAgentCount))} ${employeeWord} ${employeeVerb} working on ` +
+      `${spellCount(activeProjectCount)} ${projectWord}.${statusLine}`;
+  }
+
   return (
-    <div style={{ padding: "44px 24px 40px", maxWidth: 880, margin: "0 auto", width: "100%" }}>
-      <h1 className="font-display text-3xl">Welcome back, {displayName}</h1>
-      <p className="text-muted text-sm" style={{ margin: "6px 0 28px" }}>
-        Pick up a project, or start a new one and hire the team it needs.
-      </p>
-
-      <Card hover style={{ cursor: "pointer" }} onClick={() => router.push("/projects?new=1")}>
-        <CardBody className="flex items-center gap-3">
-          <span
-            style={{
-              width: 34, height: 34, borderRadius: "var(--radius)", background: "var(--surface-hover)",
-              border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center",
-              color: "var(--text-secondary)", flexShrink: 0,
-            }}
-          >
-            {ICON_NEW_PROJECT}
-          </span>
-          <div>
-            <div className="font-medium">Start a new project</div>
-            <div className="text-muted text-sm">Name it, describe the work, then hire the agents it needs.</div>
-          </div>
-        </CardBody>
-      </Card>
-
-      <div
-        className="text-muted text-xs"
-        style={{ textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, margin: "30px 0 12px" }}
-      >
-        Recent
+    <div style={{ padding: "44px 24px 56px", maxWidth: 1360, margin: "0 auto", width: "100%" }}>
+      <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
+        <div>
+          <h1 className="font-display text-3xl">{greeting()}, {displayName}</h1>
+          <p className="text-muted text-sm" style={{ margin: "6px 0 0" }}>
+            {isLoading ? "Loading your workspace…" : headline}
+          </p>
+        </div>
+        <Button onClick={() => router.push("/projects?new=1")}>New project</Button>
       </div>
 
-      {projectsQuery.isLoading ? (
-        <Skeleton style={{ height: 120, borderRadius: 12 }} />
-      ) : projects.length === 0 ? (
-        <p className="text-muted text-sm">No projects yet — start one above.</p>
-      ) : (
-        <div className="grid grid-3" style={{ gap: 12 }}>
-          {projects.map((p) => (
-            <Card key={p.id} hover style={{ cursor: "pointer" }} onClick={() => router.push(`/projects/${p.id}/chat`)}>
-              <CardBody>
-                <div className="font-display" style={{ fontSize: 16 }}>{p.name}</div>
-                <p className="text-muted text-sm" style={{ margin: "2px 0 16px", minHeight: 19 }}>
-                  {p.description || " "}
-                </p>
-                <div className="flex items-center justify-between">
-                  <ProjectCardStats token={token} projectId={p.id} />
-                  <span className="text-muted text-xs">Created {formatApiDateOnly(p.created_at)}</span>
+      {isLoading ? (
+        <Skeleton style={{ height: 300, borderRadius: 12 }} />
+      ) : nothingActive ? (
+        <div className="command-center-layout">
+          <div className="command-center-empty card">
+            {projects.length === 0 ? (
+              <>
+                <div className="command-center-empty-title">Nothing&apos;s running yet</div>
+                <div className="command-center-empty-body">
+                  Start a project and hire the employees it needs — their work will show up here the moment they start.
                 </div>
-              </CardBody>
-            </Card>
-          ))}
+                <Button onClick={() => router.push("/projects?new=1")}>Start a project</Button>
+              </>
+            ) : (
+              <>
+                <div className="command-center-empty-title">Nothing&apos;s running right now</div>
+                <div className="command-center-empty-body">
+                  Nothing&apos;s active and nothing finished in the last 24 hours. Open a project and give an employee a goal.
+                </div>
+                <Button onClick={() => router.push("/projects")}>Go to a project</Button>
+              </>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="command-center-layout">
+          <NeedsYouStrip tasks={needsYouTasks} />
+          <div className="command-center-main-row">
+            <div className="command-center-main">
+              <WorkingNowList tasks={workingTasks} />
+              <ProjectStatusStrip activeTasks={activeTasks} />
+            </div>
+            <div className="command-center-side">
+              <SpendCycleCard
+                credits={usageQuery.data?.usage.ai_credits ?? null}
+                planName={planQuery.data?.plan ?? null}
+              />
+              <JustFinishedCard tasks={justFinished} agentsById={agentsById} />
+            </div>
+          </div>
         </div>
       )}
-
-      <div style={{ marginTop: 32 }}>
-        <Button variant="text" onClick={() => router.push("/dashboard")}>Workspace health</Button>
-      </div>
     </div>
   );
 }

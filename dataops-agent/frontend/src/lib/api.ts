@@ -1626,6 +1626,8 @@ export interface TaskSummary {
   status: string;
   plan_edited: boolean;
   created_at: string | null;
+  // Command Center (blueprint §05) -- null for every non-completed task.
+  completed_at: string | null;
 }
 
 export function getTasks(token: string): Promise<TaskSummary[]> {
@@ -1730,13 +1732,17 @@ export function advanceTask(token: string, id: string): Promise<TaskItem & { adv
   return request(`/api/v1/tasks/${id}/advance`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
 }
 
-export function resumeTask(token: string, id: string, notes = ""): Promise<TaskItem> {
+// resume_outcome/reject_outcome are real fields on every response (the
+// backend always embeds `{**_serialize_task(...), "resume_outcome": result}`)
+// -- previously untyped here, which is how a no-op 200 (outcome:
+// "no_blocked_step") went unnoticed. See lib/resumeOutcome.ts.
+export function resumeTask(token: string, id: string, notes = ""): Promise<TaskItem & { resume_outcome: { outcome: string } }> {
   return request(`/api/v1/tasks/${id}/resume`, {
     method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ notes }),
   });
 }
 
-export function rejectTaskStep(token: string, id: string, notes = ""): Promise<TaskItem> {
+export function rejectTaskStep(token: string, id: string, notes = ""): Promise<TaskItem & { reject_outcome: { outcome: string } }> {
   return request(`/api/v1/tasks/${id}/reject-step`, {
     method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ notes }),
   });

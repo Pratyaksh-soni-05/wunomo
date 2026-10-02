@@ -1,6 +1,6 @@
 export { Button } from "./Button";
 export { Card, CardHeader, CardBody, CardFooter } from "./Card";
-export { Badge } from "./Badge";
+export { Badge, type BadgeVariant } from "./Badge";
 export { Input, Select } from "./Input";
 export { Table, Thead, Tbody, Tr, Th, Td } from "./Table";
 export { Modal } from "./Modal";
