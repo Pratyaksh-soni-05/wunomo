@@ -34,6 +34,13 @@ remains the fast per-push check and runs only the two guard tests. Running
 the whole suite locally is still useful for risky changes but is slow on a
 database with accumulated data.
 
+## Secret scanning
+
+If secret-scan fails on your PR: remove the secret. If it is a verified
+false positive, add that exact fingerprint to `.gitleaksignore` with a
+comment saying why, and say so in the PR description. Never add path or
+wildcard rules.
+
 ## Workflow
 
 Before switching branches, run `git status` and commit or stash uncommitted

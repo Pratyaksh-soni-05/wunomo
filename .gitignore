@@ -39,3 +39,20 @@ marketing-site/.next/
 .next/
 *.tsbuildinfo
 next-env.d.ts
+
+# Secrets hygiene scan (2026-10-03, docs/context/GOTCHAS.md): dataops-agent/
+# and frontend/ each ignore their own .env already, but nothing at the repo
+# root caught a .env created outside those two directories, or a
+# non-.local environment-suffixed file (.env.production, .env.staging)
+# anywhere -- confirmed both gaps directly with git check-ignore against
+# throwaway probe files before adding this. The .example templates must
+# stay tracked, hence the negated re-includes below.
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Private keys / certificates, any depth -- frontend/.gitignore already had
+# *.pem, backend had neither; nothing at root covered either one.
+*.pem
+*.key
