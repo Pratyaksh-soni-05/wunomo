@@ -82,6 +82,15 @@ jobs:
 
   secret-scan:
     runs-on: ubuntu-latest
+    # This repo's default workflow token is read-only (checked via
+    # GET /repos/.../actions/permissions/workflow) -- without this,
+    # gitleaks-action's own PR-comment step fails on every pull_request
+    # trigger with "Resource not accessible by integration" (confirmed
+    # live on this job's first run, 2026-10-03). contents:read matches
+    # the checkout above; pull-requests:write is only for that comment.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
