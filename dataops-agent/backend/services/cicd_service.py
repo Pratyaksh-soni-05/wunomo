@@ -1,5 +1,5 @@
-import hmac
-import hashlib
+import asyncio
+import secrets as _secrets
 import structlog
 from datetime import datetime, timezone
 from typing import Optional
@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
+from config import settings
 from models.cicd import PipelineCommit, PipelineDeployment, CICDStatus
 from models.all_models import Pipeline, PipelineStatus
 from schemas.cicd import GitHubWebhookPayload
@@ -30,14 +31,67 @@ def is_pipeline_file(filename: str) -> bool:
     return any(pattern in lower for pattern in PIPELINE_FILE_PATTERNS)
 
 
-async def verify_github_signature(payload_bytes: bytes, signature_header: str, secret: str) -> bool:
-    """Verify GitHub HMAC SHA-256 webhook signature."""
-    if not signature_header or not signature_header.startswith("sha256="):
-        return False
-    expected = "sha256=" + hmac.new(
-        secret.encode(), payload_bytes, hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(expected, signature_header)
+async def resolve_pipeline_for_webhook(pipeline_id: str) -> Optional[dict]:
+    """Admin-role, single-row, read-only lookup by primary key -- the one
+    legitimate place this route needs cross-tenant visibility, since the
+    whole point is finding out which tenant a pipeline belongs to before
+    any tenant context exists to scope a normal session with. Same
+    ADMIN_DATABASE_URL maintenance-role pattern services/audit_anchor.py
+    already uses (not a new one), and used for nothing but this one read --
+    every other query in the webhook's own request path runs after
+    async_tenant_context(tenant_id) is established from what this returns,
+    through the normal dataops_app role.
+
+    Returns {"tenant_id": str, "secret": str | None} or None if no pipeline
+    with this id exists at all. The secret is already decrypted -- this is
+    the one place outside the ORM allowed to touch that column's ciphertext.
+    """
+    def _sync_lookup():
+        from sqlalchemy import create_engine, text
+        engine = create_engine(settings.ADMIN_DATABASE_URL)
+        try:
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT tenant_id, webhook_secret FROM pipelines WHERE id = :pid"),
+                    {"pid": pipeline_id},
+                ).first()
+        finally:
+            engine.dispose()
+        if row is None:
+            return None
+        tenant_id, raw_secret = row
+        secret = None
+        if raw_secret:
+            from services.encryption_service import decrypt_config, is_encrypted
+            if is_encrypted(raw_secret):
+                secret = decrypt_config(raw_secret).get("secret")
+        return {"tenant_id": tenant_id, "secret": secret}
+
+    return await asyncio.to_thread(_sync_lookup)
+
+
+async def generate_or_rotate_webhook_secret(
+    db: AsyncSession, tenant_id: str, pipeline_id: str,
+) -> Optional[str]:
+    """Generates a new random secret for this pipeline's webhook, replacing
+    any existing one outright -- rotation invalidates the old value
+    immediately, there is no dual-secret grace window. Returns the new
+    PLAINTEXT secret, the only time it is ever available in plaintext
+    again (the caller must return it to the user once and never log or
+    store it elsewhere). Returns None if no pipeline with this id exists
+    for this tenant -- the caller's own tenant-scoped session already
+    enforces that via RLS; this function trusts the session it is given.
+    """
+    result = await db.execute(
+        select(Pipeline).where(Pipeline.id == pipeline_id, Pipeline.tenant_id == tenant_id)
+    )
+    pipeline = result.scalar_one_or_none()
+    if pipeline is None:
+        return None
+    new_secret = _secrets.token_urlsafe(32)
+    pipeline.webhook_secret = {"secret": new_secret}
+    await db.commit()
+    return new_secret
 
 
 async def create_pipeline_commit(
