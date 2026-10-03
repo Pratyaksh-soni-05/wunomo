@@ -1,0 +1,32 @@
+# Secrets hygiene scan, 2026-10-03 (docs/context/GOTCHAS.md has the full
+# writeup). Every entry below was investigated individually and confirmed
+# to be either an intentionally-public/throwaway value or a false positive
+# -- not a real credential. Fingerprints only (commit:file:rule:line), no
+# path or wildcard rules, so a NEW secret added later to any of these same
+# files still gets caught.
+
+# CI-only Fernet key for encryption_service.py's tests. The workflow's own
+# adjacent comment says it outright: "not a secret in any sense that
+# matters, discarded with the job." Never reused outside this ephemeral
+# CI container.
+1290b61322091816939b46ed6ad27b2704b1aabd:.github/workflows/full-suite.yml:generic-api-key:80
+
+# Alembic migration revision-ID hex strings quoted in prose about
+# migration-chain drift (e.g. "b7e2f4a91c33") -- not a credential.
+ba5a135eeb6481f3885ca02c7dfe44932b2a3cf4:docs/context/GOTCHAS.md:generic-api-key:198
+
+# Same migration-chain-drift passage as the GOTCHAS.md entry above, from an
+# earlier revision of the same doc (Pratyaksh's copy before it was merged).
+2058a4b25dd9133d7ed66a4992bd65a3fa04cefa:docs/context/GOTCHAS.md:generic-api-key:86
+
+# _TEST_FALLBACK_KEY: a deterministic key the file's own comment calls
+# "intentionally-public," used only when APP_ENV=="test". Every other
+# environment raises EncryptionKeyMissingError instead of falling back to
+# it -- confirmed by reading _fernet() directly.
+a18407c914a111ded31e88726bede8db7d18be29:dataops-agent/backend/services/encryption_service.py:generic-api-key:45
+
+# Fake "wun_..." API key values in a static HTML design-prototype file's
+# mock data (an API Keys settings-page mockup). Not a real provider key
+# format, not wired to anything live. Covers both key literals on this
+# line (identical fingerprint for both).
+7815223d47c9451a780bb4c128546cc5829d3f5b:dataops-agent/frontend/wunomo-ai MASTER DESIGN.html:generic-api-key:2487

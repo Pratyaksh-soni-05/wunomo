@@ -79,3 +79,24 @@ jobs:
 
       - name: Run the two standing guard tests
         run: python -m pytest tests/test_rls_coverage_guard.py tests/test_celery_tenant_context_guard.py -v
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history, not just the PR diff -- a secret
+          # introduced on an earlier commit of the same branch and "fixed"
+          # on a later one would otherwise never be seen.
+
+      # Pinned to the v3.0.0 release commit, not a floating @v2/@v3 tag --
+      # a tag can be moved to point at different code later; a commit SHA
+      # can't. Secrets hygiene scan, 2026-10-03 (see docs/context/GOTCHAS.md).
+      # If this repo ever moves from a personal account to an organization
+      # account, gitleaks-action requires a GITLEAKS_LICENSE secret (free at
+      # gitleaks.io) -- personal accounts, which this is today, need none.
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}

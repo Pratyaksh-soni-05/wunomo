@@ -285,7 +285,7 @@ async function main() {
   console.log("\n== Demo state ready ==");
   console.log(`Tenant:        ${TENANT_NAME}  (${tenantId})`);
   console.log(`Login email:   ${EMAIL}`);
-  console.log(`Login password:${PASSWORD}`);
+  console.log("Login password: set via DEMO_PASSWORD (not printed).");
   console.log(`Healthy pipeline: Sales Ingestion Pipeline  (${salesPipelineId})`);
   console.log(`Broken pipeline:  HR Sync Pipeline  (${hrPipelineId})`);
   console.log(`Broken source:    Employee Records  (${hrSource.source_id})`);
