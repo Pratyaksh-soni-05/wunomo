@@ -20,7 +20,7 @@ from models.cicd import PipelineCommit, PipelineDeployment, CICDStatus, GateDeci
 from services.cicd_service import resolve_pipeline_for_webhook
 from services.tenant_context import async_tenant_context
 from services.webhook_security import (
-    enforce_body_size, verify_signature, check_replay, WebhookRejected,
+    enforce_cheap_rejections, verify_signature, check_replay, WebhookRejected,
 )
 
 log = structlog.get_logger()
@@ -141,6 +141,7 @@ async def github_webhook_retired():
 
 @router.post("/webhook/{pipeline_id}", response_model=WebhookResponse)
 async def github_webhook(pipeline_id: str, request: Request,
+    db: AsyncSession = Depends(get_db),
     x_github_event: Optional[str] = Header(None),
     x_hub_signature_256: Optional[str] = Header(None),
     x_github_delivery: Optional[str] = Header(None),
@@ -149,9 +150,18 @@ async def github_webhook(pipeline_id: str, request: Request,
     delivery_id = x_github_delivery or "missing"
 
     try:
-        enforce_body_size(raw_body)
+        # Cheap, database-free rejections first: malformed/missing
+        # signature header shape, oversized body, missing delivery id.
+        # None of these need to know whether the pipeline even exists.
+        enforce_cheap_rejections(raw_body, x_hub_signature_256, x_github_delivery)
 
-        resolved = await resolve_pipeline_for_webhook(pipeline_id)
+        # The one cross-tenant read on this path -- through the normal
+        # pooled async session, as the normal dataops_app role, via a
+        # SECURITY DEFINER function scoped to exactly two columns for
+        # exactly one row (see cicd_service.resolve_pipeline_for_webhook's
+        # own docstring). No ADMIN_DATABASE_URL, no BYPASSRLS connection,
+        # anywhere on this request path.
+        resolved = await resolve_pipeline_for_webhook(db, pipeline_id)
         if resolved is None or not resolved.get("secret"):
             # Same rejection, same log reason-string shape, whether the
             # pipeline doesn't exist or just has no secret generated yet --

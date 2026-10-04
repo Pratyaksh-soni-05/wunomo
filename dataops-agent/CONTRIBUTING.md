@@ -63,3 +63,29 @@ flips to SUPERVISOR_RUNNING (see `_run_ready_wave`), so this combination
 can't happen against real data — confirmed from code, not just assumed,
 after exactly this contradiction showed up in seeded Command Center
 screenshots (2026-10-02).
+
+## Connecting GitHub (CI/CD webhook)
+
+Security Master Ranking Item #16. Each pipeline has its own webhook
+secret — there is no single, shared secret for the whole deployment.
+
+1. Generate the secret: `POST /api/v1/pipelines/{pipeline_id}/webhook-secret`
+   (requires the `pipelines.create` capability — Owner/Admin/Data Engineer,
+   not Viewer). The response's `webhook_secret` field is shown exactly
+   once; it is never retrievable again afterward. Calling this a second
+   time rotates the secret and invalidates the old value immediately.
+2. In the repository's GitHub settings → Webhooks → Add webhook:
+   - **Payload URL**: `https://<your-host>/api/v1/cicd/webhook/{pipeline_id}`
+     (the same `webhook_secret` response includes this exact URL).
+   - **Content type**: `application/json`.
+   - **Secret**: the generated value from step 1.
+   - **Which events**: `push` (`event = push`) — nothing else is handled.
+   - **SSL verification**: on. Leave it on; this endpoint does not exist
+     to be reachable over plaintext.
+3. Existing pipelines created before this fix have no secret yet — their
+   webhook is refused (the identical generic 401 every other rejection
+   reason gets) until step 1 is run for them.
+
+The old, global `POST /api/v1/cicd/webhook` (no pipeline id) is retired
+and returns 410 — it is not a fallback for a pipeline with no secret
+configured.

@@ -4,6 +4,7 @@ from typing import Optional
 from croniter import croniter
 from .auth import get_current_user, require_permission, enforce_quota
 from modules.orchestration.dag_manager import DAGManager
+from schemas.cicd import WebhookSecretResponse
 
 router = APIRouter()
 
@@ -89,7 +90,7 @@ async def update_pipeline(pipeline_id: str, req: PipelineUpdate,
     return result
 
 
-@router.post("/{pipeline_id}/webhook-secret")
+@router.post("/{pipeline_id}/webhook-secret", response_model=WebhookSecretResponse)
 async def generate_pipeline_webhook_secret(
     pipeline_id: str, user=Depends(require_permission("pipelines.create")),
 ):

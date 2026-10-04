@@ -124,7 +124,10 @@ async def test_tampered_body_is_rejected_with_401(client):
 
     r = await client.post(
         f"/api/v1/cicd/webhook/{pipeline_id}", content=tampered_body,
-        headers={"X-Hub-Signature-256": signature, "Content-Type": "application/json"},
+        headers={
+            "X-Hub-Signature-256": signature, "X-GitHub-Delivery": str(uuid.uuid4()),
+            "Content-Type": "application/json",
+        },
     )
     assert r.status_code == 401
     assert await _commit_count(tenant_id, pipeline_id) == 0
@@ -197,6 +200,30 @@ async def test_wrong_signature_prefix_is_rejected(client):
     assert await _commit_count(tenant_id, pipeline_id) == 0
 
 
+# ── 4b. Missing delivery id ─────────────────────────────────────────────────
+
+async def test_missing_delivery_id_is_rejected_before_any_database_access(client, monkeypatch):
+    """A well-formed, correctly-signed request with no X-GitHub-Delivery
+    header at all is rejected outright -- GitHub always sends this header
+    in practice, and accepting a request that omits it would mean replay
+    protection could never apply to that caller, for free. Also proves
+    this check runs before resolve_pipeline_for_webhook: patch it to
+    raise if ever called, and confirm it never is."""
+    import api.v1.cicd as cicd_module
+
+    async def _fail_if_called(*a, **k):
+        raise AssertionError("resolve_pipeline_for_webhook must not run before the cheap rejections")
+    monkeypatch.setattr(cicd_module, "resolve_pipeline_for_webhook", _fail_if_called)
+
+    body = _push_body()
+    r = await client.post(
+        f"/api/v1/cicd/webhook/{uuid.uuid4()}", content=body,
+        headers={"X-Hub-Signature-256": "sha256=" + "0" * 64, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 401
+    assert r.json() == {"detail": "Invalid webhook request."}
+
+
 # ── 5. No secret configured ─────────────────────────────────────────────────
 
 async def test_pipeline_with_no_secret_configured_is_refused(client):
@@ -207,7 +234,10 @@ async def test_pipeline_with_no_secret_configured_is_refused(client):
     body = _push_body()
     r = await client.post(
         f"/api/v1/cicd/webhook/{pipeline_id}", content=body,
-        headers={"X-Hub-Signature-256": "sha256=" + "0" * 64, "Content-Type": "application/json"},
+        headers={
+            "X-Hub-Signature-256": "sha256=" + "0" * 64, "X-GitHub-Delivery": str(uuid.uuid4()),
+            "Content-Type": "application/json",
+        },
     )
     assert r.status_code == 401
     assert r.json() == {"detail": "Invalid webhook request."}, (
@@ -220,7 +250,10 @@ async def test_pipeline_with_no_secret_configured_is_refused(client):
 async def test_unknown_pipeline_id_gets_the_identical_401_body(client):
     r = await client.post(
         f"/api/v1/cicd/webhook/{uuid.uuid4()}", content=_push_body(),
-        headers={"X-Hub-Signature-256": "sha256=" + "0" * 64, "Content-Type": "application/json"},
+        headers={
+            "X-Hub-Signature-256": "sha256=" + "0" * 64, "X-GitHub-Delivery": str(uuid.uuid4()),
+            "Content-Type": "application/json",
+        },
     )
     assert r.status_code == 401
     assert r.json() == {"detail": "Invalid webhook request."}
@@ -249,6 +282,65 @@ async def test_replayed_delivery_id_is_rejected_on_the_second_call(client):
     )
     assert r2.status_code == 401
     assert await _commit_count(tenant_id, pipeline_id) == 1, "the replay must not create a second commit"
+
+
+# ── 6b. Redis down during the replay check: fails OPEN, signature is still the gate ──
+
+async def test_redis_down_during_replay_check_still_accepts_a_valid_signature(client, monkeypatch):
+    """check_replay fails OPEN on a Redis outage (RedisError/OSError only)
+    -- by the time it runs, verify_signature has already succeeded, so a
+    genuinely valid, correctly-signed delivery must still go through
+    rather than being lost to an unrelated infrastructure outage."""
+    import services.webhook_security as wh
+
+    async def _raise_redis_error(*a, **k):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        raise RedisConnectionError("simulated Redis outage")
+    monkeypatch.setattr(wh, "_redis", lambda: type("Fake", (), {"set": _raise_redis_error})())
+
+    token, tenant_id, _ = await _register(client, "redisdown1")
+    pipeline_id = await _create_pipeline(client, token)
+    secret_info = await _generate_secret(client, token, pipeline_id)
+
+    body = _push_body()
+    r = await client.post(
+        f"/api/v1/cicd/webhook/{pipeline_id}", content=body,
+        headers={
+            "X-Hub-Signature-256": _sign(body, secret_info["webhook_secret"]),
+            "X-GitHub-Delivery": str(uuid.uuid4()), "Content-Type": "application/json",
+        },
+    )
+    assert r.status_code == 200, (
+        f"a valid signed delivery must still succeed during a Redis outage -- got {r.status_code}: {r.text}"
+    )
+    assert await _commit_count(tenant_id, pipeline_id) == 1
+
+
+async def test_redis_down_during_replay_check_still_rejects_an_invalid_signature(client, monkeypatch):
+    """The other half of the same control: Redis being down must never
+    let an INVALID signature through -- fail-open applies only to the
+    replay check, never to verify_signature itself."""
+    import services.webhook_security as wh
+
+    async def _raise_redis_error(*a, **k):
+        from redis.exceptions import ConnectionError as RedisConnectionError
+        raise RedisConnectionError("simulated Redis outage")
+    monkeypatch.setattr(wh, "_redis", lambda: type("Fake", (), {"set": _raise_redis_error})())
+
+    token, tenant_id, _ = await _register(client, "redisdown2")
+    pipeline_id = await _create_pipeline(client, token)
+    await _generate_secret(client, token, pipeline_id)
+
+    body = _push_body()
+    r = await client.post(
+        f"/api/v1/cicd/webhook/{pipeline_id}", content=body,
+        headers={
+            "X-Hub-Signature-256": "sha256=" + "0" * 64,
+            "X-GitHub-Delivery": str(uuid.uuid4()), "Content-Type": "application/json",
+        },
+    )
+    assert r.status_code == 401, "an invalid signature must stay rejected even during a Redis outage"
+    assert await _commit_count(tenant_id, pipeline_id) == 0
 
 
 # ── 7. Cross-pipeline isolation ──────────────────────────────────────────────
@@ -403,3 +495,61 @@ async def test_rotation_audit_row_has_no_secret_in_its_payload(client):
     assert row.resource_type == "pipeline" and row.resource_id == pipeline_id
     payload_str = str(row.payload)
     assert secret_info["webhook_secret"] not in payload_str
+
+
+# ── End-to-end argument seam (added per explicit instruction, overriding ────
+#    the earlier "fast-follow" default): a correctly signed delivery goes
+#    through the real handler; run_ci_pipeline.delay is never actually
+#    reached by .delay() in a test (no task_always_eager is set anywhere
+#    in this codebase, so .delay() only enqueues to the real broker) --
+#    this test captures exactly the arguments the handler passed to it,
+#    then runs the real task body with those same arguments directly,
+#    bypassing the broker. Proves the handler-to-task seam itself, not
+#    merely that each half works against its own hand-picked arguments. ──
+
+async def test_signed_delivery_arguments_let_run_ci_pipeline_find_the_commit(client, monkeypatch):
+    import asyncio
+    from services import cicd_tasks
+    from models.cicd import CICDStatus
+
+    captured = {}
+
+    def _capture_delay(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(cicd_tasks.run_ci_pipeline, "delay", _capture_delay)
+
+    token, tenant_id, _ = await _register(client, "argseam")
+    pipeline_id = await _create_pipeline(client, token)
+    secret_info = await _generate_secret(client, token, pipeline_id)
+
+    body = _push_body()
+    r = await client.post(
+        f"/api/v1/cicd/webhook/{pipeline_id}", content=body,
+        headers={
+            "X-Hub-Signature-256": _sign(body, secret_info["webhook_secret"]),
+            "X-GitHub-Delivery": str(uuid.uuid4()), "Content-Type": "application/json",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert "args" in captured, "run_ci_pipeline.delay was never called by the handler"
+    commit_id, task_tenant_id = captured["args"]
+    assert task_tenant_id == tenant_id
+
+    # The real task body, run with exactly the arguments the handler
+    # actually passed -- bypassing the broker (asyncio.to_thread, same
+    # reason test_celery_tenant_context_guard.py's own live test needs it:
+    # the task calls asyncio.run() internally, which raises if invoked
+    # from a loop that's already running).
+    await asyncio.to_thread(cicd_tasks.run_ci_pipeline.run, commit_id, task_tenant_id)
+
+    async with tenant_session(tenant_id) as db:
+        result = await db.execute(select(PipelineCommit).where(PipelineCommit.id == commit_id))
+        refreshed = result.scalar_one()
+    assert refreshed.ci_status != CICDStatus.pending, (
+        "run_ci_pipeline, called with exactly the arguments the webhook "
+        "handler passed to .delay(), never found its own commit row -- "
+        "the handler-to-task argument seam is broken even though each "
+        "half passes its own isolated test"
+    )

@@ -16,6 +16,7 @@ import hmac
 from typing import Optional
 
 from redis import asyncio as aioredis
+from redis.exceptions import RedisError
 import structlog
 
 from config import settings
@@ -52,12 +53,36 @@ def enforce_body_size(raw_body: bytes) -> None:
         raise WebhookRejected("body_too_large")
 
 
+def check_signature_header_shape(signature_header: Optional[str]) -> None:
+    """Pure shape check, no secret needed -- factored out so the cheap,
+    database-free rejection pass below and verify_signature (which does
+    need the secret) share one definition of "malformed" rather than two
+    that could drift."""
+    if not signature_header or not signature_header.startswith("sha256="):
+        raise WebhookRejected("missing_or_malformed_signature_header")
+
+
+def enforce_cheap_rejections(
+    raw_body: bytes, signature_header: Optional[str], delivery_id: Optional[str],
+) -> None:
+    """Every rejection that needs neither a database round trip nor the
+    per-pipeline secret, checked first so a malformed, oversized, or
+    clearly-non-GitHub request never costs a query. A missing delivery id
+    is rejected here (not silently tolerated) -- GitHub always sends
+    X-GitHub-Delivery in practice, and accepting a request that omits it
+    would mean replay protection could never apply to that caller at all,
+    for free, which is a worse trade than a flat rejection."""
+    check_signature_header_shape(signature_header)
+    enforce_body_size(raw_body)
+    if not delivery_id:
+        raise WebhookRejected("missing_delivery_id")
+
+
 def verify_signature(raw_body: bytes, signature_header: Optional[str], secret: str) -> None:
     """Must be called with the RAW bytes read off the request, before any
     JSON parsing -- verifying a re-serialized body would validate a
     signature against bytes GitHub never actually signed."""
-    if not signature_header or not signature_header.startswith("sha256="):
-        raise WebhookRejected("missing_or_malformed_signature_header")
+    check_signature_header_shape(signature_header)
     expected = "sha256=" + hmac.new(
         secret.encode("utf-8"), raw_body, hashlib.sha256
     ).hexdigest()
@@ -88,19 +113,31 @@ async def check_replay(delivery_id: Optional[str]) -> None:
     """Raises WebhookRejected if this exact X-GitHub-Delivery id was
     already processed within REPLAY_TTL_SECONDS.
 
-    A missing delivery id is NOT rejected on its own -- GitHub always sends
-    one in practice, but treating "no id, so dedup can't run" as a hard
-    failure would make this check load-bearing for every delivery; the
-    signature remains the real gate either way, this only narrows the
-    window a captured-and-replayed valid signature stays useful.
+    A missing delivery id is NOT rejected here -- the route's own
+    enforce_cheap_rejections already turns that into a hard 401 before
+    this is ever reached. This defensive no-op stays for any other
+    caller of this function that doesn't go through that pre-check.
+
+    Fails OPEN on Redis specifically (RedisError/OSError only, never a
+    bare except): by the time this runs, verify_signature has already
+    succeeded, so the real gate has already held. Losing replay
+    protection for the duration of a Redis outage is a smaller risk than
+    rejecting every legitimate CI delivery until Redis recovers -- see
+    docs/context/GOTCHAS.md's Item #16 entry for the full reasoning and
+    what a replay would actually do during that window (a duplicate
+    PipelineCommit row and a redundant CI run, not a cross-tenant write).
     """
     if not delivery_id:
         return
-    redis = _redis()
-    key = f"{_REPLAY_KEY_PREFIX}:{delivery_id}"
-    # SET ... NX is atomic — only the first caller to reach this exact key
-    # gets a True back, so two near-simultaneous deliveries with the same
-    # id can't both slip through a non-atomic "check then set".
-    first_seen = await redis.set(key, "1", nx=True, ex=REPLAY_TTL_SECONDS)
+    try:
+        redis = _redis()
+        key = f"{_REPLAY_KEY_PREFIX}:{delivery_id}"
+        # SET ... NX is atomic — only the first caller to reach this exact
+        # key gets a True back, so two near-simultaneous deliveries with
+        # the same id can't both slip through a non-atomic "check then set".
+        first_seen = await redis.set(key, "1", nx=True, ex=REPLAY_TTL_SECONDS)
+    except (RedisError, OSError) as exc:
+        log.warning("cicd.webhook_replay_check_unavailable", delivery_id=delivery_id, error=str(exc))
+        return
     if not first_seen:
         raise WebhookRejected("replay")
