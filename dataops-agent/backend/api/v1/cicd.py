@@ -20,7 +20,8 @@ from models.cicd import PipelineCommit, PipelineDeployment, CICDStatus, GateDeci
 from services.cicd_service import resolve_pipeline_for_webhook
 from services.tenant_context import async_tenant_context
 from services.webhook_security import (
-    enforce_cheap_rejections, verify_signature, check_replay, WebhookRejected,
+    enforce_cheap_rejections, verify_signature, check_replay, release_replay,
+    WebhookRejected, ReplayCheckUnavailable,
 )
 
 log = structlog.get_logger()
@@ -173,67 +174,94 @@ async def github_webhook(pipeline_id: str, request: Request,
     except WebhookRejected as exc:
         log.warning("cicd.webhook_rejected", delivery_id=delivery_id, reason=exc.reason, pipeline_id=pipeline_id)
         raise _webhook_rejected()
+    except ReplayCheckUnavailable as exc:
+        # Fails CLOSED, deliberately -- see ReplayCheckUnavailable's own
+        # docstring. 503, not 401: a different kind of fact (our
+        # infrastructure, not the caller's request), and GitHub redelivers
+        # on its own once this clears, so nothing is lost.
+        log.warning("cicd.webhook_replay_check_unavailable", delivery_id=delivery_id, pipeline_id=pipeline_id, error=str(exc))
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable. Please retry.")
 
     tenant_id = resolved["tenant_id"]
 
-    # Everything below runs under this pipeline's own, now-verified tenant
-    # -- never under anything a header or query param claimed.
-    async with async_tenant_context(tenant_id):
-        payload = GitHubPushPayload.model_validate_json(raw_body)
+    # Ping (sent once, when the webhook is first created in GitHub's UI)
+    # and any event other than push: acknowledged, never processed.
+    # Checked BEFORE parsing as a push payload -- GitHubPushPayload's
+    # required fields (ref/after/repository.clone_url) don't exist on a
+    # ping body at all, which would otherwise surface as an unhandled 500
+    # instead of a clean 200.
+    if x_github_event and x_github_event != "push":
+        return WebhookResponse(message=f"Ignored event type: {x_github_event}", ci_task_queued=False)
 
-        if x_github_event and x_github_event != "push":
-            return WebhookResponse(message=f"Ignored event type: {x_github_event}", ci_task_queued=False)
+    try:
+        # Everything below runs under this pipeline's own, now-verified
+        # tenant -- never under anything a header or query param claimed.
+        # Wrapped so ANY failure from here on (a malformed-but-signed
+        # payload, a DB error, anything) releases the replay key
+        # check_replay already set -- otherwise a GitHub redelivery of
+        # this exact push (same X-GitHub-Delivery) would be rejected as a
+        # replay for the rest of REPLAY_TTL_SECONDS even though nothing
+        # was ever actually persisted for it.
+        async with async_tenant_context(tenant_id):
+            payload = GitHubPushPayload.model_validate_json(raw_body)
 
-        raw = payload.model_dump()
-        changed = get_changed_files(raw)
-        pipeline_files_changed = [f for f in changed if is_pipeline_file(f)]
-        if changed and not pipeline_files_changed:
+            raw = payload.model_dump()
+            changed = get_changed_files(raw)
+            pipeline_files_changed = [f for f in changed if is_pipeline_file(f)]
+            if changed and not pipeline_files_changed:
+                return WebhookResponse(
+                    message="No pipeline definition files changed — CI skipped",
+                    ci_task_queued=False,
+                )
+
+            branch         = raw.get("ref", "").replace("refs/heads/", "")
+            commit_sha     = raw.get("after", "")
+            author         = (raw.get("pusher") or {}).get("name", "unknown")
+            repo_url       = (raw.get("repository") or {}).get("clone_url", "")
+            commit_message = raw.get("commits", [{}])[-1].get("message", "") if raw.get("commits") else ""
+
+            import uuid
+            async with AsyncSessionLocal() as inner_db:
+                commit = PipelineCommit(
+                    id=str(uuid.uuid4()),
+                    tenant_id=tenant_id,
+                    pipeline_id=pipeline_id,
+                    commit_sha=commit_sha,
+                    branch=branch,
+                    author=author,
+                    repo_url=repo_url,
+                    changed_files=changed,
+                    commit_message=commit_message,
+                    ci_status=CICDStatus.pending,
+                    check_results={},
+                    risk_score=0.0,
+                )
+                inner_db.add(commit)
+                await inner_db.commit()
+                await inner_db.refresh(commit)
+
+            log.info("cicd.webhook_received", commit_id=commit.id, sha=commit_sha[:8], pipeline_id=pipeline_id, delivery_id=delivery_id)
+
+            task_queued = False
+            try:
+                from services.cicd_tasks import run_ci_pipeline
+                run_ci_pipeline.delay(commit.id, tenant_id)
+                task_queued = True
+            except Exception as e:
+                log.warning("cicd.task_queue_failed", error=str(e))
+
             return WebhookResponse(
-                message="No pipeline definition files changed — CI skipped",
-                ci_task_queued=False,
+                message="Webhook received — CI pipeline queued",
+                commit_id=commit.id,
+                ci_task_queued=task_queued,
             )
-
-        branch         = raw.get("ref", "").replace("refs/heads/", "")
-        commit_sha     = raw.get("after", "")
-        author         = (raw.get("pusher") or {}).get("name", "unknown")
-        repo_url       = (raw.get("repository") or {}).get("clone_url", "")
-        commit_message = raw.get("commits", [{}])[-1].get("message", "") if raw.get("commits") else ""
-
-        import uuid
-        async with AsyncSessionLocal() as db:
-            commit = PipelineCommit(
-                id=str(uuid.uuid4()),
-                tenant_id=tenant_id,
-                pipeline_id=pipeline_id,
-                commit_sha=commit_sha,
-                branch=branch,
-                author=author,
-                repo_url=repo_url,
-                changed_files=changed,
-                commit_message=commit_message,
-                ci_status=CICDStatus.pending,
-                check_results={},
-                risk_score=0.0,
-            )
-            db.add(commit)
-            await db.commit()
-            await db.refresh(commit)
-
-        log.info("cicd.webhook_received", commit_id=commit.id, sha=commit_sha[:8], pipeline_id=pipeline_id, delivery_id=delivery_id)
-
-        task_queued = False
-        try:
-            from services.cicd_tasks import run_ci_pipeline
-            run_ci_pipeline.delay(commit.id, tenant_id)
-            task_queued = True
-        except Exception as e:
-            log.warning("cicd.task_queue_failed", error=str(e))
-
-        return WebhookResponse(
-            message="Webhook received — CI pipeline queued",
-            commit_id=commit.id,
-            ci_task_queued=task_queued,
-        )
+    except Exception:
+        # The PipelineCommit insert above either never ran or never
+        # committed -- release the replay key so a GitHub redelivery of
+        # this exact push is accepted rather than rejected as a replay
+        # for something that was never actually recorded.
+        await release_replay(x_github_delivery)
+        raise
 
 
 # ─── Commits ─────────────────────────────────────────────────────────────────

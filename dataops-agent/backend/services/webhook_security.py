@@ -4,11 +4,14 @@ GitHub CI/CD webhook (Security Master Ranking Item #16).
 Secrets are per-pipeline, never global -- see api/v1/cicd.py's own webhook
 docstring for why a single shared secret is wrong for this product
 specifically (every tenant who connects a repo would hold a value capable
-of forging another tenant's deployment events). Every rejection path here
-raises the same exception type; the route catches it once and returns the
-identical generic body regardless of which reason fired, so a caller can
-never learn from the response alone whether a pipeline exists, has a
-secret configured, or just failed the signature check.
+of forging another tenant's deployment events). Every WebhookRejected
+reason gets the identical generic 401 body from the route, so a caller
+can never learn from the response alone whether a pipeline exists, has a
+secret configured, or just failed the signature check. ReplayCheckUnavailable
+is the one deliberate exception to "identical body": Redis being down is
+a 503, not a 401, because it is a different kind of fact (infrastructure,
+not the caller's own request) and fails CLOSED -- see
+ReplayCheckUnavailable's own docstring for why.
 """
 import asyncio
 import hashlib
@@ -109,23 +112,34 @@ def _redis() -> aioredis.Redis:
     return _redis_client
 
 
+class ReplayCheckUnavailable(Exception):
+    """Raised when check_replay cannot reach Redis at all. The route turns
+    this into a 503 (generic body, no mention of Redis) rather than
+    treating "no replay protection available" as "let it through".
+
+    Reversed from an earlier fail-open design once it became clear what a
+    replay actually does downstream: a successfully-processed push can
+    reach services/cicd_deployment.py's deploy_pipeline (a real
+    activate_pipeline call, a second PipelineDeployment superseding the
+    first) -- not a cheaply-repeatable action like a token check, and not
+    recoverable by just trying again. Failing closed here is recoverable
+    the other way instead: GitHub redelivers on its own, and this request
+    is simply rejected (503, not the signature's own 401) until Redis is
+    back. See docs/context/GOTCHAS.md's Item #16 entry for the full
+    fail-open-vs-fail-closed principle this follows.
+    """
+
+
 async def check_replay(delivery_id: Optional[str]) -> None:
-    """Raises WebhookRejected if this exact X-GitHub-Delivery id was
-    already processed within REPLAY_TTL_SECONDS.
+    """Raises WebhookRejected("replay") if this exact X-GitHub-Delivery id
+    was already processed within REPLAY_TTL_SECONDS. Raises
+    ReplayCheckUnavailable if Redis itself cannot be reached -- never
+    silently treats that as "no replay possible, proceed".
 
     A missing delivery id is NOT rejected here -- the route's own
     enforce_cheap_rejections already turns that into a hard 401 before
     this is ever reached. This defensive no-op stays for any other
     caller of this function that doesn't go through that pre-check.
-
-    Fails OPEN on Redis specifically (RedisError/OSError only, never a
-    bare except): by the time this runs, verify_signature has already
-    succeeded, so the real gate has already held. Losing replay
-    protection for the duration of a Redis outage is a smaller risk than
-    rejecting every legitimate CI delivery until Redis recovers -- see
-    docs/context/GOTCHAS.md's Item #16 entry for the full reasoning and
-    what a replay would actually do during that window (a duplicate
-    PipelineCommit row and a redundant CI run, not a cross-tenant write).
     """
     if not delivery_id:
         return
@@ -137,7 +151,27 @@ async def check_replay(delivery_id: Optional[str]) -> None:
         # the same id can't both slip through a non-atomic "check then set".
         first_seen = await redis.set(key, "1", nx=True, ex=REPLAY_TTL_SECONDS)
     except (RedisError, OSError) as exc:
-        log.warning("cicd.webhook_replay_check_unavailable", delivery_id=delivery_id, error=str(exc))
-        return
+        raise ReplayCheckUnavailable(str(exc)) from exc
     if not first_seen:
         raise WebhookRejected("replay")
+
+
+async def release_replay(delivery_id: Optional[str]) -> None:
+    """Deletes the replay-dedup key for this delivery id. Called when
+    something fails AFTER check_replay has already marked the id seen but
+    BEFORE the resulting PipelineCommit is actually persisted -- without
+    this, a GitHub redelivery of the exact same push (same
+    X-GitHub-Delivery, which is what a redelivery is) would be rejected
+    as a replay for the rest of REPLAY_TTL_SECONDS even though nothing
+    was ever actually recorded for it.
+
+    Best-effort: a failure here is logged, never raised -- letting a
+    release failure mask the real error that triggered it would be worse
+    than just leaving the key in place for this one delivery.
+    """
+    if not delivery_id:
+        return
+    try:
+        await _redis().delete(f"{_REPLAY_KEY_PREFIX}:{delivery_id}")
+    except (RedisError, OSError) as exc:
+        log.warning("cicd.webhook_replay_release_failed", delivery_id=delivery_id, error=str(exc))
