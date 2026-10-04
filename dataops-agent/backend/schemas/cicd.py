@@ -92,3 +92,12 @@ class WebhookResponse(BaseModel):
     message: str
     commit_id: Optional[UUID] = None
     ci_task_queued: bool = False
+
+
+class WebhookSecretResponse(BaseModel):
+    """The plaintext secret appears here exactly once -- this response is
+    the only place it is ever returned decrypted. No GET endpoint, log
+    line, or audit payload may carry it."""
+    pipeline_id: UUID
+    webhook_secret: str
+    webhook_url: str
