@@ -31,7 +31,9 @@ NEXT instance of this exact shape impossible to miss for free, on every
 test run, not to certify correctness of the policy itself.
 """
 import inspect
+import io
 import re
+import tokenize
 
 import pytest
 
@@ -57,6 +59,55 @@ ALLOWLISTED_TASKS = {
 }
 
 TENANT_CONTEXT_MARKERS = ("tenant_context(", "async_tenant_context(", "with_tenant_context")
+
+
+def _strip_comments_and_strings(source: str) -> str:
+    """Found 2026-10-04 (Item #16 follow-up): the main check below used to
+    do a plain substring search over raw source text, which a comment
+    mentioning "tenant_context(" -- explaining why a task does NOT need it,
+    say -- or a string literal containing the same text would satisfy
+    exactly as well as a real `with tenant_context(...):` statement. No
+    real task was ever caught by this (every one genuinely calls one of
+    the three markers for real -- see each test function below), but the
+    guard itself was gameable, which defeats its own point: a future task
+    with a comment-only mention would pass this guard while establishing
+    no real context at all.
+
+    Tokenizes the source and reproduces it with every COMMENT and STRING
+    token (which covers docstrings -- Python has no separate docstring
+    token) blanked out, so a marker only counts when it appears in actual
+    code: a name followed by `(`, or (for `with_tenant_context`, used as a
+    decorator/bare name rather than a call) a bare name token. NAME/OP
+    tokens -- the only place a real call or decorator can appear -- are
+    left untouched.
+    """
+    out = []
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(source).readline)
+        for tok_type, tok_string, _, _, _ in tokens:
+            if tok_type in (tokenize.COMMENT, tokenize.STRING):
+                continue
+            out.append(tok_string)
+    except tokenize.TokenError:
+        # A snippet that doesn't tokenize cleanly on its own (e.g. a
+        # function body dedented without its def) falls back to the raw
+        # text rather than silently returning an empty, always-failing
+        # string -- same fail-loud-not-silent standard as the rest of this
+        # file's checks.
+        return source
+    # No separator: a real call's NAME and "(" tokens are adjacent in the
+    # original source (tenant_context(...), not tenant_context (...), and
+    # the old substring check already required that exact adjacency) --
+    # joining with "" preserves that, where joining with a space would
+    # silently break every real match this guard exists to find.
+    return "".join(out)
+
+
+def _establishes_tenant_context(combined_source: str) -> bool:
+    """The real check, now against code with comments and string literals
+    removed -- see _strip_comments_and_strings' docstring for why."""
+    code_only = _strip_comments_and_strings(combined_source)
+    return any(marker in code_only for marker in TENANT_CONTEXT_MARKERS)
 
 
 def _discover_registered_tasks():
@@ -128,7 +179,7 @@ def test_every_registered_celery_task_establishes_tenant_context_or_is_allowlist
         if name in ALLOWLISTED_TASKS:
             continue
         combined = _same_module_helper_source(fn)
-        if not any(marker in combined for marker in TENANT_CONTEXT_MARKERS):
+        if not _establishes_tenant_context(combined):
             violations.append(
                 f"{name} ({fn.__module__}.{fn.__qualname__}): no "
                 f"tenant_context/async_tenant_context/with_tenant_context found "
@@ -165,4 +216,134 @@ def test_allowlist_entries_are_still_real_and_still_justify_their_exemption():
         "anchor_audit_chains's allowlist reason (reads via ADMIN_DATABASE_URL "
         "as the maintenance role) no longer matches its source -- re-examine "
         "whether it still needs the exemption"
+    )
+
+
+# ── Guard-hardening negative control (2026-10-04, Item #16 follow-up) ──────
+#
+# Investigated whether cicd.run_ci_pipeline (services/cicd_tasks.py) was a
+# 7th instance of this exact bug shape. It is not: it genuinely wraps its
+# whole body in `with tenant_context(tenant_id):` (cicd_tasks.py:338-340),
+# confirmed by reading the function in full, not a partial read that
+# stopped before that line. So there is no real "pre-fix run_ci_pipeline"
+# to demonstrate this against -- the two tests below instead prove the
+# guard's OWN detection logic directly, with synthetic source snippets
+# standing in for "a task that looks covered but isn't": the comment-only
+# case is exactly the shape a future task could ship with and still pass
+# the naive substring check this guard used to run.
+
+_COMMENT_ONLY_SNIPPET = '''
+def fake_task(tenant_id):
+    # NOTE: older versions of this task called tenant_context(tenant_id)
+    # here, but it turned out to be unnecessary for this query -- removed.
+    return query_something(tenant_id)
+'''
+
+_DOCSTRING_ONLY_SNIPPET = '''
+def fake_task(tenant_id):
+    """Establishes tenant context via async_tenant_context() before doing
+    any real work."""
+    return query_something(tenant_id)
+'''
+
+_REAL_CALL_SNIPPET = '''
+def fake_task(tenant_id):
+    with tenant_context(tenant_id):
+        return query_something(tenant_id)
+'''
+
+
+def _naive_pre_hardening_check(combined_source: str) -> bool:
+    """Reproduces exactly what this guard's main check did before the
+    2026-10-04 hardening: a plain substring search over the raw,
+    unstripped source. Kept here only to prove the negative control below
+    -- the real guard never calls this."""
+    return any(marker in combined_source for marker in TENANT_CONTEXT_MARKERS)
+
+
+def test_naive_substring_check_is_fooled_by_a_comment_or_docstring():
+    """The negative control: shows the OLD approach (still available as
+    _naive_pre_hardening_check, reproduced verbatim from the pre-hardening
+    source) would have wrongly accepted both synthetic snippets below as
+    'establishes tenant context', despite neither one actually calling
+    anything. This is the exact gameability the hardening closes."""
+    assert _naive_pre_hardening_check(_COMMENT_ONLY_SNIPPET) is True, (
+        "negative control itself is broken: the naive check should wrongly "
+        "accept a comment-only mention, demonstrating the bug it has"
+    )
+    assert _naive_pre_hardening_check(_DOCSTRING_ONLY_SNIPPET) is True, (
+        "negative control itself is broken: the naive check should wrongly "
+        "accept a docstring-only mention, demonstrating the bug it has"
+    )
+
+
+def test_hardened_check_rejects_a_comment_or_docstring_but_accepts_a_real_call():
+    """Passing half of the same negative control: the hardened
+    _establishes_tenant_context (comments/strings stripped via tokenize)
+    correctly rejects both snippets above, and still accepts the one with
+    a genuine `with tenant_context(...):` statement -- proving the fix
+    doesn't just reject everything."""
+    assert _establishes_tenant_context(_COMMENT_ONLY_SNIPPET) is False
+    assert _establishes_tenant_context(_DOCSTRING_ONLY_SNIPPET) is False
+    assert _establishes_tenant_context(_REAL_CALL_SNIPPET) is True
+
+
+@pytest.mark.asyncio
+async def test_run_ci_pipeline_genuinely_establishes_tenant_context_live():
+    """Live proof, not just a source-text check, that cicd.run_ci_pipeline
+    (the task the Item #16 webhook fix queues) actually scopes its queries
+    to the right tenant: seed a real commit for a real tenant, call the
+    task's own function directly (bypassing Celery's broker, same pattern
+    test_cicd_no_duplicate_approval.py already uses), and confirm its
+    first query finds the row -- the exact failure mode
+    ("cicd.commit_not_found", a silent no-op) every other instance of this
+    bug shape in this codebase produces when context is missing."""
+    import asyncio
+    import uuid as _uuid
+    from httpx import AsyncClient, ASGITransport
+    import main as main_module
+    from models.cicd import PipelineCommit, CICDStatus
+    from services.tenant_context import tenant_session
+    from services import cicd_tasks
+
+    async with AsyncClient(transport=ASGITransport(app=main_module.app), base_url="http://test") as client:
+        reg = await client.post("/api/v1/auth/register", json={
+            "email": f"guardlive-{_uuid.uuid4().hex[:8]}@example.com",
+            "password": "test1234", "full_name": "Guard Live",
+            "tenant_name": f"Guard Live Corp {_uuid.uuid4().hex[:6]}",
+        })
+    tenant_id = reg.json()["tenant_id"]
+
+    commit_id = str(_uuid.uuid4())
+    async with tenant_session(tenant_id) as db:
+        commit = PipelineCommit(
+            id=commit_id, tenant_id=tenant_id, pipeline_id=None,
+            commit_sha="a" * 40, branch="main", author="guard-live-test",
+            repo_url="", changed_files=[], commit_message="guard live test",
+            ci_status=CICDStatus.pending, check_results={}, risk_score=0.0,
+        )
+        db.add(commit)
+        await db.commit()
+
+    # The real task function, called directly -- same pattern
+    # test_cicd_no_duplicate_approval.py already uses. Wrapped in
+    # to_thread because the task body calls asyncio.run() internally
+    # (cicd_tasks.py:340), which raises if invoked from a loop that's
+    # already running, exactly the one this test function is in.
+    await asyncio.to_thread(cicd_tasks.run_ci_pipeline.run, commit_id, tenant_id)
+
+    async with tenant_session(tenant_id) as db:
+        from sqlalchemy import select
+        result = await db.execute(select(PipelineCommit).where(PipelineCommit.id == commit_id))
+        refreshed = result.scalar_one()
+
+    # If tenant context had NOT been established, the task's own first
+    # query ("SELECT ... WHERE id = commit_id") would see zero rows under
+    # RLS and log cicd.commit_not_found, leaving ci_status stuck at
+    # "pending" forever. Reaching "running" or past it proves the task's
+    # query found the row -- context was real, not just textually present.
+    assert refreshed.ci_status != CICDStatus.pending, (
+        "run_ci_pipeline left ci_status at 'pending' -- its own first "
+        "query never found the commit, meaning tenant context was not "
+        "actually established despite the source-level check passing"
     )

@@ -213,6 +213,13 @@ class Pipeline(Base):
     retry_policy = Column(JSON, default=dict)
     tags = Column(JSON, default=list)
     version = Column(Integer, default=1)
+    # Security Master Ranking Item #16: per-pipeline GitHub webhook secret,
+    # {"secret": "<raw value>"}, encrypted at rest via EncryptedJSON (the
+    # same Fernet mechanism DataSource.connection_config already uses).
+    # NULL until a user generates one via POST .../webhook-secret -- a
+    # pipeline with no secret has its webhook refused, same generic 401 as
+    # a bad signature. Never returned decrypted by any GET.
+    webhook_secret = Column(EncryptedJSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     tenant = relationship("Tenant", back_populates="pipelines")

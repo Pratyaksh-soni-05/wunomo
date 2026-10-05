@@ -4,6 +4,7 @@ from typing import Optional
 from croniter import croniter
 from .auth import get_current_user, require_permission, enforce_quota
 from modules.orchestration.dag_manager import DAGManager
+from schemas.cicd import WebhookSecretResponse
 
 router = APIRouter()
 
@@ -87,6 +88,50 @@ async def update_pipeline(pipeline_id: str, req: PipelineUpdate,
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result
+
+
+@router.post("/{pipeline_id}/webhook-secret", response_model=WebhookSecretResponse)
+async def generate_pipeline_webhook_secret(
+    pipeline_id: str, user=Depends(require_permission("pipelines.create")),
+):
+    """Generates (or rotates) this pipeline's GitHub webhook secret --
+    Security Master Ranking Item #16. The raw secret is returned exactly
+    once, here; it is never retrievable again afterward (only its
+    encrypted form is stored, same mechanism as DataSource.connection_config
+    -- see models/all_models.py's EncryptedJSON). Rotating replaces the old
+    value outright: any delivery still configured with the previous secret
+    starts failing signature verification immediately, there is no overlap
+    window.
+
+    require_permission("pipelines.create") -- the same capability that
+    already governs every other pipeline-configuration change (PUT
+    /{pipeline_id}, PUT /{pipeline_id}/schedule); a Viewer cannot reach this.
+    """
+    from services.cicd_service import generate_or_rotate_webhook_secret
+    from database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        new_secret = await generate_or_rotate_webhook_secret(db, user["tenant_id"], pipeline_id)
+    if new_secret is None:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+
+    # Found 2026-10-04, Item #16 fix. Called here, not from
+    # cicd_service.generate_or_rotate_webhook_secret() itself, same reason
+    # api_keys.py calls AuditTrail from the router rather than
+    # api_key_service.py -- that function only has tenant_id/pipeline_id,
+    # not the caller's email every other audit call site uses as actor.
+    # pipeline_id only -- never the secret, raw or encrypted.
+    from modules.governance.audit_trail import AuditTrail
+    await AuditTrail(user["tenant_id"]).log_action(
+        actor=user["email"], action="pipeline.webhook_secret_rotated",
+        resource_type="pipeline", resource_id=pipeline_id, payload={},
+    )
+
+    return {
+        "pipeline_id": pipeline_id,
+        "webhook_secret": new_secret,
+        "webhook_url": f"/api/v1/cicd/webhook/{pipeline_id}",
+    }
 
 
 @router.delete("/{pipeline_id}")
