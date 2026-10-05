@@ -154,6 +154,13 @@ DELETION_PLAN = [
     # before every one of those parents, including the existing tasks
     # delete below.
     ("handoffs", None),
+    # outputs: same shape as handoffs -- its own tenant_id column, FKs to
+    # tasks/projects/agent_instances (all deleted later below), plus a
+    # self-referential supersedes_output_id (no ordering concern: the
+    # whole tenant's rows are removed in one DELETE statement, so a row
+    # pointing at a sibling also being deleted in the same statement is
+    # fine -- constraints are checked at statement end, not row-by-row).
+    ("outputs", None),
     ("channel_users", "channel_id = ANY(:CH)"),
     ("channel_agents", "channel_id = ANY(:CH) OR agent_id = ANY(:AG)"),
     ("project_agents", "project_id = ANY(:PR) OR agent_id = ANY(:AG)"),

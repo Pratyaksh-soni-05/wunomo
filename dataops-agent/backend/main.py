@@ -19,7 +19,7 @@ from api.v1 import (
     incidents, quality, governance, uploads,
     analytics, approvals, transformations,
     cicd, onboarding, catalog, team, billing, settings as settings_router,
-    api_keys, tasks, mfa, sso, agents, projects, channels,
+    api_keys, tasks, mfa, sso, agents, projects, channels, outputs,
 )
 
 
@@ -149,6 +149,7 @@ app.include_router(auth.router,            prefix="/api/v1/auth",            tag
 app.include_router(mfa.router,             prefix="/api/v1/auth/mfa",        tags=["MFA"])
 app.include_router(sso.router,             prefix="/api/v1/auth/sso",        tags=["SSO"])
 app.include_router(uploads.router,         prefix="/api/v1/uploads",         tags=["Uploads"])
+app.include_router(outputs.router,         prefix="/api/v1/outputs",         tags=["Outputs"])
 
 
 # Phase 2 — Core DataOps

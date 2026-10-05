@@ -1127,3 +1127,79 @@ class Handoff(Base):
     # CLAUDE.md Hard Rule 3) -- a Handoff is a normal application record,
     # not one of the cicd.py tables' documented timezone-aware exception.
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Output(Base):
+    """Blueprint §11 (Outputs): the record of a real file a task produced --
+    unblocks §11 itself, LiveWorkPanel's Files tab, §7.3.D's output card
+    (trust score), and "How this was made" (provenance), all four gated on
+    this one model not existing yet. Backend only this pass -- see
+    services/output_service.py for the real logic, no UI here.
+
+    tenant_id is a REAL FK (unlike this codebase's bare-tenant_id-by-
+    convention tables -- AuditLog, ChatMessage, ApprovalRequest), matching
+    the newer Wunomo-Projects-era precedent Project/AgentInstance/Handoff
+    already established: an Output is never write-critical the way an
+    audit/metering row is, it's a real artefact a UI will always display
+    scoped to a real, live tenant, so the stronger guarantee costs nothing.
+
+    No rows exist from any real tool yet -- confirmed by reading every
+    tool in agent/tools/*.py: export_dataset (reporting_tools.py) and
+    standardize_dataset (transformation_tools.py) are the only two with
+    any "produce an output file" framing, and both are permanent stubs
+    returning {"error": "not implemented..."} (see
+    docs/context/STATUS_TABLE.md's "22-site tool punch list" rows) --
+    nothing in this codebase writes real bytes to disk except the upload
+    endpoints (api/v1/uploads.py, api/v1/channels.py's upload_to_channel),
+    which register a DataSource, never an Output. The table is still
+    right to build now: four real surfaces are blocked on the model
+    existing, and the write side (OutputService.create_output) is a real,
+    tested function any future file-producing tool can call the day one
+    exists -- it does not need a live caller today to be correct."""
+    __tablename__ = "outputs"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    # Nullable: mirrors Handoff.project_id/Task's own looseness -- a task
+    # (and therefore what it produces) doesn't have to belong to a project.
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
+    # NOT NULL, unlike Task.agent_id/Handoff's historical nullability --
+    # both of those accommodate pre-existing rows from before agents were
+    # records at all; this is a brand-new table with no such history, and
+    # an Output genuinely cannot exist without a real producing task and a
+    # real acting agent.
+    task_id = Column(String, ForeignKey("tasks.id"), nullable=False, index=True)
+    agent_instance_id = Column(String, ForeignKey("agent_instances.id"), nullable=False, index=True)
+    filename = Column(String, nullable=False)
+    content_type = Column(String, nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    # Where the bytes actually live -- REUSES the one real storage
+    # mechanism this codebase has (api/v1/uploads.py's UPLOAD_DIR,
+    # modules/ingestion/connector_manager.py), the same convention
+    # DataSource.connection_config["file_path"] already uses: a full path
+    # string under UPLOAD_DIR, not a second storage path invented for
+    # this table. See services/output_service.py's module docstring for
+    # the full investigation.
+    storage_ref = Column(String, nullable=False)
+    # Version chain: v3 supersedes v2, v2 stays retrievable -- a new
+    # version is always a NEW row, never an UPDATE to an existing one.
+    # supersedes_output_id is self-referential and nullable (v1 of any
+    # chain supersedes nothing).
+    version = Column(Integer, nullable=False, default=1)
+    supersedes_output_id = Column(String, ForeignKey("outputs.id"), nullable=True)
+    # 0-100, NULL when there was nothing to aggregate (no quality rules
+    # configured for the producing pipeline) -- NEVER defaulted to 100 or
+    # 0 for that case. See services/output_service.py's compute_trust_score().
+    trust_score = Column(Float, nullable=True)
+    # One entry per aggregated check: [{"check": rule_name, "passed": bool,
+    # "message": human_readable_line}, ...] -- the same field shape
+    # QualityRuleEngine.run_checks()'s own `results` already returns, not
+    # a second shape invented for this column. NULL alongside trust_score
+    # when there was nothing to aggregate, [] is never used for "nothing
+    # to show" (NULL and [] would mean two different things to a future
+    # UI -- "no checks existed" vs. "checks existed and all were empty,"
+    # which can't actually happen, so [] is reserved rather than overloaded).
+    trust_checks = Column(JSON, nullable=True)
+    # Naive UTC, matching this codebase's convention outside cicd.py (see
+    # CLAUDE.md Hard Rule 3).
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
