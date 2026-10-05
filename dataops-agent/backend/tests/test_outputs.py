@@ -116,6 +116,66 @@ async def test_list_outputs_only_returns_this_tenants_rows(client):
     assert names == {"a.csv"}
 
 
+@pytest.mark.asyncio
+async def test_list_outputs_shows_latest_version_only(client):
+    """§11's own mock shows one row per filename, not one per version --
+    a superseded version must not clutter the main list, while staying
+    directly retrievable by id (get_output), proven separately by the
+    version-chain tests below."""
+    token, tenant_id, user_id = await _register(client, "latestonly")
+    agent_id = await _hire(client, token)
+    task_id = await _make_task(tenant_id, user_id, agent_id)
+    svc = OutputService(tenant_id)
+
+    v1 = await svc.create_output(
+        task_id=task_id, agent_instance_id=agent_id, filename="report.csv",
+        content_type="text/csv", size_bytes=10, storage_ref="/tmp/report_v1.csv",
+    )
+    v2 = await svc.create_output(
+        task_id=task_id, agent_instance_id=agent_id, filename="report.csv",
+        content_type="text/csv", size_bytes=10, storage_ref="/tmp/report_v2.csv",
+        supersedes_output_id=v1["id"],
+    )
+    # An unrelated, never-superseded output in the same tenant.
+    other = await svc.create_output(
+        task_id=task_id, agent_instance_id=agent_id, filename="other.csv",
+        content_type="text/csv", size_bytes=10, storage_ref="/tmp/other.csv",
+    )
+
+    listed = await svc.list_outputs()
+    listed_ids = {o["id"] for o in listed}
+    assert v1["id"] not in listed_ids  # superseded, excluded
+    assert v2["id"] in listed_ids      # latest in its chain, included
+    assert other["id"] in listed_ids   # unrelated, included
+
+    # v1 is still directly retrievable by id -- "stays retrievable."
+    assert await svc.get_output(v1["id"]) is not None
+
+
+@pytest.mark.asyncio
+async def test_list_and_get_resolve_agent_name_and_project_name(client):
+    """The list/detail views can't show "Made by Ravi" or a project
+    column off bare UUIDs -- real names, not raw ids."""
+    token, tenant_id, user_id = await _register(client, "names")
+    agent_id = await _hire(client, token, name="Ravi")
+    project = await client.post("/api/v1/projects/", json={"name": "Hiring wave"}, headers=_auth(token))
+    project_id = project.json()["id"]
+    task_id = await _make_task(tenant_id, user_id, agent_id)
+
+    created = await OutputService(tenant_id).create_output(
+        task_id=task_id, agent_instance_id=agent_id, filename="x.csv",
+        content_type="text/csv", size_bytes=10, storage_ref="/tmp/x.csv",
+        project_id=project_id,
+    )
+    assert created["agent_name"] == "Ravi"
+    assert created["employee_type"] == "dataops"
+    assert created["project_name"] == "Hiring wave"
+
+    listed = await OutputService(tenant_id).list_outputs()
+    assert listed[0]["agent_name"] == "Ravi"
+    assert listed[0]["project_name"] == "Hiring wave"
+
+
 # ── Version chain ────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -320,7 +380,7 @@ async def test_provenance_story_is_chronologically_ordered_across_all_sources(cl
             id=str(uuid.uuid4()), task_id=task_id, tenant_id=tenant_id, step_index=0,
             description="sync the finance source", source=TaskStepSource.LLM_PLANNED,
             tool_name="sync_source", tool_args={}, status=TaskStepStatus.SUCCEEDED,
-            approval_request_id=approval.id,
+            approval_request_id=approval.id, completed_at=now - timedelta(minutes=5),
         ))
         await db.commit()
 
@@ -338,7 +398,9 @@ async def test_provenance_story_is_chronologically_ordered_across_all_sources(cl
     # approval, task_completed, output_created (output_created is always
     # last -- it's created.created_at, which is always >= task.completed_at
     # by construction in this test).
-    assert types == ["task_created", "handoff_received", "approval", "task_completed", "output_created"]
+    assert types == [
+        "task_created", "handoff_received", "approval", "step_executed", "task_completed", "output_created",
+    ]
     assert "Raw sales numbers for Q3." in story[1]["description"]
     assert "owner@example.com" in story[2]["description"]
     # Strictly non-decreasing timestamps.
@@ -369,6 +431,41 @@ async def test_provenance_for_a_task_with_no_handoff_or_approval_still_works(cli
     provenance = await OutputService(tenant_id).get_provenance(created["id"])
     types = [e["type"] for e in provenance["story"]]
     assert types == ["task_created", "task_completed", "output_created"]
+
+
+@pytest.mark.asyncio
+async def test_provenance_step_executed_exposes_sql_only_when_the_step_has_one(client):
+    """"show the SQL one click away where it exists" -- a step whose
+    tool_args carries a real sql key exposes it; a step that doesn't
+    (e.g. sync_source) must not have a fabricated sql field at all."""
+    token, tenant_id, user_id = await _register(client, "sqlstep")
+    agent_id = await _hire(client, token)
+    task_id = await _make_task(tenant_id, user_id, agent_id)
+
+    async with tenant_session(tenant_id) as db:
+        db.add(TaskStep(
+            id=str(uuid.uuid4()), task_id=task_id, tenant_id=tenant_id, step_index=0,
+            description="sync the source", source=TaskStepSource.LLM_PLANNED,
+            tool_name="sync_source", tool_args={}, status=TaskStepStatus.SUCCEEDED,
+            completed_at=datetime.utcnow() - timedelta(minutes=5),
+        ))
+        db.add(TaskStep(
+            id=str(uuid.uuid4()), task_id=task_id, tenant_id=tenant_id, step_index=1,
+            description="build the report", source=TaskStepSource.LLM_PLANNED,
+            tool_name="execute_sql_transform", tool_args={"sql": "SELECT region, SUM(amount) FROM sales GROUP BY region"},
+            status=TaskStepStatus.SUCCEEDED, completed_at=datetime.utcnow() - timedelta(minutes=2),
+        ))
+        await db.commit()
+
+    created = await OutputService(tenant_id).create_output(
+        task_id=task_id, agent_instance_id=agent_id, filename="report.csv",
+        content_type="text/csv", size_bytes=10, storage_ref="/tmp/report.csv",
+    )
+    provenance = await OutputService(tenant_id).get_provenance(created["id"])
+    steps = [e for e in provenance["story"] if e["type"] == "step_executed"]
+    assert len(steps) == 2
+    assert "sql" not in steps[0]
+    assert steps[1]["sql"] == "SELECT region, SUM(amount) FROM sales GROUP BY region"
 
 
 @pytest.mark.asyncio

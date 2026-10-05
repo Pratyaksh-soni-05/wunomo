@@ -41,6 +41,26 @@ resolution_note, which exist regardless of audit coverage) but may show
 no matching audit_logs entry -- an honest gap in audit coverage, not a
 bug in this join. The story includes whichever of the four sources
 actually has a row; it does not require all four.
+
+Frontend pass (2026-10-05, blueprint §11 UI) added three enrichments,
+each a join against data already being touched, not new tracking:
+  - _serialize() now resolves agent_name/employee_type/project_name --
+    the list/detail views can't show "Made by Ravi" off a bare
+    agent_instance_id UUID, same reasoning ScheduledAgentTask's own
+    list_all_schedules() already applies.
+  - get_provenance() now includes one "step_executed" story entry per
+    completed TaskStep on the producing task (the §11 mock's own 4th
+    story beat, "the agent ran it" -- steps were already being queried
+    here for their approval_request_id, just not surfaced as their own
+    entries). sql is exposed when a step's tool_args carries one (e.g.
+    execute_sql_transform) -- "where it exists," per instruction, never
+    fabricated for a step that has none.
+  - list_outputs() now defaults to latest-version-only: an output whose
+    id appears as some other row's supersedes_output_id is superseded,
+    excluded from the list the same way §11's own mock shows one row
+    per filename, not one per version. get_output()/get_output_row()
+    are unchanged -- any specific version, latest or not, is still
+    directly retrievable by id ("v2 stays retrievable").
 """
 import uuid
 from datetime import datetime, timezone
@@ -50,7 +70,8 @@ from sqlalchemy import select
 
 from database import AsyncSessionLocal
 from models.all_models import (
-    AgentInstance, ApprovalRequest, AuditLog, Handoff, Output, Task, TaskStep,
+    AgentInstance, ApprovalRequest, AuditLog, Handoff, Output, Project, Task, TaskStep,
+    TaskStepStatus,
 )
 from modules.quality.rule_engine import QualityRuleEngine
 from services.tenant_context import tenant_scoped
@@ -158,8 +179,18 @@ class OutputService:
     # ------------------------------------------------------------------
 
     async def list_outputs(self, project_id: str | None = None) -> list[dict]:
+        """Latest version per chain only -- an output referenced by some
+        OTHER row's supersedes_output_id has been superseded, and §11's
+        own mock shows exactly one row per filename, not one per
+        version. get_output()/get_output_row() are unaffected: any
+        specific version is still directly retrievable by id."""
         async with AsyncSessionLocal() as db:
-            q = select(Output).where(Output.tenant_id == self.tenant_id)
+            superseded_ids = select(Output.supersedes_output_id).where(
+                Output.tenant_id == self.tenant_id, Output.supersedes_output_id.isnot(None),
+            )
+            q = select(Output).where(
+                Output.tenant_id == self.tenant_id, Output.id.notin_(superseded_ids),
+            )
             if project_id:
                 q = q.where(Output.project_id == project_id)
             q = q.order_by(Output.created_at.desc())
@@ -228,7 +259,23 @@ class OutputService:
 
             steps = (await db.execute(
                 select(TaskStep).where(TaskStep.task_id == output.task_id)
+                .order_by(TaskStep.step_index)
             )).scalars().all()
+
+            agent = await db.get(AgentInstance, output.agent_instance_id)
+            agent_name = agent.name if agent else "The agent"
+            for step in steps:
+                if step.status != TaskStepStatus.SUCCEEDED or step.tool_name is None:
+                    continue
+                entry = {
+                    "at": step.completed_at, "type": "step_executed",
+                    "description": f'{agent_name} ran "{step.description}" ({step.tool_name}).',
+                }
+                sql = (step.tool_args or {}).get("sql")
+                if sql:
+                    entry["sql"] = sql
+                story.append(entry)
+
             approval_ids = [s.approval_request_id for s in steps if s.approval_request_id is not None]
             approvals = []
             if approval_ids:
@@ -276,12 +323,18 @@ class OutputService:
     # ------------------------------------------------------------------
 
     async def _serialize(self, output: Output) -> dict:
+        async with AsyncSessionLocal() as db:
+            agent = await db.get(AgentInstance, output.agent_instance_id)
+            project = await db.get(Project, output.project_id) if output.project_id else None
         return {
             "id": output.id,
             "tenant_id": output.tenant_id,
             "project_id": output.project_id,
+            "project_name": project.name if project else None,
             "task_id": output.task_id,
             "agent_instance_id": output.agent_instance_id,
+            "agent_name": agent.name if agent else None,
+            "employee_type": agent.employee_type.value if agent else None,
             "filename": output.filename,
             "content_type": output.content_type,
             "size_bytes": output.size_bytes,
