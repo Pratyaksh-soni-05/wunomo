@@ -13,7 +13,7 @@ import { EMPLOYEE_TYPE_LABEL } from "@/lib/employeeTypes";
 import { liveWorkBadge, liveWorkStepLine } from "@/lib/activeTaskDisplay";
 import type { LocalChatMessage } from "./types";
 import {
-  getActiveTasks, getSources,
+  getActiveTasks, getSources, getOutputs,
   type ActiveTaskRailItem, type ChannelMemberAgent, type ChatContext, type PendingApproval,
 } from "@/lib/api";
 
@@ -27,8 +27,9 @@ const ACTIVE_TASKS_IDLE_POLL_MS = 60000;
  * "Agents" tab's roster + Hire another, moved across unchanged), Data
  * (the old Sources list + Attach Context picker, moved across
  * unchanged -- explicitly NOT disabled per spec's own note: spec assumed
- * nothing real existed here yet, but it does), Files (disabled -- there
- * really is nothing behind it until the Output model lands in stage 6).
+ * nothing real existed here yet, but it does), Files (enabled as of
+ * blueprint §11, 2026-10-05 -- real GET /outputs/?project_id=, scoped to
+ * this project; was disabled until the Output model existed).
  *
  * The old "Activity" tab's two sections split differently: Active Tasks
  * is superseded by Live work's real task cards (§7.6's own anatomy, not
@@ -80,6 +81,15 @@ export function LiveWorkPanel({
 
   const { agentRoster, sourceIds, loading: scopeLoading } = useProjectScope(token, projectId);
   const sourcesQuery = useQuery({ queryKey: ["sources"], queryFn: () => getSources(token) });
+  // enabled: only fetches once the Files tab is actually opened -- no
+  // real file-producing tool exists yet (see the Output model's own
+  // docstring), so this is near-certainly an empty list for every real
+  // project today; no reason to fetch it on every panel mount regardless.
+  const outputsQuery = useQuery({
+    queryKey: ["outputs", projectId], queryFn: () => getOutputs(token, projectId),
+    enabled: tab === "files",
+  });
+  const projectOutputs = outputsQuery.data?.outputs ?? [];
   const projectSources = (sourcesQuery.data?.sources ?? []).filter((s) => sourceIds.has(s.id));
 
   const toolLog = messages.flatMap((m) =>
@@ -104,7 +114,7 @@ export function LiveWorkPanel({
         items={[
           { id: "livework", label: "Live work" },
           { id: "team", label: "Team" },
-          { id: "files", label: "Files", disabled: true },
+          { id: "files", label: "Files" },
           { id: "data", label: "Data" },
         ]}
         activeId={tab}
@@ -169,6 +179,37 @@ export function LiveWorkPanel({
           >
             Hire another
           </Button>
+        </div>
+      )}
+
+      {tab === "files" && (
+        <div className="chat-context-section">
+          {outputsQuery.isLoading ? (
+            <Skeleton height={40} style={{ borderRadius: 6, marginBottom: 6 }} />
+          ) : projectOutputs.length === 0 ? (
+            <div className="chat-empty-note">
+              No files yet. Anything your team produces lands here automatically.
+            </div>
+          ) : (
+            projectOutputs.map((o) => (
+              <div
+                key={o.id} className="chat-tool-log-item" style={{ cursor: "pointer" }}
+                onClick={() => router.push(`/outputs?output=${o.id}`)}
+              >
+                <div className="font-medium text-sm">{o.filename}</div>
+                <div className="text-xs text-muted" style={{ marginTop: 2 }}>
+                  {o.agent_name ?? "Unknown"}
+                  {o.trust_score !== null ? ` · trust ${Math.round(o.trust_score)}` : ""}
+                </div>
+              </div>
+            ))
+          )}
+          <Link
+            href="/outputs"
+            className="text-xs" style={{ display: "block", marginTop: 8, color: "var(--accent-text)" }}
+          >
+            Open in Outputs →
+          </Link>
         </div>
       )}
 

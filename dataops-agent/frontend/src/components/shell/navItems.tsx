@@ -66,10 +66,13 @@ export const ICON_NEW_PROJECT = (
   </svg>
 );
 // IA-rail pass (blueprint §03) — Outputs (a document glyph) and
-// Connections (two linked nodes) are new destinations §03 names but this
-// pass doesn't build; both render disabled (see NavItem.disabled), but
-// still need a real icon so the disabled row isn't blank where every
-// sibling has one.
+// Connections (two linked nodes) are the two destinations §03 names that
+// this pass doesn't build; both rendered disabled (see NavItem.disabled)
+// needing a real icon so the disabled row isn't blank where every
+// sibling has one. Outputs is real as of blueprint §11 (2026-10-05, once
+// the Output model existed) -- its icon stays, only RAIL_NAV_ITEMS'
+// `disabled`/`disabledReason` were removed. Connections remains disabled;
+// this comment's "both" is now stale for Outputs specifically.
 export const ICON_OUTPUTS = railIcon(
   <>
     <path d="M4.8 2.5h4.4l2 2v8.3a.7.7 0 0 1-.7.7H4.8a.7.7 0 0 1-.7-.7V3.2a.7.7 0 0 1 .7-.7z" />
@@ -124,11 +127,14 @@ export const ICON_CONNECTIONS = railIcon(
  * - Approvals -> /approvals, same route, renamed from "Needs you" (the
  *   page's own <h1> renamed to match — a rail label pointing at a page
  *   titled something else would read as a bug, not a rename).
- * - Outputs, Connections: real §03 destinations with nothing to route to
- *   yet (no Output model; Connections only exists project-scoped under
- *   each project's Workbench). Render disabled with a tooltip — see
- *   ICON_OUTPUTS/ICON_CONNECTIONS above and Sidebar.tsx's disabled-item
- *   branch. Do not point these at a page that doesn't exist.
+ * - Outputs, Connections: real §03 destinations that had nothing to route
+ *   to at the time of this pass (no Output model; Connections only
+ *   exists project-scoped under each project's Workbench). Rendered
+ *   disabled with a tooltip then — see ICON_OUTPUTS/ICON_CONNECTIONS
+ *   above and Sidebar.tsx's disabled-item branch for that mechanism.
+ *   Outputs is enabled as of blueprint §11 (2026-10-05, once the Output
+ *   model existed); Connections remains disabled. Do not point a still-
+ *   disabled item at a page that doesn't exist.
  *
  * Settings keeps its own slug/label unchanged; what changed is what's
  * folded into it (Team & billing's tabs, see settings/page.tsx) and its
@@ -140,10 +146,7 @@ export const RAIL_NAV_ITEMS: NavItem[] = [
   { slug: "projects", label: "Projects", icon: ICON_PROJECT },
   { slug: "agents", label: "Team", icon: ICON_TEAM },
   { slug: "approvals", label: "Approvals", icon: ICON_NEEDS_YOU },
-  {
-    slug: "outputs", label: "Outputs", icon: ICON_OUTPUTS, disabled: true,
-    disabledReason: "Not available yet — outputs aren't tracked as their own object in this system.",
-  },
+  { slug: "outputs", label: "Outputs", icon: ICON_OUTPUTS },
   {
     slug: "connections", label: "Connections", icon: ICON_CONNECTIONS, disabled: true,
     disabledReason: "Not tenant-wide yet — manage sources inside each project's Workbench.",
@@ -223,6 +226,12 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { slug: "dashboard", label: "Dashboard" },
   { slug: "scheduled", label: "Scheduled" },
   { slug: "approvals", label: "Approvals" },
+  // Added 2026-10-05 (blueprint §11 UI): outputs had no ALL_NAV_ITEMS
+  // entry at all while the rail item was disabled (nothing to route to),
+  // so Topbar's breadcrumb rendered blank and the command palette
+  // couldn't find it by name -- neither mattered while the route was
+  // disabled; both do now that it's real.
+  { slug: "outputs", label: "Outputs" },
   { slug: "settings", label: "Settings" },
   { slug: "team", label: "Team & Billing (now tabs inside Settings — People & Roles, Billing)" },
   { slug: "billing", label: "Billing (now part of Team & billing)" },

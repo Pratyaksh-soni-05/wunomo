@@ -2103,3 +2103,82 @@ export function clearSession() {
   localStorage.removeItem(TENANT_KEY);
   localStorage.removeItem(USER_KEY);
 }
+
+// ---------- Outputs (blueprint §11, 2026-10-05) ----------
+// No real file-producing tool exists yet (see backend's Output model
+// docstring) -- this table, and therefore these endpoints, have no rows
+// in any real environment until one does. The UI built against these is
+// real, not a stub; it's just honestly empty today.
+
+export interface OutputTrustCheck {
+  check: string;
+  passed: boolean;
+  message: string;
+}
+
+export interface OutputItem {
+  id: string;
+  tenant_id: string;
+  project_id: string | null;
+  project_name: string | null;
+  task_id: string;
+  agent_instance_id: string;
+  agent_name: string | null;
+  employee_type: string | null;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  storage_ref: string;
+  version: number;
+  supersedes_output_id: string | null;
+  trust_score: number | null;
+  trust_checks: OutputTrustCheck[] | null;
+  created_at: string | null;
+}
+
+export function getOutputs(token: string, projectId?: string): Promise<{ outputs: OutputItem[]; count: number }> {
+  const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+  return authedRequest(`/api/v1/outputs/${qs}`, token);
+}
+
+export function getOutput(token: string, id: string): Promise<OutputItem> {
+  return authedRequest(`/api/v1/outputs/${id}`, token);
+}
+
+// "step_executed"'s sql is present only when that real step's own
+// tool_args carried one (e.g. execute_sql_transform) -- never fabricated
+// for a step that has none ("the SQL one click away where it exists").
+export interface ProvenanceEntry {
+  at: string | null;
+  type: "task_created" | "task_completed" | "handoff_received" | "approval" | "audit_event" | "step_executed" | "output_created";
+  description: string;
+  sql?: string;
+}
+
+export function getOutputProvenance(token: string, id: string): Promise<{ output_id: string; story: ProvenanceEntry[] }> {
+  return authedRequest(`/api/v1/outputs/${id}/provenance`, token);
+}
+
+// A plain <a href> can't carry the Authorization header this endpoint
+// needs (JWT in localStorage, not a cookie) -- fetch the real bytes with
+// the header, then trigger a normal browser save via a synthetic link.
+// No download helper existed anywhere in this file before this one.
+export async function downloadOutput(token: string, id: string, filename: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/v1/outputs/${id}/download`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    if (res.status === 401) handleSessionExpired();
+    const body = await res.json().catch(() => null);
+    throw new ApiError(res.status, body?.detail ?? body);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

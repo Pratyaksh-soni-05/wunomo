@@ -1773,3 +1773,88 @@ tr.selected td:first-child {
 }
 .command-center-empty-title { font-size: 16px; font-weight: 600; color: var(--text-primary); }
 .command-center-empty-body { font-size: 13px; color: var(--text-muted); max-width: 420px; }
+
+/* ==========================================
+   Outputs (blueprint §11, 2026-10-05)
+   ========================================== */
+.outputs-toolbar { display: flex; gap: 10px; padding: 0 24px 16px; }
+.outputs-search { flex: 1; max-width: 360px; }
+.outputs-project-filter { width: 200px; }
+
+.outputs-body { padding: 0 24px 20px; display: grid; grid-template-columns: 1fr; gap: 20px; }
+.outputs-body.with-detail { grid-template-columns: 1.4fr 1fr; }
+@media (max-width: 1000px) { .outputs-body.with-detail { grid-template-columns: 1fr; } }
+
+.outputs-table { padding: 0; overflow: hidden; }
+.outputs-table-header {
+  display: grid; grid-template-columns: 2fr 1.2fr 1fr 70px 110px;
+  gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border);
+  font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted);
+}
+.outputs-table-row {
+  display: grid; grid-template-columns: 2fr 1.2fr 1fr 70px 110px;
+  gap: 12px; align-items: center; width: 100%; padding: 12px 16px;
+  border: none; border-bottom: 1px solid var(--border); background: none;
+  text-align: left; cursor: pointer; font: inherit; color: inherit;
+}
+.outputs-table-row:last-child { border-bottom: none; }
+.outputs-table-row:hover { background: var(--surface-hover); }
+.outputs-table-row.selected { background: var(--accent-subtle-bg); }
+.outputs-table-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.outputs-file-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.outputs-filename { font-size: 13.5px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outputs-file-subline { font-size: 11.5px; color: var(--text-muted); }
+.outputs-made-by-cell { display: flex; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
+
+.outputs-detail { padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+.outputs-detail-header { display: flex; flex-direction: column; gap: 3px; }
+.outputs-detail-filename { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.outputs-section-label {
+  font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-muted); margin-top: 4px;
+}
+.outputs-detail-actions { display: flex; gap: 8px; margin-top: 4px; }
+.outputs-supersedes-link {
+  border: none; background: none; padding: 0; text-align: left; cursor: pointer;
+  font-size: 12.5px; color: var(--accent-text);
+}
+.outputs-supersedes-link:hover { color: var(--accent-text-hover); }
+
+.trust-score-card {
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; display: flex;
+  flex-direction: column; gap: 8px;
+}
+.trust-score-header { display: flex; align-items: center; justify-content: space-between; }
+.trust-score-label { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.trust-check-row { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.5; }
+.trust-check-icon { flex-shrink: 0; font-weight: 700; }
+.trust-check-passed .trust-check-icon { color: var(--success); }
+.trust-check-passed { color: var(--text-secondary); }
+.trust-check-failed .trust-check-icon { color: var(--danger); }
+.trust-check-failed { color: var(--text-primary); }
+/* Scaffolded, not wired to anything yet -- see outputs/page.tsx's own
+   top-of-file comment: no real "assumed, not verified" state exists in
+   today's trust_checks data (binary pass/fail only). Ready for the day
+   a third check state exists; a failed check uses .trust-check-failed
+   above, never this one, until then. */
+.trust-check-assumed .trust-check-icon { color: var(--warning); }
+.trust-check-assumed { color: var(--text-primary); }
+
+.provenance-story { display: flex; flex-direction: column; gap: 2px; }
+.provenance-entry { display: flex; gap: 10px; padding: 8px 0; }
+.provenance-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+.provenance-dot-info { background: var(--info); }
+.provenance-dot-gray { background: var(--text-disabled); }
+.provenance-dot-hold { background: var(--hold); }
+.provenance-dot-success { background: var(--success); }
+.provenance-dot-accent { background: var(--accent-fill); }
+.provenance-entry-body { min-width: 0; flex: 1; }
+.provenance-entry-desc { font-size: 13px; color: var(--text-primary); }
+.provenance-entry-meta { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+.provenance-sql { margin-top: 6px; }
+.provenance-sql summary { cursor: pointer; color: var(--accent-text); font-size: 11.5px; }
+.provenance-sql summary:hover { color: var(--accent-text-hover); }
+.provenance-sql pre {
+  margin-top: 6px; padding: 8px 10px; background: var(--surface-hover);
+  border-radius: var(--radius-sm); font-size: 11.5px; overflow-x: auto; white-space: pre-wrap;
+}
